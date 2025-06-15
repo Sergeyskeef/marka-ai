@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.17, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /app
+plugins: anyio-4.9.0
+collecting ... collected 5 items
+
+langchain_api/tests/test_retrieval_block.py::test_retrieval_block_limit PASSED [ 20%]
+langchain_api/tests/test_retrieval_block.py::test_retrieval_block_no_duplicates PASSED [ 40%]
+langchain_api/tests/test_retrieval_block.py::test_retrieval_block_fallback PASSED [ 60%]
+langchain_api/tests/test_retrieval_block.py::test_retrieval_block_markdown_headers PASSED [ 80%]
+langchain_api/tests/test_retrieval_block.py::test_prompt_structure_with_retrieval_block PASSED [100%]
+
+======================== 5 passed, 2 warnings in 2.53s =========================

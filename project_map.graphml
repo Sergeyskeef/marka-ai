@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <graph id="G" edgedefault="directed">
+    <node id="langchain_api/__init__.py"/>
+    <node id="langchain_api/clean_duplicates.py"/>
+    <node id="langchain_api/check_weaviate.py"/>
+    <node id="langchain_api/memory_logic.py"/>
+    <node id="langchain_api/check_doc_preview.py"/>
+    <node id="langchain_api/check_doc_count.py"/>
+    <node id="langchain_api/upload_docs.py"/>
+    <node id="langchain_api/check_objects.py"/>
+    <node id="langchain_api/doc_count.py"/>
+    <node id="langchain_api/count_doc.py"/>
+    <node id="langchain_api/upload_chatgpt_memory.py"/>
+    <node id="langchain_api/check_duplicates.py"/>
+    <node id="langchain_api/local_test.py"/>
+    <node id="langchain_api/main.py"/>
+    <node id="langchain_api/tests/test_weaviate_insert.py"/>
+    <node id="langchain_api/tests/test_passport.py"/>
+    <node id="langchain_api/tests/test_experience_elevation.py"/>
+    <node id="langchain_api/tests/test_memoryclass_wrappers.py"/>
+    <node id="langchain_api/tests/test_persistence.py"/>
+    <node id="langchain_api/tests/__init__.py"/>
+    <node id="langchain_api/tests/test_question_parser.py"/>
+    <node id="langchain_api/tests/test_llm_roundtrip.py"/>
+    <node id="langchain_api/tests/test_memory_search.py"/>
+    <node id="langchain_api/tests/test_experience_memory_wrapper.py"/>
+    <node id="langchain_api/tests/test_full_cycle.py"/>
+    <node id="langchain_api/tests/test_memory_commands.py"/>
+    <node id="langchain_api/tests/test_userid_in_upload.py"/>
+    <node id="langchain_api/tests/test_sandbox_snapshot.py"/>
+    <node id="langchain_api/tests/test_self_analysis.py"/>
+    <node id="langchain_api/tests/test_retrieval_block.py"/>
+    <node id="langchain_api/rag/__init__.py"/>
+    <node id="langchain_api/rag/enhanced_rag_chain.py"/>
+    <node id="langchain_api/scripts/test_experience_elevation.py"/>
+    <node id="langchain_api/scripts/reset_sandbox_snapshot.py"/>
+    <node id="langchain_api/scripts/clear_all_memory.py"/>
+    <node id="langchain_api/scripts/batch_set_reflection.py"/>
+    <node id="langchain_api/scripts/self_analysis.py"/>
+    <node id="langchain_api/scripts/check_user_id_all_collections.py"/>
+    <node id="langchain_api/scripts/test_manual_elevate.py"/>
+    <node id="langchain_api/scripts/insert_persona.py"/>
+    <node id="langchain_api/scripts/log_awakening_event.py"/>
+    <node id="langchain_api/scripts/update_user_id_all_collections.py"/>
+    <node id="langchain_api/scripts/question_parser.py"/>
+    <node id="langchain_api/scripts/update_passport.py"/>
+    <node id="langchain_api/scripts/log_sandbox_event.py"/>
+    <node id="langchain_api/scripts/delete_experience_class.py"/>
+    <node id="langchain_api/scripts/add_user_id_field_to_collections.py"/>
+    <node id="langchain_api/scripts/sandbox_dashboard.py"/>
+    <node id="langchain_api/scripts/reflect.py"/>
+    <node id="langchain_api/scripts/test_reflection_chain.py"/>
+    <node id="langchain_api/scripts/generate_project_map.py"/>
+    <node id="langchain_api/weaviate_tools/bootstrap_persona.py"/>
+    <node id="langchain_api/weaviate_tools/add_core_docs.py"/>
+    <node id="langchain_api/weaviate_tools/init_schema.py"/>
+    <node id="langchain_api/memory/multi_layer_memory.py"/>
+    <node id="langchain_api/memory/memory_manager.py"/>
+    <node id="langchain_api/telegram_bot/bot.py"/>
+    <node id="langchain_api/utils/proxy.py"/>
+    <node id="langchain_api/utils/logger.py"/>
+    <node id="langchain_api/utils/openai_proxy_client.py"/>
+    <node id="utils/__init__.py"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+  </graph>
+</graphml>

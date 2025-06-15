@@ -1,0 +1,1335 @@
+{
+  "classes": [
+    {
+      "class": "CriticLog",
+      "description": "Класс CriticLog для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "action",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "details",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "session_id",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "status",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "error_message",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text[]"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "source_ids",
+          "tokenization": "word"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "ChatGPTMemory",
+      "description": "Класс ChatGPTMemory для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "text",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "session_id",
+          "tokenization": "word"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "Memory",
+      "description": "Класс Memory для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "sender",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "message",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        },
+        {
+          "dataType": [
+            "number"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "importance"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "session_id",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text[]"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "tags",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "boolean"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "needs_reflection"
+        },
+        {
+          "dataType": [
+            "number"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "rubric_score"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "rubric_summary",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "rubric_justification",
+          "tokenization": "word"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "Insight",
+      "description": "Класс Insight для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "insight",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text[]"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "source_ids",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "UserFacts",
+      "description": "Класс UserFacts для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "user_id",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "key",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "value",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "number"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "confidence"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "Document",
+      "description": "Класс Document для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "text",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "filename",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "content_hash",
+          "tokenization": "word"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "Persona",
+      "description": "Класс Persona для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "name",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "description",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "traits",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    },
+    {
+      "class": "Experience",
+      "description": "Класс Experience для проекта МАРК",
+      "invertedIndexConfig": {
+        "bm25": {
+          "b": 0.75,
+          "k1": 1.2
+        },
+        "cleanupIntervalSeconds": 60,
+        "stopwords": {
+          "additions": null,
+          "preset": "en",
+          "removals": null
+        },
+        "usingBlockMaxWAND": true
+      },
+      "moduleConfig": {
+        "text2vec-openai": {
+          "baseURL": "https://api.openai.com",
+          "isAzure": false,
+          "model": "text-embedding-3-small",
+          "vectorizeClassName": true
+        }
+      },
+      "multiTenancyConfig": {
+        "autoTenantActivation": false,
+        "autoTenantCreation": false,
+        "enabled": false
+      },
+      "properties": [
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "summary",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "text[]"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "source_ids",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "date"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "timestamp"
+        },
+        {
+          "dataType": [
+            "text"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": true,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "session_id",
+          "tokenization": "word"
+        },
+        {
+          "dataType": [
+            "boolean"
+          ],
+          "indexFilterable": true,
+          "indexRangeFilters": false,
+          "indexSearchable": false,
+          "moduleConfig": {
+            "text2vec-openai": {
+              "skip": false,
+              "vectorizePropertyName": true
+            }
+          },
+          "name": "elevated"
+        }
+      ],
+      "replicationConfig": {
+        "asyncEnabled": false,
+        "deletionStrategy": "NoAutomatedResolution",
+        "factor": 1
+      },
+      "shardingConfig": {
+        "actualCount": 1,
+        "actualVirtualCount": 128,
+        "desiredCount": 1,
+        "desiredVirtualCount": 128,
+        "function": "murmur3",
+        "key": "_id",
+        "strategy": "hash",
+        "virtualPerPhysical": 128
+      },
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "sweeping",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "skip": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": "text2vec-openai"
+    }
+  ]
+}
