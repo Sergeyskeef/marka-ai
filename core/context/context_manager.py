@@ -605,11 +605,37 @@ class ContextManager:
     async def update_context_from_analysis(self, analysis: Dict[str, Any]) -> bool:
         """Обновление контекста на основе анализа."""
         try:
-            # Обновляем контекст с результатами анализа
+            # Обновляем ключевые идеи
+            if 'key_ideas' in analysis:
+                self.current_context['key_ideas'] = analysis['key_ideas']
+                
+            # Обновляем семантический анализ
+            if 'semantic_analysis' in analysis:
+                semantic = analysis['semantic_analysis']
+                
+                # Обновляем темы
+                if 'topics' in semantic:
+                    self.current_context['topics'] = semantic['topics']
+                    
+                # Обновляем сущности
+                if 'entities' in semantic:
+                    self.current_context['entities'] = semantic['entities']
+                    
+                # Обновляем связи
+                if 'relations' in semantic:
+                    self.current_context['relations'] = semantic['relations']
+                    
+            # Обновляем общую информацию об анализе
             self.current_context.update({
                 'last_analysis': analysis,
                 'analysis_timestamp': datetime.now().isoformat()
             })
+            
+            # Сохраняем в историю
+            self.context_history.append(self.current_context.copy())
+            
+            # Сохраняем в память
+            self._save_context_to_memory()
             
             # Логируем обновление
             self.logger.info(f"Context updated from analysis: {analysis}")
@@ -630,7 +656,9 @@ class ContextManager:
         for i, idea1 in enumerate(self.current_context['key_ideas']):
             for j, idea2 in enumerate(self.current_context['key_ideas'][i+1:], i+1):
                 # Проверяем семантическую близость
-                similarity = self._calculate_semantic_similarity(idea1['text'], idea2['text'])
+                content1 = idea1.get('content', idea1.get('text', ''))
+                content2 = idea2.get('content', idea2.get('text', ''))
+                similarity = self._calculate_semantic_similarity(content1, content2)
                 
                 if similarity > 0.5:  # Порог схожести
                     link = {
@@ -644,7 +672,9 @@ class ContextManager:
         # Связываем идеи с сущностями
         for i, idea in enumerate(self.current_context['key_ideas']):
             for j, entity in enumerate(self.current_context['entities']):
-                if entity['text'] in idea['text']:
+                idea_content = idea.get('content', idea.get('text', ''))
+                entity_text = entity.get('text', entity.get('name', ''))
+                if entity_text in idea_content:
                     link = {
                         'source': i,
                         'target': j,
@@ -671,8 +701,9 @@ class ContextManager:
         # Приоритизируем ключевые идеи
         for idea in self.current_context['key_ideas']:
             score = idea.get('importance', 0.5)
+            content = idea.get('content', idea.get('text', ''))
             priority = {
-                'item': idea['text'],
+                'item': content,
                 'score': score,
                 'reason': 'key_idea',
                 'type': idea.get('type', 'unknown')
@@ -687,8 +718,9 @@ class ContextManager:
             if entity.get('importance', 0) > 0.5:
                 score += 0.3
                 
+            entity_text = entity.get('text', entity.get('name', ''))
             priority = {
-                'item': entity['text'],
+                'item': entity_text,
                 'score': score,
                 'reason': 'entity',
                 'type': entity.get('type', 'unknown')
@@ -698,7 +730,8 @@ class ContextManager:
         # Приоритизируем темы
         for topic in self.current_context['topics']:
             score = 0.4  # Базовая оценка
-            if topic in [idea['text'] for idea in self.current_context['key_ideas']]:
+            idea_contents = [idea.get('content', idea.get('text', '')) for idea in self.current_context['key_ideas']]
+            if topic in idea_contents:
                 score += 0.3
                 
             priority = {
@@ -759,19 +792,199 @@ class ContextManager:
             return False
     
     async def add_event_links(self, event_id: str, related_events: List[str]) -> bool:
-        """Добавление связей между событиями."""
+        """
+        Добавление связей между событиями.
+        
+        Args:
+            event_id: ID основного события
+            related_events: Список связанных событий
+            
+        Returns:
+            bool: True если успешно добавлено
+        """
         try:
-            # Инициализируем структуру для связей событий, если её нет
             if 'event_links' not in self.current_context:
                 self.current_context['event_links'] = {}
-            
-            # Добавляем связи
+                
             self.current_context['event_links'][event_id] = related_events
-            
-            # Логируем добавление связей
-            self.logger.info(f"Event links added for {event_id}: {related_events}")
-            
             return True
         except Exception as e:
-            self.logger.error(f"Error adding event links: {e}")
-            return False 
+            self.logger.error(f"Ошибка при добавлении связей событий: {str(e)}")
+            return False
+            
+    async def auto_update_context(self) -> Dict[str, Any]:
+        """
+        Автоматическое обновление контекста на основе анализа данных.
+        
+        Returns:
+            Dict[str, Any]: Результаты автоматического обновления
+        """
+        try:
+            updates = {}
+            
+            # Анализируем тренды в LLM взаимодействиях
+            if self.current_context.get('llm_interactions'):
+                trends = self._analyze_llm_trends()
+                updates['llm_trends'] = trends
+                
+            # Обновляем приоритеты на основе активности
+            priority_updates = self._update_priorities()
+            updates['priority_updates'] = priority_updates
+            
+            # Генерируем интеллектуальные подсказки
+            suggestions = self._generate_intelligent_suggestions()
+            updates['suggestions'] = suggestions
+            
+            # Обновляем контекст (используем синхронный метод)
+            self.update_context(updates)
+            
+            return {
+                'status': 'success',
+                'updates_applied': len(updates),
+                'trends_analyzed': bool(updates.get('llm_trends')),
+                'priorities_updated': bool(updates.get('priority_updates')),
+                'suggestions_generated': len(updates.get('suggestions', []))
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при автоматическом обновлении контекста: {str(e)}")
+            return {
+                'status': 'error',
+                'error': str(e)
+            }
+            
+    def _analyze_llm_trends(self) -> Dict[str, Any]:
+        """
+        Анализ трендов в LLM взаимодействиях.
+        
+        Returns:
+            Dict[str, Any]: Результаты анализа трендов
+        """
+        interactions = self.current_context.get('llm_interactions', [])
+        if not interactions:
+            return {}
+            
+        # Анализируем последние 10 взаимодействий
+        recent_interactions = interactions[-10:]
+        
+        # Анализ качества ответов
+        quality_scores = [interaction.get('analysis', {}).get('quality_score', 0) 
+                         for interaction in recent_interactions]
+        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+        
+        # Анализ релевантности
+        relevance_scores = [interaction.get('analysis', {}).get('relevance_score', 0) 
+                           for interaction in recent_interactions]
+        avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
+        
+        # Анализ тем
+        all_topics = []
+        for interaction in recent_interactions:
+            topics = interaction.get('analysis', {}).get('semantic_analysis', {}).get('topics', [])
+            all_topics.extend(topics)
+            
+        # Находим популярные темы
+        topic_frequency = {}
+        for topic in all_topics:
+            topic_frequency[topic] = topic_frequency.get(topic, 0) + 1
+            
+        popular_topics = sorted(topic_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        return {
+            'avg_quality_score': avg_quality,
+            'avg_relevance_score': avg_relevance,
+            'popular_topics': popular_topics,
+            'interactions_count': len(recent_interactions),
+            'trend_direction': 'improving' if avg_quality > 0.7 else 'stable' if avg_quality > 0.5 else 'declining'
+        }
+        
+    def _update_priorities(self) -> Dict[str, Any]:
+        """
+        Обновление приоритетов на основе активности.
+        
+        Returns:
+            Dict[str, Any]: Результаты обновления приоритетов
+        """
+        updates = {}
+        
+        # Анализируем активные задачи
+        active_tasks = self.current_context.get('active_tasks', [])
+        if active_tasks:
+            # Повышаем приоритет задач, которые долго выполняются
+            for task in active_tasks:
+                if isinstance(task, dict) and 'created_at' in task:
+                    # Логика обновления приоритета
+                    pass
+                    
+        # Анализируем ключевые идеи
+        key_ideas = self.current_context.get('key_ideas', [])
+        if key_ideas:
+            # Сортируем идеи по важности
+            sorted_ideas = sorted(key_ideas, key=lambda x: x.get('importance', 0), reverse=True)
+            updates['prioritized_ideas'] = sorted_ideas[:5]
+            
+        return updates
+        
+    def _generate_intelligent_suggestions(self) -> List[Dict[str, Any]]:
+        """
+        Генерация интеллектуальных подсказок на основе контекста.
+        
+        Returns:
+            List[Dict[str, Any]]: Список подсказок
+        """
+        suggestions = []
+        
+        # Анализируем контекст для генерации подсказок
+        context_analysis = self.analyze_context()
+        
+        # Подсказка на основе количества активных задач
+        if context_analysis['active_tasks_count'] > 5:
+            suggestions.append({
+                'type': 'task_management',
+                'priority': 'high',
+                'message': 'Много активных задач. Рекомендуется приоритизация.',
+                'action': 'prioritize_tasks'
+            })
+            
+        # Подсказка на основе возраста контекста
+        if context_analysis['context_age'] > 3600:  # больше часа
+            suggestions.append({
+                'type': 'context_refresh',
+                'priority': 'medium',
+                'message': 'Контекст устарел. Рекомендуется обновление.',
+                'action': 'refresh_context'
+            })
+            
+        # Подсказка на основе качества LLM ответов
+        llm_trends = self._analyze_llm_trends()
+        if llm_trends.get('trend_direction') == 'declining':
+            suggestions.append({
+                'type': 'llm_optimization',
+                'priority': 'medium',
+                'message': 'Качество ответов LLM снижается. Рекомендуется оптимизация.',
+                'action': 'optimize_llm_prompts'
+            })
+            
+        return suggestions
+        
+    async def get_context_summary(self) -> Dict[str, Any]:
+        """
+        Получение краткого резюме текущего контекста.
+        
+        Returns:
+            Dict[str, Any]: Резюме контекста
+        """
+        analysis = self.analyze_context()
+        llm_trends = self._analyze_llm_trends()
+        
+        return {
+            'session_id': self.current_context.get('session_id'),
+            'active_tasks': len(self.current_context.get('active_tasks', [])),
+            'recent_actions': len(self.current_context.get('recent_actions', [])),
+            'key_ideas': len(self.current_context.get('key_ideas', [])),
+            'llm_interactions': analysis.get('llm_interactions_count', 0),
+            'context_age_seconds': analysis.get('context_age', 0),
+            'llm_quality_trend': llm_trends.get('trend_direction', 'unknown'),
+            'popular_topics': llm_trends.get('popular_topics', [])[:3],
+            'suggestions_count': len(self._generate_intelligent_suggestions())
+        } 

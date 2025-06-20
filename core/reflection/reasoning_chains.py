@@ -54,6 +54,19 @@ class ReasoningChain:
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
 
+    @property
+    def chain_id(self) -> str:
+        """Алиас для id для совместимости с тестами"""
+        return self.id
+        
+    @property
+    def root_step_id(self) -> Optional[str]:
+        """ID корневого шага (первого шага без родителя)"""
+        for step in self.steps:
+            if step.parent_id is None:
+                return step.id
+        return None
+
     def add_step(self, step: ReasoningStep) -> None:
         """
         Добавление шага в цепочку.
@@ -63,6 +76,12 @@ class ReasoningChain:
         """
         self.steps.append(step)
         self.updated_at = datetime.now()
+        
+        # Обновляем children_ids родительского шага
+        if step.parent_id:
+            parent = self.get_step(step.parent_id)
+            if parent and step.id not in parent.children_ids:
+                parent.children_ids.append(step.id)
 
     def get_step(self, step_id: str) -> Optional[ReasoningStep]:
         """
@@ -117,6 +136,10 @@ class ReasoningChain:
                 step_scores.append(step.confidence)
                 
         return sum(step_scores) / len(step_scores)
+        
+    def evaluate_logical_consistency(self) -> float:
+        """Алиас для evaluate() для совместимости с тестами"""
+        return self.evaluate()
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -190,11 +213,17 @@ class ReasoningSystem:
         if not chain:
             return {"error": "Chain not found"}
         
+        # Вычисляем максимальную глубину
+        max_depth = 0
+        for step in chain.steps:
+            depth = len(chain.get_chain(step.id))
+            max_depth = max(max_depth, depth)
+        
         return {
             "logical_consistency": chain.evaluate(),
             "step_count": len(chain.steps),
-            "depth": max(len(chain.get_chain(step_id)) for step_id in chain.steps),
-            "average_confidence": sum(step.confidence for step in chain.steps) / len(chain.steps)
+            "depth": max_depth,
+            "average_confidence": sum(step.confidence for step in chain.steps) / len(chain.steps) if chain.steps else 0.0
         }
 
     def save_chains(self, filepath: str) -> None:

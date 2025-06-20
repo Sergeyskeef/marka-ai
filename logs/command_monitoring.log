@@ -16,3 +16,43 @@
 2025-06-20 09:20:12,450 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду from telegram_bot
 2025-06-20 09:20:17,790 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду in 5.34s
 2025-06-20 09:20:17,790 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду in 5.34s
+2025-06-20 12:37:58,223 - langchain_api.core.command_monitoring - INFO - Command logged: Ты как себя чувствуешь? from telegram_bot
+2025-06-20 12:37:58,223 - langchain_api.core.command_monitoring - INFO - Command logged: Ты как себя чувствуешь? from telegram_bot
+2025-06-20 12:37:58,223 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Ты как себя чувствуешь? from telegram_bot
+2025-06-20 12:37:58,223 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Ты как себя чувствуешь? from telegram_bot
+2025-06-20 12:38:04,547 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Ты как себя чувствуешь? in 6.32s
+2025-06-20 12:38:04,547 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Ты как себя чувствуешь? in 6.32s
+2025-06-20 12:38:15,858 - langchain_api.core.command_monitoring - INFO - Command logged: Я прекрасно) from telegram_bot
+2025-06-20 12:38:15,858 - langchain_api.core.command_monitoring - INFO - Command logged: Я прекрасно) from telegram_bot
+2025-06-20 12:38:15,859 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я прекрасно) from telegram_bot
+2025-06-20 12:38:15,859 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я прекрасно) from telegram_bot
+2025-06-20 12:38:19,082 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я прекрасно) in 3.22s
+2025-06-20 12:38:19,082 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я прекрасно) in 3.22s
+2025-06-20 12:38:26,566 - langchain_api.core.command_monitoring - INFO - Command logged: Что ты умеешь? from telegram_bot
+2025-06-20 12:38:26,566 - langchain_api.core.command_monitoring - INFO - Command logged: Что ты умеешь? from telegram_bot
+2025-06-20 12:38:26,566 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Что ты умеешь? from telegram_bot
+2025-06-20 12:38:26,566 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Что ты умеешь? from telegram_bot
+2025-06-20 12:38:31,825 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Что ты умеешь? in 5.26s
+2025-06-20 12:38:31,825 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Что ты умеешь? in 5.26s
+2025-06-20 12:38:52,826 - langchain_api.core.command_monitoring - INFO - Command logged: А про песочницу ты ничего пока не знаешь? from telegram_bot
+2025-06-20 12:38:52,826 - langchain_api.core.command_monitoring - INFO - Command logged: А про песочницу ты ничего пока не знаешь? from telegram_bot
+2025-06-20 12:38:52,826 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: А про песочницу ты ничего пока не знаешь? from telegram_bot
+2025-06-20 12:38:52,826 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: А про песочницу ты ничего пока не знаешь? from telegram_bot
+2025-06-20 12:38:57,006 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: А про песочницу ты ничего пока не знаешь? in 4.18s
+2025-06-20 12:38:57,006 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: А про песочницу ты ничего пока не знаешь? in 4.18s
+2025-06-20 12:39:51,107 - langchain_api.core.command_monitoring - INFO - Command logged: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся from telegram_bot
+2025-06-20 12:39:51,107 - langchain_api.core.command_monitoring - INFO - Command logged: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся from telegram_bot
+2025-06-20 12:39:51,108 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся from telegram_bot
+2025-06-20 12:39:51,108 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся from telegram_bot
+2025-06-20 12:39:55,199 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся in 4.09s
+2025-06-20 12:39:55,199 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Так, как то надо этот вопрос решить, я для тебя все уже сделал, надо только тебе все это дать в руки, сейчас разберёмся in 4.09s
+2025-06-20 12:40:18,566 - langchain_api.core.command_monitoring - INFO - Command logged: /help from telegram_bot
+2025-06-20 12:40:18,566 - langchain_api.core.command_monitoring - INFO - Command logged: /help from telegram_bot
+2025-06-20 12:40:19,164 - langchain_api.core.command_monitoring - INFO - Command completed: /help in 0.60s
+2025-06-20 12:40:19,164 - langchain_api.core.command_monitoring - INFO - Command completed: /help in 0.60s
+2025-06-20 12:42:56,747 - langchain_api.core.command_monitoring - INFO - Command logged: Ты видел команды которые я запускал в чате бота? from telegram_bot
+2025-06-20 12:42:56,747 - langchain_api.core.command_monitoring - INFO - Command logged: Ты видел команды которые я запускал в чате бота? from telegram_bot
+2025-06-20 12:42:56,747 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Ты видел команды которые я запускал в чате бота? from telegram_bot
+2025-06-20 12:42:56,747 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Ты видел команды которые я запускал в чате бота? from telegram_bot
+2025-06-20 12:43:01,020 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Ты видел команды которые я запускал в чате бота? in 4.27s
+2025-06-20 12:43:01,020 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Ты видел команды которые я запускал в чате бота? in 4.27s

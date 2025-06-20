@@ -69,7 +69,7 @@ class SelfLearningSystem:
             return []
 
         patterns = []
-        for step in chain.steps.values():
+        for step in chain.steps:
             # Анализируем контекст шага
             context_analysis = self.reasoning_system.analyze_context(step.context)
             
@@ -96,6 +96,30 @@ class SelfLearningSystem:
         else:
             return "general_pattern"
 
+    def record_learning_event(self, event_type: str, context: Dict[str, Any], 
+                            success: bool, patterns_used: List[str]) -> None:
+        """
+        Записывает событие обучения.
+        
+        Args:
+            event_type: Тип события
+            context: Контекст события
+            success: Успешность события
+            patterns_used: Список использованных паттернов
+        """
+        event = {
+            "event_type": event_type,
+            "context": context,
+            "success": success,
+            "patterns_used": patterns_used,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.learning_history.append(event)
+        
+        # Обновляем статистику использованных паттернов
+        for pattern_id in patterns_used:
+            self.update_pattern_stats(pattern_id, success)
+
     def update_pattern(self, pattern_id: str, success: bool) -> None:
         """Обновляет статистику использования паттерна"""
         pattern = self.patterns.get(pattern_id)
@@ -121,17 +145,19 @@ class SelfLearningSystem:
         relevant_patterns = []
         
         for pattern in self.patterns.values():
-            # Проверяем совпадение типов
-            if pattern.pattern_type == context.get('type'):
-                # Проверяем совпадение ключевых полей контекста
-                context_match = True
-                for key, value in context.items():
-                    if key in pattern.context and pattern.context[key] != value:
-                        context_match = False
-                        break
-                
-                if context_match:
-                    relevant_patterns.append(pattern)
+            # Проверяем совпадение типов контекста
+            # Если в контексте есть 'code', то ищем code_pattern
+            if 'code' in context and pattern.pattern_type == 'code_pattern':
+                relevant_patterns.append(pattern)
+            # Если в контексте есть 'text', то ищем text_pattern
+            elif 'text' in context and pattern.pattern_type == 'text_pattern':
+                relevant_patterns.append(pattern)
+            # Если в контексте есть 'type', то ищем паттерн с таким же типом
+            elif 'type' in context and pattern.pattern_type == context['type']:
+                relevant_patterns.append(pattern)
+            # Если нет специфичных полей, ищем general_pattern
+            elif not any(key in context for key in ['code', 'text', 'type']) and pattern.pattern_type == 'general_pattern':
+                relevant_patterns.append(pattern)
                 
         # Сортируем по уверенности
         relevant_patterns.sort(key=lambda x: x.confidence, reverse=True)
@@ -169,11 +195,28 @@ class SelfLearningSystem:
         """
         total_patterns = len(self.patterns)
         successful_patterns = sum(1 for p in self.patterns.values() if p.success_rate > 0.7)
+        total_events = len(self.learning_history)
+        
+        # Вычисляем среднюю успешность по паттернам, а не по событиям
+        if total_patterns > 0:
+            average_success_rate = sum(p.success_rate for p in self.patterns.values()) / total_patterns
+        else:
+            average_success_rate = 0.0
+            
+        # Получаем наиболее используемые паттерны
+        most_used_patterns = sorted(
+            self.patterns.values(), 
+            key=lambda x: x.usage_count, 
+            reverse=True
+        )
         
         return {
             'total_patterns': total_patterns,
             'successful_patterns': successful_patterns,
-            'success_rate': successful_patterns / total_patterns if total_patterns > 0 else 0.0
+            'success_rate': successful_patterns / total_patterns if total_patterns > 0 else 0.0,
+            'total_events': total_events,
+            'average_success_rate': average_success_rate,
+            'most_used_patterns': most_used_patterns
         }
         
     def save_state(self, filepath: str) -> None:
@@ -203,28 +246,29 @@ class SelfLearningSystem:
         with open(filepath, 'w') as f:
             json.dump(state, f, indent=2)
             
-    def load_state(self, filepath: str) -> None:
+    @classmethod
+    def load_state(cls, filepath: str, reasoning_system: ReasoningSystem) -> 'SelfLearningSystem':
         """
         Загрузка состояния системы.
         
         Args:
             filepath: Путь к файлу
+            reasoning_system: Система рассуждений
+            
+        Returns:
+            Загруженная система
         """
         with open(filepath, 'r') as f:
             state = json.load(f)
             
-        self.patterns.clear()
-        for pattern_data in state['patterns'].values():
-            pattern = LearningPattern(
-                id=pattern_data['id'],
-                pattern_type=pattern_data['pattern_type'],
-                context=pattern_data['context'],
-                confidence=pattern_data['confidence'],
-                created_at=datetime.fromisoformat(pattern_data['created_at']),
-                last_used=datetime.fromisoformat(pattern_data['last_used']),
-                usage_count=pattern_data['usage_count'],
-                success_rate=pattern_data['success_rate']
-            )
-            self.patterns[pattern.id] = pattern
+        learning_system = cls(reasoning_system)
         
-        self.learning_history = state['learning_history'] 
+        # Загружаем паттерны
+        for pattern_id, pattern_data in state['patterns'].items():
+            pattern = LearningPattern.from_dict(pattern_data)
+            learning_system.patterns[pattern_id] = pattern
+            
+        # Загружаем историю
+        learning_system.learning_history = state['learning_history']
+        
+        return learning_system 
