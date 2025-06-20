@@ -1,0 +1,18 @@
+2025-06-20 09:17:16,221 - langchain_api.core.command_monitoring - INFO - Command logged: Привет! Как ты? from telegram_bot
+2025-06-20 09:17:16,221 - langchain_api.core.command_monitoring - INFO - Command logged: Привет! Как ты? from telegram_bot
+2025-06-20 09:17:16,221 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Привет! Как ты? from telegram_bot
+2025-06-20 09:17:16,221 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Привет! Как ты? from telegram_bot
+2025-06-20 09:17:20,529 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Привет! Как ты? in 4.31s
+2025-06-20 09:17:20,529 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Привет! Как ты? in 4.31s
+2025-06-20 09:18:26,053 - langchain_api.core.command_monitoring - INFO - Command logged: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) from telegram_bot
+2025-06-20 09:18:26,053 - langchain_api.core.command_monitoring - INFO - Command logged: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) from telegram_bot
+2025-06-20 09:18:26,053 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) from telegram_bot
+2025-06-20 09:18:26,053 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) from telegram_bot
+2025-06-20 09:18:30,300 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) in 4.25s
+2025-06-20 09:18:30,300 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я хорошо, сейчас сделали большой шаг с тобой, ну то есть я проекте, интеграцию. Я тебе скоро все покажу или ты сам увидишь) in 4.25s
+2025-06-20 09:20:12,449 - langchain_api.core.command_monitoring - INFO - Command logged: Я бы хотел чтобы ты в песочнице запустил любую простую команду from telegram_bot
+2025-06-20 09:20:12,449 - langchain_api.core.command_monitoring - INFO - Command logged: Я бы хотел чтобы ты в песочнице запустил любую простую команду from telegram_bot
+2025-06-20 09:20:12,450 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду from telegram_bot
+2025-06-20 09:20:12,450 - langchain_api.core.command_monitoring - INFO - Command logged: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду from telegram_bot
+2025-06-20 09:20:17,790 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду in 5.34s
+2025-06-20 09:20:17,790 - langchain_api.core.command_monitoring - INFO - Command completed: QUESTION: Я бы хотел чтобы ты в песочнице запустил любую простую команду in 5.34s

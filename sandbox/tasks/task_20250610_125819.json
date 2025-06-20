@@ -1,0 +1,20 @@
+{
+  "id": "20250610_125819",
+  "title": "test_memory_analysis",
+  "description": "Эксперимент по анализу возможностей: test_memory_analysis",
+  "priority": 3,
+  "status": "completed",
+  "dependencies": [],
+  "created_at": "2025-06-10T12:58:19.836669",
+  "updated_at": "2025-06-10T12:58:19.839537",
+  "completed_at": null,
+  "results": {
+    "experiment_filename": "experiment_20250610_125819.json",
+    "reflection_filename": "reflection_20250610_125819.json",
+    "analysis": {
+      "success_rate": 0.0,
+      "improvements": [],
+      "learnings": []
+    }
+  }
+}

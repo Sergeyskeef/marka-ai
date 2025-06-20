@@ -1,0 +1,93 @@
+{
+  "analysis": {
+    "core_components": {
+      "rag_system": {
+        "path": "rag/",
+        "components": [
+          "enhanced_rag_chain.py",
+          "rag_chain.py"
+        ],
+        "description": "Система RAG для генерации ответов с учетом контекста"
+      },
+      "memory_system": {
+        "path": "memory/",
+        "components": [
+          "memory_manager.py",
+          "multi_layer_memory.py"
+        ],
+        "description": "Многоуровневая система памяти"
+      },
+      "telegram_bot": {
+        "path": "telegram_bot/",
+        "components": [
+          "bot.py"
+        ],
+        "description": "Telegram-бот для взаимодействия с пользователями"
+      }
+    },
+    "memory_system": {
+      "memory_types": {
+        "Memory": "Долговременная память (факты, знания, сообщения)",
+        "Experience": "Опыт (результаты экспериментов, тестов, изменений)",
+        "Insight": "Инсайты (ключевые выводы, открытия)",
+        "Persona": "Информация о личности Марка",
+        "UserFacts": "Факты о пользователях",
+        "ChatGPTMemory": "История диалогов"
+      },
+      "storage": "Weaviate (векторная база данных)",
+      "capabilities": [
+        "Сохранение и поиск по контексту",
+        "Автоматическая кластеризация опыта",
+        "Генерация инсайтов",
+        "Многоуровневая память"
+      ]
+    },
+    "sandbox_capabilities": {
+      "self_analysis": {
+        "capabilities": [
+          "Сохранение результатов экспериментов",
+          "Анализ успешности экспериментов",
+          "Выявление возможных улучшений",
+          "Извлечение уроков"
+        ],
+        "components": [
+          "self_analysis.py",
+          "task_manager.py",
+          "sandbox_integrator.py"
+        ]
+      },
+      "task_management": {
+        "capabilities": [
+          "Создание и управление задачами",
+          "Отслеживание прогресса",
+          "Приоритизация задач",
+          "Управление зависимостями"
+        ]
+      },
+      "integration": {
+        "capabilities": [
+          "Связь с системой памяти",
+          "Сохранение инсайтов",
+          "Рефлексия и самоанализ"
+        ]
+      }
+    },
+    "self_awareness": {
+      "capabilities": [
+        "Анализ структуры проекта",
+        "Понимание своих компонентов",
+        "Осознание возможностей песочницы",
+        "Самоанализ и рефлексия",
+        "Управление задачами"
+      ],
+      "integration_points": [
+        "Memory Bank",
+        "Telegram-бот",
+        "RAG-система",
+        "Система памяти"
+      ]
+    },
+    "last_updated": "2025-06-10T12:58:19.838753"
+  },
+  "focus": "test_memory_analysis"
+}

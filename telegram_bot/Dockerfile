@@ -1,6 +1,16 @@
 FROM python:3.10-slim
 WORKDIR /bot
-COPY telegram_bot/requirements-bot.txt .
-RUN pip install --no-cache-dir -r requirements-bot.txt
-COPY telegram_bot/ .
-CMD ["python", "bot.py"]
+
+# Копируем весь проект
+COPY . /bot/langchain_api/
+
+# Устанавливаем зависимости
+WORKDIR /bot/langchain_api
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
+
+# Устанавливаем PYTHONPATH
+ENV PYTHONPATH=/bot
+
+# Запускаем бота
+CMD ["python", "-m", "langchain_api.telegram_bot.bot"]
