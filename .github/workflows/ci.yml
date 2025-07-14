@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build and run tests
+      run: |
+        docker compose build app
+        docker compose exec -T app python -m pytest /app/langchain_api/tests/test_autonomous_development_system.py /app/langchain_api/tests/test_development_tools.py /app/langchain_api/tests/test_development_pipeline.py /app/langchain_api/tests/test_ci_pipeline.py /app/langchain_api/tests/test_reflection_manager.py -v --tb=short
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          langchain_api/.pytest_cache/
+          langchain_api/htmlcov/ 

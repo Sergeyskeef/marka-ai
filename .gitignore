@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.log
+sandbox/**/*.md
+sandbox/**/*.json
+.vscode/
+.idea/

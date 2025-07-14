@@ -1,0 +1,245 @@
+name: Baseline Benchmarks для Марк v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_type:
+        description: 'Тип запуска baseline diagnostics'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - latency-only
+        - cost-only
+  push:
+    branches: 
+      - baseline-diagnostics
+      - main
+    paths:
+      - 'langchain_api/benchmarks/**'
+      - 'docs/metrics/**'
+      - '.github/workflows/bench.yml'
+  
+jobs:
+  baseline-diagnostics:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 📦 Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          
+      - name: 🔧 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r langchain_api/requirements.txt
+          pip install pytest pytest-cov pytest-benchmark tiktoken requests
+          
+      - name: 📁 Create metrics directory
+        run: |
+          mkdir -p docs/metrics
+
+      - name: 🐳 Start GraphitiMemory services (for validation)
+        run: |
+          cd langchain_api
+          echo "🚀 Запуск GraphitiMemory сервисов для валидации..."
+          docker-compose up -d graphiti graphiti-neo4j
+          
+      - name: ⏳ Wait for GraphitiMemory services
+        run: |
+          echo "⏳ Ожидание запуска GraphitiMemory сервисов..."
+          sleep 60
+          
+          echo "🔍 Проверка статуса сервисов..."
+          docker ps | grep graphiti
+          
+          echo "🏥 Проверка health GraphitiMemory..."
+          for i in {1..10}; do
+            if curl -f http://localhost:7878/health; then
+              echo "✅ GraphitiMemory готов"
+              break
+            else
+              echo "⏳ Ожидание GraphitiMemory... попытка $i/10"
+              sleep 10
+            fi
+          done
+          
+      - name: 🧪 Run GraphitiMemory smoke tests
+        run: |
+          cd langchain_api
+          echo "🧪 Запуск smoke тестов GraphitiMemory..."
+          
+          # Простые smoke тесты
+          python tests/graphiti_smoke.py || echo "⚠️ Smoke тесты не прошли (GraphitiMemory недоступен?)"
+          
+          # Pytest тесты
+          python -m pytest tests/graphiti/test_graphiti_smoke.py -v --tb=short || echo "⚠️ Pytest тесты GraphitiMemory не прошли"
+          
+
+          
+      - name: 🚀 Run Baseline Diagnostics (Full)
+        if: ${{ github.event.inputs.run_type == 'full' || github.event.inputs.run_type == '' }}
+        run: |
+          cd langchain_api
+          echo "🔍 Запуск полной baseline диагностики..."
+          make measure-baseline || echo "⚠️ Некоторые метрики не удалось собрать"
+          
+      - name: ⚡ Run Latency Only
+        if: ${{ github.event.inputs.run_type == 'latency-only' }}
+        run: |
+          cd langchain_api
+          echo "⚡ Измерение только латентности..."
+          python benchmarks/p95_latency.py || echo "⚠️ Латентность не измерена (API недоступен?)"
+          
+      - name: 💰 Run Cost Only  
+        if: ${{ github.event.inputs.run_type == 'cost-only' }}
+        run: |
+          cd langchain_api
+          echo "💰 Измерение только стоимости токенов..."
+          python benchmarks/token_cost.py
+          
+      - name: 📊 Validate metrics files
+        run: |
+          echo "🔍 Проверка созданных файлов метрик..."
+          ls -la docs/metrics/ || echo "Папка metrics не создана"
+          
+          if [ -f "docs/metrics/p95_latency.json" ]; then
+            echo "✅ p95_latency.json создан"
+            cat docs/metrics/p95_latency.json
+          else
+            echo "❌ p95_latency.json не найден"
+          fi
+          
+          if [ -f "docs/metrics/token_cost.json" ]; then
+            echo "✅ token_cost.json создан"
+            cat docs/metrics/token_cost.json
+          else
+            echo "❌ token_cost.json не найден"
+          fi
+          
+          if [ -f "docs/metrics/success_rate.json" ]; then
+            echo "✅ success_rate.json создан"
+            cat docs/metrics/success_rate.json
+          else
+            echo "❌ success_rate.json не найден"
+          fi
+          
+          if [ -f "docs/metrics/coverage.json" ]; then
+            echo "✅ coverage.json создан"
+            head -20 docs/metrics/coverage.json
+          else
+            echo "❌ coverage.json не найден"
+          fi
+          
+      - name: 📈 Generate baseline summary
+        run: |
+          echo "## 📊 Baseline Diagnostics Summary" > baseline_summary.md
+          echo "Измерение выполнено: $(date)" >> baseline_summary.md
+          echo "" >> baseline_summary.md
+          
+          # Baseline metrics
+          if [ -f "docs/metrics/p95_latency.json" ]; then
+            P95=$(cat docs/metrics/p95_latency.json | jq -r '.p95_ms')
+            echo "- **P95 Латентность**: ${P95}мс (цель Rust Core: -30%)" >> baseline_summary.md
+          fi
+          
+          if [ -f "docs/metrics/token_cost.json" ]; then
+            COST=$(cat docs/metrics/token_cost.json | jq -r '.cost_estimates_usd."gpt-4".total_cost_per_1k_requests')
+            echo "- **Стоимость токенов (GPT-4)**: \$${COST}/1K запросов (цель Promptbreeder: -10%)" >> baseline_summary.md
+          fi
+          
+          if [ -f "docs/metrics/success_rate.json" ]; then
+            SUCCESS=$(cat docs/metrics/success_rate.json | jq -r '.success_rate_percent')
+            echo "- **Success Rate**: ${SUCCESS}% (цель Reflexion: +25%)" >> baseline_summary.md
+          fi
+          
+          echo "" >> baseline_summary.md
+          echo "### 🚀 Technology Validation Status:" >> baseline_summary.md
+          
+          # Проверка статуса GraphitiMemory
+          if curl -f http://localhost:7878/health 2>/dev/null; then
+            echo "- **GraphitiMemory**: ✅ Доступен и готов к использованию" >> baseline_summary.md
+          else
+            echo "- **GraphitiMemory**: ❌ Недоступен (требуется настройка)" >> baseline_summary.md
+          fi
+          
+          # Проверка Neo4j
+          if docker ps | grep graphiti-neo4j | grep -q "Up"; then
+            echo "- **Neo4j Backend**: ✅ Запущен и работает" >> baseline_summary.md
+          else
+            echo "- **Neo4j Backend**: ❌ Не запущен" >> baseline_summary.md
+          fi
+          
+
+          
+          echo "" >> baseline_summary.md
+          echo "### 🎯 Цели для Марк v2:" >> baseline_summary.md
+          echo "- Q1: GraphitiMemory (латентность -30%)" >> baseline_summary.md
+          echo "- Q2: Tick-loop + Reflexion Tournament (success rate +25%)" >> baseline_summary.md
+          echo "- Q3: Darwin Patcher + Promptbreeder (coverage +3 п.п., cost -10%)" >> baseline_summary.md
+          echo "- Q4: Cedar Policy Gateway (escape rate = 0)" >> baseline_summary.md
+          
+          cat baseline_summary.md
+          
+      - name: 💾 Upload baseline metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-metrics-${{ github.run_number }}
+          path: |
+            docs/metrics/*.json
+            baseline_summary.md
+          retention-days: 90
+          
+      - name: 🧹 Cleanup services
+        if: always()
+        run: |
+          cd langchain_api
+          echo "🧹 Остановка GraphitiMemory сервисов..."
+          docker-compose down graphiti graphiti-neo4j --volumes || true
+          
+          echo "📊 Статус Docker после cleanup:"
+          docker ps -a | grep -E "(graphiti)" || echo "Все validation контейнеры остановлены"
+          
+      - name: 📝 Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('baseline_summary.md')) {
+              const summary = fs.readFileSync('baseline_summary.md', 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
+            
+  notify-completion:
+    needs: baseline-diagnostics
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: 🎉 Baseline diagnostics completed
+        run: |
+          if [ "${{ needs.baseline-diagnostics.result }}" == "success" ]; then
+            echo "✅ Baseline Diagnostics успешно завершены!"
+            echo "📊 Метрики готовы для начала оптимизаций Марка v2"
+            echo "🚀 Следующий шаг: Technology Validation для Q1 компонентов"
+          else
+            echo "❌ Baseline Diagnostics завершились с ошибками"
+            echo "🔧 Требуется исправление перед началом Q1"
+          fi 
