@@ -2,12 +2,11 @@
 SandboxManager - менеджер песочницы для безопасного выполнения команд
 """
 
-import logging
-import subprocess
 import asyncio
-from typing import Dict, Any, Optional, List
-from datetime import datetime
+import logging
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +16,8 @@ class CommandResult:
     """Результат выполнения команды"""
     success: bool
     output: str
-    error: Optional[str] = None
-    return_code: Optional[int] = None
+    error: str | None = None
+    return_code: int | None = None
     execution_time: float = 0.0
     command: str = ""
 
@@ -30,23 +29,23 @@ class Sandbox:
     working_dir: str
     timeout: int = 30
     max_output_size: int = 1024 * 1024  # 1MB
-    allowed_commands: Optional[List[str]] = None
+    allowed_commands: list[str] | None = None
 
 
 class SandboxManager:
     """Менеджер песочницы"""
-    
+
     def __init__(self):
-        self.sandboxes: Dict[str, Sandbox] = {}
-        self.command_history: List[CommandResult] = []
+        self.sandboxes: dict[str, Sandbox] = {}
+        self.command_history: list[CommandResult] = []
         self.default_timeout = 30
         self.default_max_output = 1024 * 1024  # 1MB
-        
+
         # Создаем песочницу по умолчанию
         self.create_sandbox("default", "/sandbox")
-        
+
         logger.info("✅ SandboxManager инициализирован")
-    
+
     def create_sandbox(self, sandbox_id: str, working_dir: str, **kwargs) -> Sandbox:
         """Создает новую песочницу"""
         sandbox = Sandbox(
@@ -57,15 +56,15 @@ class SandboxManager:
         self.sandboxes[sandbox_id] = sandbox
         logger.info(f"🏖️ Создана песочница: {sandbox_id} в {working_dir}")
         return sandbox
-    
-    def get_sandbox(self, sandbox_id: str = "default") -> Optional[Sandbox]:
+
+    def get_sandbox(self, sandbox_id: str = "default") -> Sandbox | None:
         """Возвращает песочницу по ID"""
         return self.sandboxes.get(sandbox_id)
-    
-    async def execute_command(self, 
-                            command: str, 
+
+    async def execute_command(self,
+                            command: str,
                             sandbox_id: str = "default",
-                            timeout: Optional[int] = None) -> CommandResult:
+                            timeout: int | None = None) -> CommandResult:
         """Выполняет команду в песочнице"""
         sandbox = self.get_sandbox(sandbox_id)
         if not sandbox:
@@ -75,9 +74,9 @@ class SandboxManager:
                 error=f"Песочница {sandbox_id} не найдена",
                 command=command
             )
-        
+
         start_time = datetime.now()
-        
+
         try:
             # Проверяем разрешенные команды
             if sandbox.allowed_commands and command.split()[0] not in sandbox.allowed_commands:
@@ -87,7 +86,7 @@ class SandboxManager:
                     error=f"Команда {command.split()[0]} не разрешена в песочнице {sandbox_id}",
                     command=command
                 )
-            
+
             # Выполняем команду
             process = await asyncio.create_subprocess_exec(
                 *command.split(),
@@ -95,7 +94,7 @@ class SandboxManager:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=sandbox.working_dir
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
@@ -110,16 +109,16 @@ class SandboxManager:
                     command=command,
                     execution_time=(datetime.now() - start_time).total_seconds()
                 )
-            
+
             execution_time = (datetime.now() - start_time).total_seconds()
-            
+
             # Ограничиваем размер вывода
             output = stdout.decode('utf-8', errors='ignore')
             if len(output) > sandbox.max_output_size:
                 output = output[:sandbox.max_output_size] + "\n... (вывод обрезан)"
-            
+
             error_output = stderr.decode('utf-8', errors='ignore')
-            
+
             result = CommandResult(
                 success=process.returncode == 0,
                 output=output,
@@ -128,18 +127,18 @@ class SandboxManager:
                 execution_time=execution_time,
                 command=command
             )
-            
+
             # Сохраняем в историю
             self.command_history.append(result)
-            
+
             logger.info(f"🔧 Команда выполнена: {command} (код: {process.returncode}, время: {execution_time:.2f}с)")
-            
+
             return result
-            
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
             logger.error(f"❌ Ошибка выполнения команды {command}: {e}")
-            
+
             return CommandResult(
                 success=False,
                 output="",
@@ -147,18 +146,18 @@ class SandboxManager:
                 command=command,
                 execution_time=execution_time
             )
-    
-    def get_command_history(self, limit: int = 100) -> List[CommandResult]:
+
+    def get_command_history(self, limit: int = 100) -> list[CommandResult]:
         """Возвращает историю команд"""
         return self.command_history[-limit:] if self.command_history else []
-    
+
     def clear_history(self):
         """Очищает историю команд"""
         cleared_count = len(self.command_history)
         self.command_history.clear()
         logger.info(f"🧹 Очищена история команд: {cleared_count} записей")
-    
-    def get_sandbox_stats(self) -> Dict[str, Any]:
+
+    def get_sandbox_stats(self) -> dict[str, Any]:
         """Возвращает статистику песочницы"""
         return {
             "total_sandboxes": len(self.sandboxes),
@@ -166,4 +165,4 @@ class SandboxManager:
             "successful_commands": len([c for c in self.command_history if c.success]),
             "failed_commands": len([c for c in self.command_history if not c.success]),
             "sandboxes": [s.id for s in self.sandboxes.values()]
-        } 
+        }

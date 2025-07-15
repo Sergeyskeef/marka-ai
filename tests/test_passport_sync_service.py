@@ -1,10 +1,11 @@
-import os
-import pytest
 import asyncio
-from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
-from services.passport_sync_service import PassportSyncService
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from scripts.auto_sync_passport import ChangeReport
+from services.passport_sync_service import PassportSyncService
+
 
 @pytest.fixture
 def project_root(tmp_path):
@@ -39,7 +40,7 @@ async def test_start_service(sync_service):
     with patch('watchdog.observers.Observer') as mock_observer:
         mock_observer.return_value = MagicMock()
         await sync_service.start()
-        
+
         assert sync_service.is_running
         assert sync_service.observer is not None
         sync_service.observer.start.assert_called_once()
@@ -51,10 +52,10 @@ async def test_stop_service(sync_service):
     with patch('watchdog.observers.Observer') as mock_observer:
         mock_observer.return_value = MagicMock()
         await sync_service.start()
-        
+
     # Останавливаем сервис
     await sync_service.stop()
-    
+
     assert not sync_service.is_running
     sync_service.observer.stop.assert_called_once()
     sync_service.observer.join.assert_called_once()
@@ -77,10 +78,10 @@ async def test_notify_changes(sync_service):
     """Тест отправки уведомлений об изменениях"""
     callback = AsyncMock()
     sync_service.register_notification_callback(callback)
-    
+
     changes = ChangeReport()
     changes.changes['added_files'].append('test.py')
-    
+
     await sync_service._notify_changes(changes)
     callback.assert_called_once_with(changes)
 
@@ -91,18 +92,18 @@ async def test_check_changes_loop(sync_service, mock_handler):
     changes = ChangeReport()
     changes.changes['added_files'].append('test.py')
     mock_handler.get_pending_changes.return_value = changes
-    
+
     # Запускаем сервис
     with patch('watchdog.observers.Observer') as mock_observer:
         mock_observer.return_value = MagicMock()
         await sync_service.start()
-        
+
         # Ждем один цикл проверки
         await asyncio.sleep(0.1)
-        
+
         # Останавливаем сервис
         await sync_service.stop()
-        
+
         # Проверяем, что изменения были получены
         assert mock_handler.get_pending_changes.call_count > 0
 
@@ -130,4 +131,4 @@ def test_service_status(sync_service, mock_handler):
     assert 'is_running' in status
     assert 'project_root' in status
     assert 'sync_interval' in status
-    assert 'has_pending_changes' in status 
+    assert 'has_pending_changes' in status

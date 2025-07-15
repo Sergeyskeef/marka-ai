@@ -1,4 +1,4 @@
 """Глобальные переменные для приложения."""
 
 # Глобальный сервис синхронизации паспорта
-passport_sync_service = None 
+passport_sync_service = None

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Простой тест для проверки нового подхода с OpenAI Tools API.
 Тестирует базовую функциональность tool_calls для выполнения команд.
 """
 
-import sys
-import os
-import json
 import asyncio
+import json
+import os
+import sys
+
 import httpx
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_api.utils.openai_proxy_client import create_openai_client
@@ -88,18 +89,18 @@ async def test_tools_api():
     """Тестирует OpenAI Tools API с выполнением команд."""
     print("🧪 Тестирование OpenAI Tools API")
     print("=" * 50)
-    
+
     # Тестовые вопросы
     test_questions = [
         "Проверь файлы в директории",
         "Какая текущая директория?",
         "Кто я в системе?"
     ]
-    
+
     for i, question in enumerate(test_questions, 1):
         print(f"\n{i}. Вопрос: {question}")
         print("-" * 30)
-        
+
         try:
             # Первый запрос - получаем tool_calls
             response = openai_client.chat.completions.create(
@@ -113,25 +114,25 @@ async def test_tools_api():
                     {"role": "user", "content": question}
                 ]
             )
-            
+
             msg = response.choices[0].message
             print(f"Ответ LLM: {msg.content or 'Нет текста'}")
-            
+
             if msg.tool_calls:
                 print(f"✅ Обнаружены tool_calls: {len(msg.tool_calls)}")
-                
+
                 # Выполняем команды
                 for call in msg.tool_calls:
                     print(f"Выполняем: {call.function.name}({call.function.arguments})")
-                    
+
                     if call.function.name == "execute_sandbox_command":
                         args = json.loads(call.function.arguments)
                         command = args["command"]
-                        
+
                         # Выполняем команду
                         result = await execute_sandbox_command(command)
                         print(f"Результат: {result[:200]}...")
-                        
+
                         # Добавляем результат в историю
                         messages = [
                             {"role": "system", "content": "Ты - Марк, помощник который может выполнять команды в песочнице."},
@@ -140,31 +141,31 @@ async def test_tools_api():
                             {"role": "assistant", "content": None, "tool_calls": [call]},
                             {"role": "tool", "tool_call_id": call.id, "name": call.function.name, "content": result}
                         ]
-                        
+
                         # Второй запрос - получаем финальный ответ
                         final_response = openai_client.chat.completions.create(
                             model="gpt-4.1-mini",
                             temperature=0,
                             messages=messages
                         )
-                        
+
                         final_msg = final_response.choices[0].message
                         print(f"Финальный ответ: {final_msg.content}")
-                        
+
             else:
                 print("❌ Tool_calls НЕ обнаружены")
                 print(f"Полный ответ: {msg}")
-                
+
         except Exception as e:
             print(f"❌ Ошибка: {e}")
-        
+
         print("=" * 50)
 
 async def test_forced_tool_call():
     """Тестирует принудительный вызов инструмента."""
     print("\n🧪 Тестирование принудительного tool_call")
     print("=" * 50)
-    
+
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -176,15 +177,15 @@ async def test_forced_tool_call():
                 {"role": "user", "content": "Привет"}
             ]
         )
-        
+
         msg = response.choices[0].message
         print(f"Принудительный tool_call: {msg.tool_calls}")
-        
+
         if msg.tool_calls:
             print("✅ Принудительный tool_call работает!")
         else:
             print("❌ Принудительный tool_call не сработал")
-            
+
     except Exception as e:
         print(f"❌ Ошибка принудительного tool_call: {e}")
 
@@ -192,11 +193,11 @@ def main():
     """Основная функция тестирования."""
     print("🚀 Простой тест OpenAI Tools API")
     print("=" * 50)
-    
+
     # Запускаем тесты
     asyncio.run(test_tools_api())
     asyncio.run(test_forced_tool_call())
-    
+
     print("\n✅ Тестирование завершено!")
     print("\n📝 Результаты:")
     print("1. Проверен базовый tool_call")
@@ -204,4 +205,4 @@ def main():
     print("3. Проверена интеграция с API песочницы")
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -3,16 +3,15 @@
 GraphitiMemory Validation Service
 Простой FastAPI сервер для валидации GraphitiMemory интеграции
 """
+import logging
 import os
 import uuid
-import time
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
 from neo4j import GraphDatabase
-import logging
+from pydantic import BaseModel, Field
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -21,10 +20,10 @@ logger = logging.getLogger(__name__)
 # Pydantic модели
 class NodeProperties(BaseModel):
     """Свойства узла"""
-    msg: Optional[str] = None
-    timestamp: Optional[float] = None
-    test_run: Optional[bool] = None
-    pytest_test: Optional[bool] = None
+    msg: str | None = None
+    timestamp: float | None = None
+    test_run: bool | None = None
+    pytest_test: bool | None = None
 
     class Config:
         extra = "allow"  # ← разрешить любые дополнительные ключи
@@ -39,7 +38,7 @@ class NodeResponse(BaseModel):
     """Ответ при получении узла"""
     id: str
     type: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -54,7 +53,7 @@ class StatsResponse(BaseModel):
     """Статистика GraphitiMemory"""
     total_nodes: int = 0
     total_relationships: int = 0
-    node_types: Dict[str, int] = {}
+    node_types: dict[str, int] = {}
     last_updated: datetime
 
 # FastAPI приложение
@@ -71,11 +70,11 @@ in_memory_nodes = {}
 def init_neo4j():
     """Инициализация Neo4j подключения"""
     global neo4j_driver
-    
+
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://graphiti-neo4j:7687")
     neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
-    
+
     try:
         neo4j_driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_username, neo4j_password))
         # Проверка подключения
@@ -92,7 +91,7 @@ def check_neo4j_connection():
     """Проверка подключения к Neo4j"""
     if not neo4j_driver:
         return False
-    
+
     try:
         with neo4j_driver.session() as session:
             result = session.run("RETURN 1 as test")
@@ -107,14 +106,14 @@ async def startup_event():
     """Инициализация при запуске"""
     logger.info("Запуск GraphitiMemory Validation Service...")
     neo4j_connected = init_neo4j()
-    
+
     if neo4j_connected:
         logger.info("✅ Neo4j подключение установлено")
-        
+
         # Инициализация индексов и constraints
         try:
-            import sys
             import os
+            import sys
             sys.path.append(os.path.dirname(__file__))
             from init_neo4j import init_neo4j_constraints_and_indexes
             init_neo4j_constraints_and_indexes()
@@ -136,7 +135,7 @@ async def shutdown_event():
 async def health_check():
     """Health check endpoint"""
     neo4j_connected = check_neo4j_connection()
-    
+
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now(),
@@ -162,7 +161,7 @@ async def get_stats():
     for node in in_memory_nodes.values():
         node_type = node.get("type", "unknown")
         node_types[node_type] = node_types.get(node_type, 0) + 1
-    
+
     return StatsResponse(
         total_nodes=len(in_memory_nodes),
         total_relationships=0,  # Пока без связей
@@ -183,7 +182,7 @@ async def create_node(node: Node):
     props = {**base_props, **extra_props}
     import json
     for k, v in list(props.items()):
-        if isinstance(v, (list, dict)):
+        if isinstance(v, list | dict):
             props[k] = json.dumps(v, ensure_ascii=False)
     logger.info(f"PROPS to Neo4j → {props}")
 
@@ -224,7 +223,7 @@ async def create_node(node: Node):
 @app.get("/nodes/{node_id}", response_model=NodeResponse)
 async def get_node(node_id: str):
     """Получение узла по ID"""
-    
+
     # Поиск в Neo4j
     if check_neo4j_connection():
         try:
@@ -245,7 +244,7 @@ async def get_node(node_id: str):
                     )
         except Exception as e:
             logger.error(f"Ошибка поиска узла в Neo4j: {e}")
-    
+
     # Поиск в in-memory
     if node_id in in_memory_nodes:
         node_data = in_memory_nodes[node_id]
@@ -256,17 +255,17 @@ async def get_node(node_id: str):
             created_at=node_data["created_at"],
             updated_at=node_data["updated_at"]
         )
-    
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Узел с ID {node_id} не найден"
     )
 
 @app.get("/nodes")
-async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = None):
+async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None):
     """Получение списка узлов с опциональным поиском"""
     nodes_list = []
-    
+
     # Чтение из Neo4j
     if check_neo4j_connection():
         try:
@@ -277,13 +276,13 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
                     try:
                         # Пробуем полнотекстовый поиск (Enterprise Edition)
                         result = session.run("""
-                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search) 
-                            YIELD node, score 
-                            RETURN node, score 
-                            ORDER BY score DESC 
+                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search)
+                            YIELD node, score
+                            RETURN node, score
+                            ORDER BY score DESC
                             SKIP $offset LIMIT $limit
                         """, search=search, offset=offset, limit=limit)
-                        
+
                         for record in result:
                             node = record["node"]
                             score = record["score"]
@@ -296,27 +295,27 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
                                 "updated_at": datetime.now()
                             }
                             nodes_list.append(node_data)
-                        
+
                         # Общее количество для поиска
                         count_result = session.run("""
-                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search) 
-                            YIELD node 
+                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search)
+                            YIELD node
                             RETURN count(node) as total
                         """, search=search)
                         total = count_result.single()["total"]
-                        
+
                     except Exception as e:
                         if "ProcedureNotFound" in str(e) or "There is no such fulltext schema index" in str(e):
                             # Fallback для Community Edition - поиск через LIKE
                             logger.info("Используется LIKE поиск (Community Edition)")
                             result = session.run("""
-                                MATCH (n:Episode) 
+                                MATCH (n:Episode)
                                 WHERE toLower(n.msg) CONTAINS toLower($search)
                                 RETURN n
-                                ORDER BY n.created_at DESC 
+                                ORDER BY n.created_at DESC
                                 SKIP $offset LIMIT $limit
                             """, search=search, offset=offset, limit=limit)
-                            
+
                             for record in result:
                                 node = record["n"]
                                 node_data = {
@@ -328,10 +327,10 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
                                     "updated_at": datetime.now()
                                 }
                                 nodes_list.append(node_data)
-                            
+
                             # Общее количество для поиска
                             count_result = session.run("""
-                                MATCH (n:Episode) 
+                                MATCH (n:Episode)
                                 WHERE toLower(n.msg) CONTAINS toLower($search)
                                 RETURN count(n) as total
                             """, search=search)
@@ -354,11 +353,11 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
                             "updated_at": datetime.now()
                         }
                         nodes_list.append(node_data)
-                    
+
                     # Общее количество
                     count_result = session.run("MATCH (n) RETURN count(n) as total")
                     total = count_result.single()["total"]
-                
+
                 logger.info(f"Загружено {len(nodes_list)} узлов из Neo4j")
                 return {
                     "nodes": nodes_list,
@@ -369,13 +368,13 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
                 }
         except Exception as e:
             logger.error(f"Ошибка чтения узлов из Neo4j: {e}")
-    
+
     # Fallback to in-memory
     nodes_list = list(in_memory_nodes.values())
     start = offset
     end = offset + limit
     paginated_nodes = nodes_list[start:end]
-    
+
     return {
         "nodes": paginated_nodes,
         "total": len(nodes_list),
@@ -387,7 +386,7 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = N
 @app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_node(node_id: str):
     """Удаление узла"""
-    
+
     # Удаление из Neo4j
     if check_neo4j_connection():
         try:
@@ -402,12 +401,12 @@ async def delete_node(node_id: str):
                     return
         except Exception as e:
             logger.error(f"Ошибка удаления узла из Neo4j: {e}")
-    
+
     # Удаление из in-memory
     if node_id in in_memory_nodes:
         del in_memory_nodes[node_id]
         return
-    
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Узел с ID {node_id} не найден"
@@ -433,8 +432,8 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     host = os.getenv("GRAPHITI_API_HOST", "0.0.0.0")
     port = int(os.getenv("GRAPHITI_API_PORT", "7878"))
-    
-    uvicorn.run(app, host=host, port=port) 
+
+    uvicorn.run(app, host=host, port=port)

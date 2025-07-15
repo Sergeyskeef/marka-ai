@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-import requests
 import json
 
-# Создаем эпизод с list_field
+import requests
+
+# Создаем эпизод точно как в тесте
 episode_data = {
-    'text': 'Debug test with list',
-    'metadata': {
-        'list_field': [1, 2, 3],
-        'string_field': 'test string'
+    "text": "Complex metadata types test",
+    "metadata": {
+        "string_field": "test string",
+        "integer_field": 42,
+        "float_field": 3.14,
+        "boolean_field": True,
+        "list_field": [1, 2, 3],
+        "null_field": None
     }
 }
 
-print("1. Создаем эпизод...")
+print("1. Создаем эпизод как в тесте...")
 response = requests.post('http://localhost:8000/memory', json=episode_data)
 print(f"Status: {response.status_code}")
 print(f"Response: {response.json()}")
 
 # Ждем
 import time
+
 time.sleep(2)
 
 # Ищем эпизод
 print("\n2. Ищем эпизод...")
-response = requests.get('http://localhost:8000/search?q=Debug test with list')
+response = requests.get('http://localhost:8000/search?q=Complex metadata types')
 print(f"Status: {response.status_code}")
 
 data = response.json()
@@ -34,7 +40,7 @@ if data['items']:
     print(f"Text: {item['text']}")
     print(f"Metadata keys: {list(item['metadata'].keys())}")
     print(f"Full metadata: {json.dumps(item['metadata'], indent=2)}")
-    
+
     # Проверяем list_field
     if 'list_field' in item['metadata']:
         print(f"list_field type: {type(item['metadata']['list_field'])}")
@@ -42,4 +48,4 @@ if data['items']:
     else:
         print("list_field НЕ НАЙДЕН в метаданных!")
 else:
-    print("Эпизоды не найдены!") 
+    print("Эпизоды не найдены!")

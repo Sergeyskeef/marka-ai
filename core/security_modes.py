@@ -8,16 +8,14 @@
 """
 
 import asyncio
-import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set
-from dataclasses import dataclass, asdict
-import re
+from typing import Any
 
-from langchain_api.services.security import SecurityManager, AccessLevel, TaskCategory
 from langchain_api.core.command_monitoring import CommandMonitoringSystem
+from langchain_api.services.security import AccessLevel, SecurityManager
 
 
 class WorkMode(Enum):
@@ -43,13 +41,13 @@ class SecurityContext:
     """Контекст безопасности для операции"""
     mode: WorkMode
     chat_id: int
-    user_id: Optional[int] = None
-    session_id: Optional[str] = None
+    user_id: int | None = None
+    session_id: str | None = None
     access_level: AccessLevel = AccessLevel.READ
     requires_confirmation: bool = False
-    allowed_operations: Set[OperationType] = None
+    allowed_operations: set[OperationType] = None
     confirmation_pending: bool = False
-    confirmation_expires: Optional[datetime] = None
+    confirmation_expires: datetime | None = None
 
 
 @dataclass
@@ -59,36 +57,36 @@ class ConfirmationRequest:
     operation_type: OperationType
     description: str
     chat_id: int
-    user_id: Optional[int]
-    parameters: Dict[str, Any]
+    user_id: int | None
+    parameters: dict[str, Any]
     requested_at: datetime
     expires_at: datetime
     confirmed: bool = False
-    confirmed_at: Optional[datetime] = None
-    confirmed_by: Optional[int] = None
+    confirmed_at: datetime | None = None
+    confirmed_by: int | None = None
 
 
 class SecurityModeManager:
     """
     Менеджер режимов безопасности.
-    
+
     Отвечает за:
     - Управление режимами работы
     - Валидацию операций
     - Систему подтверждений
     - Логирование действий
     """
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.security_manager = SecurityManager()
         self.command_monitoring = CommandMonitoringSystem()
-        
+
         # Состояние системы
         self.current_mode = WorkMode.PRODUCTION
-        self.active_sessions: Dict[int, SecurityContext] = {}
-        self.pending_confirmations: Dict[str, ConfirmationRequest] = {}
-        
+        self.active_sessions: dict[int, SecurityContext] = {}
+        self.pending_confirmations: dict[str, ConfirmationRequest] = {}
+
         # Настройки режимов
         self.mode_configurations = {
             WorkMode.PRODUCTION: {
@@ -131,7 +129,7 @@ class SecurityModeManager:
                 "description": "Гибридный режим - анализ в продакшне, выполнение в песочнице"
             }
         }
-        
+
         # Команды и их типы операций
         self.command_operation_mapping = {
             # Безопасные команды (все режимы)
@@ -141,7 +139,7 @@ class SecurityModeManager:
             "/selfcheck": OperationType.READ,
             "/memory_search": OperationType.MEMORY_OPERATION,
             "/memory_analyze": OperationType.MEMORY_OPERATION,
-            
+
             # Команды с подтверждением
             "/sync": OperationType.SYSTEM_MODIFICATION,
             "/sandbox_exec": OperationType.CODE_EXECUTION,
@@ -152,26 +150,26 @@ class SecurityModeManager:
             "/memory_save": OperationType.MEMORY_OPERATION,
             "/memory_update": OperationType.MEMORY_OPERATION,
             "/memory_delete": OperationType.MEMORY_OPERATION,
-            
+
             # Команды анализа
             "/self_analyze": OperationType.ANALYSIS,
             "/analyze_self": OperationType.ANALYSIS,
             "/decompose": OperationType.ANALYSIS,
-            
+
             # Команды управления
             "/approve": OperationType.READ,  # Специальная команда для подтверждений
             "/reject": OperationType.READ,   # Специальная команда для отклонений
         }
-        
+
         self.logger.info("Security Mode Manager инициализирован")
-    
+
     def set_mode(self, mode: WorkMode, chat_id: int) -> bool:
         """Установка режима работы для чата"""
         try:
             if not isinstance(mode, WorkMode):
                 self.logger.error(f"Неизвестный режим работы: {mode}")
                 raise AttributeError(f"Invalid work mode: {mode}")
-            
+
             # Создаем или обновляем контекст безопасности
             context = SecurityContext(
                 mode=mode,
@@ -179,10 +177,10 @@ class SecurityModeManager:
                 allowed_operations=self.mode_configurations[mode]["allowed_operations"],
                 requires_confirmation=bool(self.mode_configurations[mode]["requires_confirmation"])
             )
-            
+
             self.active_sessions[chat_id] = context
             self.current_mode = mode
-            
+
             # Логируем изменение режима
             self.command_monitoring.log_command(
                 command=f"set_mode_{mode.value}",
@@ -191,25 +189,25 @@ class SecurityModeManager:
                 parameters={"mode": mode.value},
                 metadata={"operation": "mode_change"}
             )
-            
+
             self.logger.info(f"Режим работы изменен на {mode.value} для чата {chat_id}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка установки режима {mode}: {e}")
             raise
-    
+
     def get_mode(self, chat_id: int) -> WorkMode:
         """Получение текущего режима работы для чата"""
         context = self.active_sessions.get(chat_id)
         if context:
             return context.mode
         return self.current_mode
-    
-    def validate_operation(self, command: str, chat_id: int, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
+
+    def validate_operation(self, command: str, chat_id: int, parameters: dict[str, Any] = None) -> dict[str, Any]:
         """
         Валидация операции в текущем режиме.
-        
+
         Returns:
             Dict с результатом валидации:
             {
@@ -229,18 +227,18 @@ class SecurityModeManager:
                     allowed_operations=self.mode_configurations[self.current_mode]["allowed_operations"]
                 )
                 self.active_sessions[chat_id] = context
-            
+
             # Определяем тип операции
             operation_type = self._determine_operation_type(command, parameters)
-            
+
             # Проверяем разрешенность операции
             allowed = operation_type in context.allowed_operations
-            
+
             # Проверяем необходимость подтверждения
             requires_confirmation = (
                 operation_type in self.mode_configurations[context.mode]["requires_confirmation"]
             )
-            
+
             result = {
                 "allowed": allowed,
                 "requires_confirmation": requires_confirmation and allowed,
@@ -249,11 +247,11 @@ class SecurityModeManager:
                 "reason": "",
                 "suggestions": []
             }
-            
+
             if not allowed:
                 result["reason"] = f"Операция {operation_type.value} не разрешена в режиме {context.mode.value}"
                 result["suggestions"] = self._get_suggestions(operation_type, context.mode)
-            
+
             # Логируем валидацию
             self.command_monitoring.log_command(
                 command=f"validate_{command}",
@@ -267,9 +265,9 @@ class SecurityModeManager:
                 },
                 metadata={"operation": "validation"}
             )
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка валидации операции {command}: {e}")
             return {
@@ -278,14 +276,14 @@ class SecurityModeManager:
                 "reason": f"Ошибка валидации: {str(e)}",
                 "suggestions": ["Обратитесь к администратору"]
             }
-    
-    def _determine_operation_type(self, command: str, parameters: Dict[str, Any] = None) -> OperationType:
+
+    def _determine_operation_type(self, command: str, parameters: dict[str, Any] = None) -> OperationType:
         """Определение типа операции по команде и параметрам"""
-        
+
         # Проверяем прямое соответствие команды
         if command in self.command_operation_mapping:
             return self.command_operation_mapping[command]
-        
+
         # Анализируем команду по паттернам
         if command.startswith("/sandbox_"):
             if "exec" in command or "run" in command:
@@ -294,19 +292,19 @@ class SecurityModeManager:
                 return OperationType.SYSTEM_MODIFICATION
             else:
                 return OperationType.FILE_OPERATION
-        
+
         if command.startswith("/task_"):
             return OperationType.TASK_CREATION
-        
+
         if command.startswith("/memory_"):
             if command in ["/memory_save", "/memory_update", "/memory_delete"]:
                 return OperationType.MEMORY_OPERATION
             else:
                 return OperationType.READ
-        
+
         if command.startswith("!"):
             return OperationType.CODE_EXECUTION
-        
+
         # Анализируем параметры для определения типа
         if parameters:
             if "command" in parameters or "script" in parameters:
@@ -315,31 +313,31 @@ class SecurityModeManager:
                 return OperationType.FILE_OPERATION
             if "task" in parameters:
                 return OperationType.TASK_CREATION
-        
+
         # По умолчанию считаем операцией чтения
         return OperationType.READ
-    
-    def _get_suggestions(self, operation_type: OperationType, current_mode: WorkMode) -> List[str]:
+
+    def _get_suggestions(self, operation_type: OperationType, current_mode: WorkMode) -> list[str]:
         """Получение предложений для разрешения операции"""
         suggestions = []
-        
+
         if operation_type in [OperationType.CODE_EXECUTION, OperationType.SYSTEM_MODIFICATION]:
             if current_mode == WorkMode.PRODUCTION:
                 suggestions.append("Переключитесь в режим песочницы: /mode_sandbox")
                 suggestions.append("Используйте гибридный режим: /mode_hybrid")
             elif current_mode == WorkMode.HYBRID:
                 suggestions.append("Переключитесь в режим песочницы: /mode_sandbox")
-        
+
         elif operation_type == OperationType.TASK_CREATION:
             suggestions.append("Используйте команду /approve для подтверждения")
-        
+
         return suggestions
-    
-    async def request_confirmation(self, operation_id: str, operation_type: OperationType, 
-                                 description: str, chat_id: int, user_id: Optional[int],
-                                 parameters: Dict[str, Any]) -> ConfirmationRequest:
+
+    async def request_confirmation(self, operation_id: str, operation_type: OperationType,
+                                 description: str, chat_id: int, user_id: int | None,
+                                 parameters: dict[str, Any]) -> ConfirmationRequest:
         """Создание запроса на подтверждение операции"""
-        
+
         confirmation = ConfirmationRequest(
             operation_id=operation_id,
             operation_type=operation_type,
@@ -350,9 +348,9 @@ class SecurityModeManager:
             requested_at=datetime.now(),
             expires_at=datetime.now() + timedelta(minutes=30)  # 30 минут на подтверждение
         )
-        
+
         self.pending_confirmations[operation_id] = confirmation
-        
+
         # Логируем запрос подтверждения
         self.command_monitoring.log_command(
             command="request_confirmation",
@@ -365,27 +363,27 @@ class SecurityModeManager:
             },
             metadata={"operation": "confirmation_request"}
         )
-        
+
         self.logger.info(f"Запрос подтверждения создан: {operation_id}")
         return confirmation
-    
+
     def confirm_operation(self, operation_id: str, user_id: int) -> bool:
         """Подтверждение операции"""
         if operation_id not in self.pending_confirmations:
             return False
-        
+
         confirmation = self.pending_confirmations[operation_id]
-        
+
         # Проверяем срок действия
         if datetime.now() > confirmation.expires_at:
             del self.pending_confirmations[operation_id]
             return False
-        
+
         # Подтверждаем операцию
         confirmation.confirmed = True
         confirmation.confirmed_at = datetime.now()
         confirmation.confirmed_by = user_id
-        
+
         # Логируем подтверждение
         self.command_monitoring.log_command(
             command="confirm_operation",
@@ -397,20 +395,20 @@ class SecurityModeManager:
             },
             metadata={"operation": "confirmation"}
         )
-        
+
         self.logger.info(f"Операция подтверждена: {operation_id}")
         return True
-    
+
     def reject_operation(self, operation_id: str, user_id: int) -> bool:
         """Отклонение операции"""
         if operation_id not in self.pending_confirmations:
             return False
-        
+
         confirmation = self.pending_confirmations[operation_id]
-        
+
         # Удаляем запрос подтверждения
         del self.pending_confirmations[operation_id]
-        
+
         # Логируем отклонение
         self.command_monitoring.log_command(
             command="reject_operation",
@@ -422,33 +420,33 @@ class SecurityModeManager:
             },
             metadata={"operation": "rejection"}
         )
-        
+
         self.logger.info(f"Операция отклонена: {operation_id}")
         return True
-    
-    def get_pending_confirmations(self, chat_id: int) -> List[ConfirmationRequest]:
+
+    def get_pending_confirmations(self, chat_id: int) -> list[ConfirmationRequest]:
         """Получение ожидающих подтверждения операций для чата"""
         return [
             conf for conf in self.pending_confirmations.values()
             if conf.chat_id == chat_id and not conf.confirmed
         ]
-    
+
     def cleanup_expired_confirmations(self) -> int:
         """Очистка просроченных подтверждений"""
         expired = []
         for operation_id, confirmation in self.pending_confirmations.items():
             if datetime.now() > confirmation.expires_at:
                 expired.append(operation_id)
-        
+
         for operation_id in expired:
             del self.pending_confirmations[operation_id]
-        
+
         if expired:
             self.logger.info(f"Очищено {len(expired)} просроченных подтверждений")
-        
+
         return len(expired)
-    
-    def get_mode_info(self, mode: WorkMode) -> Dict[str, Any]:
+
+    def get_mode_info(self, mode: WorkMode) -> dict[str, Any]:
         """Получение информации о режиме работы"""
         config = self.mode_configurations.get(mode, {})
         return {
@@ -457,8 +455,8 @@ class SecurityModeManager:
             "allowed_operations": [op.value for op in config.get("allowed_operations", [])],
             "requires_confirmation": [op.value for op in config.get("requires_confirmation", [])]
         }
-    
-    def get_security_status(self, chat_id: int) -> Dict[str, Any]:
+
+    def get_security_status(self, chat_id: int) -> dict[str, Any]:
         """Получение статуса безопасности для чата"""
         context = self.active_sessions.get(chat_id)
         if not context:
@@ -467,9 +465,9 @@ class SecurityModeManager:
                 chat_id=chat_id,
                 allowed_operations=self.mode_configurations[self.current_mode]["allowed_operations"]
             )
-        
+
         pending_count = len(self.get_pending_confirmations(chat_id))
-        
+
         return {
             "mode": context.mode.value,
             "access_level": context.access_level.value,
@@ -490,7 +488,7 @@ class SecurityModeManager:
 
 
 # Глобальный экземпляр менеджера режимов
-_security_mode_manager: Optional[SecurityModeManager] = None
+_security_mode_manager: SecurityModeManager | None = None
 
 
 def get_security_mode_manager() -> SecurityModeManager:
@@ -510,4 +508,4 @@ async def cleanup_expired_confirmations_task():
             await asyncio.sleep(300)  # Проверяем каждые 5 минут
         except Exception as e:
             logging.error(f"Ошибка в задаче очистки подтверждений: {e}")
-            await asyncio.sleep(60) 
+            await asyncio.sleep(60)

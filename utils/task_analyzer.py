@@ -2,11 +2,11 @@
 Модуль для анализа выполнения задач и генерации рекомендаций по улучшению.
 """
 
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +16,14 @@ class TaskMetrics:
     task_id: str
     task_type: str
     start_time: datetime
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
     cpu_usage: float = 0.0
     memory_usage: float = 0.0
     success: bool = True
-    error_message: Optional[str] = None
-    execution_time: Optional[float] = None
+    error_message: str | None = None
+    execution_time: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Преобразует метрики в словарь."""
         return {
             "task_id": self.task_id,
@@ -44,8 +44,8 @@ class TaskAnalysis:
     task_type: str
     performance_score: float
     resource_efficiency: float
-    recommendations: List[str]
-    patterns: List[str]
+    recommendations: list[str]
+    patterns: list[str]
 
 class DateTimeEncoder(json.JSONEncoder):
     """Кастомный JSON энкодер для datetime."""
@@ -66,34 +66,34 @@ def convert_all_dt_to_str(obj):
 
 class TaskAnalyzer:
     """Анализатор выполнения задач."""
-    
+
     def __init__(self):
-        self.metrics_history: List[TaskMetrics] = []
-        self.analysis_history: List[TaskAnalysis] = []
-        
+        self.metrics_history: list[TaskMetrics] = []
+        self.analysis_history: list[TaskAnalysis] = []
+
     def add_metrics(self, metrics: TaskMetrics) -> None:
         """Добавляет метрики выполнения задачи."""
         self.metrics_history.append(metrics)
         logger.info(f"Added metrics for task {metrics.task_id}")
-        
+
     def analyze_task(self, task_id: str) -> TaskAnalysis:
         """Анализирует выполнение конкретной задачи."""
         task_metrics = next((m for m in self.metrics_history if m.task_id == task_id), None)
         if not task_metrics:
             raise ValueError(f"Metrics not found for task {task_id}")
-            
+
         # Анализ производительности
         performance_score = self._calculate_performance_score(task_metrics)
-        
+
         # Анализ эффективности использования ресурсов
         resource_efficiency = self._calculate_resource_efficiency(task_metrics)
-        
+
         # Генерация рекомендаций
         recommendations = self._generate_recommendations(task_metrics)
-        
+
         # Выявление паттернов
         patterns = self._identify_patterns(task_metrics)
-        
+
         analysis = TaskAnalysis(
             task_id=task_id,
             task_type=task_metrics.task_type,
@@ -102,80 +102,80 @@ class TaskAnalyzer:
             recommendations=recommendations,
             patterns=patterns
         )
-        
+
         self.analysis_history.append(analysis)
         return analysis
-    
+
     def _calculate_performance_score(self, metrics: TaskMetrics) -> float:
         """Рассчитывает оценку производительности задачи."""
         if not metrics.success:
             return 0.0
-            
+
         # Базовая оценка на основе времени выполнения
         base_score = 1.0 - (metrics.execution_time / 3600)  # Нормализация к часу
-        
+
         # Корректировка на основе использования ресурсов
         resource_penalty = (metrics.cpu_usage + metrics.memory_usage) / 200  # Нормализация к 100%
-        
+
         return max(0.0, min(1.0, base_score - resource_penalty))
-    
+
     def _calculate_resource_efficiency(self, metrics: TaskMetrics) -> float:
         """Рассчитывает эффективность использования ресурсов."""
         if not metrics.success:
             return 0.0
-            
+
         # Эффективность = результат / затраченные ресурсы
         resource_usage = metrics.cpu_usage + metrics.memory_usage
         if resource_usage == 0:
             return 1.0
-            
+
         return 1.0 / resource_usage
-    
-    def _generate_recommendations(self, metrics: TaskMetrics) -> List[str]:
+
+    def _generate_recommendations(self, metrics: TaskMetrics) -> list[str]:
         """Генерирует рекомендации по улучшению выполнения задачи."""
         recommendations = []
-        
+
         if not metrics.success:
             recommendations.append(f"Исправить ошибку: {metrics.error_message}")
-            
+
         if metrics.cpu_usage > 80:
             recommendations.append("Оптимизировать использование CPU")
-            
+
         if metrics.memory_usage > 80:
             recommendations.append("Оптимизировать использование памяти")
-            
+
         if metrics.execution_time > 300:  # 5 минут
             recommendations.append("Рассмотреть возможность оптимизации времени выполнения")
-            
+
         return recommendations
-    
-    def _identify_patterns(self, metrics: TaskMetrics) -> List[str]:
+
+    def _identify_patterns(self, metrics: TaskMetrics) -> list[str]:
         """Выявляет паттерны в выполнении задачи."""
         patterns = []
-        
+
         # Анализ похожих задач
         similar_tasks = [
-            m for m in self.metrics_history 
+            m for m in self.metrics_history
             if m.task_type == metrics.task_type and m.task_id != metrics.task_id
         ]
-        
+
         if similar_tasks:
             avg_execution_time = sum(t.execution_time for t in similar_tasks) / len(similar_tasks)
             if metrics.execution_time > avg_execution_time * 1.5:
                 patterns.append("Время выполнения значительно выше среднего")
             elif metrics.execution_time < avg_execution_time * 0.5:
                 patterns.append("Время выполнения значительно ниже среднего")
-                
+
         return patterns
-    
-    def get_task_statistics(self) -> Dict:
+
+    def get_task_statistics(self) -> dict:
         """Возвращает общую статистику по всем задачам."""
         if not self.metrics_history:
             return {}
-            
+
         total_tasks = len(self.metrics_history)
         successful_tasks = sum(1 for m in self.metrics_history if m.success)
-        
+
         return {
             "total_tasks": total_tasks,
             "successful_tasks": successful_tasks,
@@ -184,7 +184,7 @@ class TaskAnalyzer:
             "average_cpu_usage": sum(m.cpu_usage for m in self.metrics_history) / total_tasks,
             "average_memory_usage": sum(m.memory_usage for m in self.metrics_history) / total_tasks
         }
-    
+
     def export_analysis(self, filepath: str) -> None:
         """Экспорт анализа в JSON файл."""
         data = {
@@ -193,4 +193,4 @@ class TaskAnalyzer:
         }
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info(f"Analysis exported to {filepath}") 
+        logger.info(f"Analysis exported to {filepath}")

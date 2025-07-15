@@ -1,21 +1,18 @@
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timedelta
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from langchain_api.services.security import AccessLevel, TaskCategory
+from langchain_api.services.task_executor import Task, TaskPriority, TaskStatus
 from langchain_api.telegram_bot.handlers.task_commands import (
+    task_analyze,
+    task_cancel,
+    task_create,
     task_list,
     task_status,
-    task_analyze,
-    task_create,
-    task_cancel
 )
-from langchain_api.services.task_executor import Task, TaskStatus, TaskPriority
-from langchain_api.services.security import TaskCategory, AccessLevel
+
 
 @pytest.mark.asyncio
 class TestTaskCommands:
@@ -162,4 +159,4 @@ class TestTaskCommands:
         self.update.message.reply_text.assert_called_once_with("❌ Не удалось отменить задачу task1")
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

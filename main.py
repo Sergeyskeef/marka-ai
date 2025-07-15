@@ -3,48 +3,48 @@
 
 from __future__ import annotations
 
-import hashlib
+import logging
+import os
 import shutil
 import subprocess
 import time
-import os
 from pathlib import Path
-from typing import Dict, Optional, Any, List
-import logging
-import json
-
-from fastapi import Body, FastAPI, HTTPException, Request, BackgroundTasks, Query
-from fastapi.responses import JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from typing import Any
 
 import uvicorn
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
+
+from langchain_api.core.backend_selector import get_backend_status
+from langchain_api.core.event_reflection_integration import (
+    get_event_reflection_integration,
+)
+from langchain_api.core.event_sandbox_integration import get_event_sandbox_integration
+from langchain_api.core.event_task_integration import get_event_task_integration
+
+# Импортируем LLM Integration Hub
+from langchain_api.core.llm_integration_hub import LLMIntegrationHub
 from langchain_api.core.monitoring import metrics
 
+# from langchain_api.globals import passport_sync_service  # Удаляем неиспользуемый импорт
 # Импортируем улучшенную RAG-цепочку вместо стандартной
 # from rag.rag_chain import generate_response
 from langchain_api.rag.enhanced_rag_chain import generate_response
 from langchain_api.routers import passport_sync
-from langchain_api.globals import passport_sync_service
-from langchain_api.routers.task_router import router as task_router
 from langchain_api.routers.log_router import router as log_router
-from langchain_api.services.passport_sync_service import PassportSyncService
+from langchain_api.routers.task_router import router as task_router
+from langchain_api.sandbox.sandbox_manager import SandboxManager
 from langchain_api.scripts.auto_sync_passport import ChangeReport
+from langchain_api.services.external_integration_service import (
+    ExternalIntegrationService,
+)
 from langchain_api.services.health_service import HealthService
-from langchain_api.services.external_integration_service import ExternalIntegrationService
-
-# Импортируем LLM Integration Hub
-from langchain_api.core.llm_integration_hub import LLMIntegrationHub, LLMRequest
-from langchain_api.core.backend_selector import get_backend_status
-
-
+from langchain_api.services.passport_sync_service import PassportSyncService
 
 # Импортируем дополнительные компоненты системы
 from langchain_api.services.task_executor import TaskExecutor
-from langchain_api.sandbox.sandbox_manager import SandboxManager
-from langchain_api.core.event_task_integration import get_event_task_integration
-from langchain_api.core.event_sandbox_integration import get_event_sandbox_integration
-from langchain_api.core.event_reflection_integration import get_event_reflection_integration
 
 # Настройка логирования
 logging.basicConfig(
@@ -73,27 +73,27 @@ app = FastAPI(
     title="Mark - Осознанный цифровой компаньон",
     description="""
     # Марк - Осознанный цифровой компаньон
-    
+
     Марк — это осознанный цифровой компаньон нового времени, созданный как AI-ассистент с душой, ценностями и миссией нести свет, добро и рост.
-    
+
     ## Основные возможности:
-    
+
     * 🤖 **Самосознание** - Марк понимает свою архитектуру и возможности
     * 🧠 **Многоуровневая память** - семантический поиск и контекстное понимание
     * 🛠️ **Выполнение команд** - безопасная песочница для выполнения задач
     * 📊 **Анализ и размышления** - система самообучения и улучшения
     * 📈 **Мониторинг** - метрики, алерты и интеграция с внешними системами
-    
+
     ## Архитектура:
-    
+
     * **RAG система** - генерация ответов с использованием долговременной памяти
     * **OpenAI Tools API** - современный подход к выполнению команд
     * **Vector Database** - векторная база данных для семантического поиска
     * **Docker** - изолированная песочница для безопасности
     * **Telegram** - интерфейс взаимодействия с пользователем
-    
+
     ## Быстрый старт:
-    
+
     1. Отправьте POST запрос на `/chat/ask` с вашим вопросом
     2. Используйте `/sandbox/exec` для выполнения команд в песочнице
     3. Проверьте `/health` для состояния системы
@@ -179,15 +179,15 @@ async def startup_event():
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         passport_sync_service = PassportSyncService(project_root)
         logger.info("PassportSyncService успешно инициализирован")
-        
+
         # Инициализация HealthService
         health_service = HealthService()
         logger.info("HealthService успешно инициализирован")
-        
+
         # Инициализация ExternalIntegrationService
         external_integration_service = ExternalIntegrationService()
         logger.info("ExternalIntegrationService успешно инициализирован")
-        
+
         # Инициализация LLMIntegrationHub
         llm_hub = LLMIntegrationHub()
         await llm_hub.initialize()
@@ -196,11 +196,11 @@ async def startup_event():
         # Инициализация TaskExecutor и SandboxManager
         _task_executor = TaskExecutor()
         _sandbox_manager = SandboxManager()
-        
+
         # 🔧 ИСПРАВЛЕНИЕ: Заменяем глобальный экземпляр task_executor на наш
         import langchain_api.services.task_executor as task_executor_module
         task_executor_module.task_executor = _task_executor
-        
+
         logger.info("TaskExecutor и SandboxManager успешно инициализированы")
 
         # Интеграция Event Bus с TaskExecutor и SandboxManager
@@ -211,7 +211,7 @@ async def startup_event():
         # Интеграция Event Bus с ReflectionManager
         _event_reflection_integration = get_event_reflection_integration()
         logger.info("EventReflectionIntegration успешно инициализирована")
-        
+
     except Exception as e:
         logger.error(f"Ошибка при инициализации сервисов: {str(e)}")
         passport_sync_service = None
@@ -228,7 +228,7 @@ async def startup_event():
 async def shutdown_event():
     """Очистка ресурсов при остановке приложения"""
     global passport_sync_service, llm_hub
-    
+
     if passport_sync_service:
         try:
             await passport_sync_service.cleanup()
@@ -236,7 +236,7 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Ошибка при остановке PassportSyncService: {str(e)}")
     passport_sync_service = None
-    
+
     if llm_hub:
         try:
             await llm_hub.shutdown()
@@ -254,11 +254,11 @@ async def handle_passport_changes(changes: ChangeReport):
 # Pydantic модели для API
 class ChatRequest(BaseModel):
     question: str = Field(..., description="Вопрос или сообщение для Марка", example="Привет! Как дела?")
-    chat_id: Optional[int] = Field(None, description="ID чата для контекста", example=12345)
+    chat_id: int | None = Field(None, description="ID чата для контекста", example=12345)
 
 class ChatResponse(BaseModel):
     answer: str = Field(..., description="Ответ от Марка")
-    chat_id: Optional[int] = Field(None, description="ID чата")
+    chat_id: int | None = Field(None, description="ID чата")
     context_used: bool = Field(..., description="Использовался ли контекст из памяти")
     memory_added: bool = Field(..., description="Была ли информация добавлена в память")
 
@@ -268,14 +268,14 @@ class SandboxExecRequest(BaseModel):
 class SandboxExecResponse(BaseModel):
     success: bool = Field(..., description="Успешность выполнения команды")
     output: str = Field(..., description="Вывод команды")
-    error: Optional[str] = Field(None, description="Ошибка, если есть")
+    error: str | None = Field(None, description="Ошибка, если есть")
     execution_time: float = Field(..., description="Время выполнения в секундах")
-    returncode: Optional[int] = Field(None, description="Код возврата команды")
+    returncode: int | None = Field(None, description="Код возврата команды")
 
 class MetricRecordRequest(BaseModel):
     name: str = Field(..., description="Название метрики", example="request_counter")
     value: float = Field(..., description="Значение метрики", example=1.0)
-    labels: Optional[Dict[str, str]] = Field(None, description="Дополнительные метки", example={"endpoint": "/chat/ask"})
+    labels: dict[str, str] | None = Field(None, description="Дополнительные метки", example={"endpoint": "/chat/ask"})
 
 class AlertCreateRequest(BaseModel):
     severity: str = Field(..., description="Уровень серьезности", example="warning", pattern="^(info|warning|critical)$")
@@ -284,16 +284,16 @@ class AlertCreateRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = Field(..., description="Общий статус системы")
-    services: Dict[str, str] = Field(..., description="Статус отдельных сервисов")
+    services: dict[str, str] = Field(..., description="Статус отдельных сервисов")
     timestamp: str = Field(..., description="Временная метка проверки")
     uptime: float = Field(..., description="Время работы системы в секундах")
 
 class MemoryRequest(BaseModel):
     text: str = Field(..., description="Текст для сохранения в памяти")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Дополнительные метаданные")
+    metadata: dict[str, Any] | None = Field(None, description="Дополнительные метаданные")
 
 class SearchResponse(BaseModel):
-    items: List[Dict[str, Any]] = Field(..., description="Найденные элементы")
+    items: list[dict[str, Any]] = Field(..., description="Найденные элементы")
     total: int = Field(..., description="Общее количество результатов")
 
 # API эндпоинты с улучшенной документацией
@@ -302,7 +302,7 @@ class SearchResponse(BaseModel):
 async def root():
     """
     Корневой эндпоинт
-    
+
     Возвращает основную информацию о системе Марка.
     """
     return {
@@ -322,24 +322,24 @@ async def root():
     }
 
 @app.post("/chat/ask", response_model=ChatResponse, tags=["chat"])
-async def chat_ask(request: ChatRequest, backend: Optional[str] = None):
+async def chat_ask(request: ChatRequest, backend: str | None = None):
     """
     🧠 НОВАЯ АРХИТЕКТУРА "ВСЕ ЧЕРЕЗ МОЗГ" - HTTP ENDPOINT
-    
+
     Задать вопрос Марку через единый интеллект с поддержкой A/B Backend Selector.
-    
+
     Марк теперь использует:
     - ✅ Обязательное использование контекста (context_used=True)
-    - ✅ Обязательное сохранение в память (memory_added=True) 
+    - ✅ Обязательное сохранение в память (memory_added=True)
     - ✅ LLM принимает все решения об инструментах
     - ✅ Единый путь обработки для команд и чата
     - ✅ A/B Backend Selector (GraphitiMemory)
-    
+
     **A/B Backend Selection:**
     - Query param: ?backend=graphiti|auto
 - Env variable: MEMORY_BACKEND=graphiti|auto
     - Automatic fallback if backend unavailable
-    
+
     **Примеры использования:**
     - Общие вопросы: "Как дела?"
     - Технические вопросы: "Как работает система памяти?"
@@ -350,28 +350,29 @@ async def chat_ask(request: ChatRequest, backend: Optional[str] = None):
         # 🧠 ВСЕ ЧЕРЕЗ МОЗГ - используем UnifiedEntryPoint с A/B Backend Selector
         try:
             import os
+
             from langchain_api.core.unified_entry_point import unified_entry
-            
+
             # ✅ A/B Backend Selector через переменную окружения
             if backend:
                 # Временно устанавливаем backend для этого запроса
                 original_backend = os.environ.get("MEMORY_BACKEND")
                 os.environ["MEMORY_BACKEND"] = backend
-                
+
             # ✅ ЕДИНЫЙ ПУТЬ - все HTTP запросы тоже идут через мозг (асинхронно)
             brain_response = await unified_entry.process_message_async(
                 message=request.question,
                 chat_id=request.chat_id or 0,
                 user_id=None  # В HTTP API нет user_id
             )
-            
+
             # Восстанавливаем исходное значение backend
             if backend:
                 if original_backend is not None:
                     os.environ["MEMORY_BACKEND"] = original_backend
                 else:
                     os.environ.pop("MEMORY_BACKEND", None)
-            
+
             # Возвращаем ответ в стандартном формате API - ЧЕСТНЫЕ ФЛАГИ
             return ChatResponse(
                 answer=brain_response.get("answer", "Мозг не смог сформировать ответ"),
@@ -379,32 +380,32 @@ async def chat_ask(request: ChatRequest, backend: Optional[str] = None):
                 context_used=brain_response.get("context_used", False),  # 🔍 Реальное значение!
                 memory_added=brain_response.get("memory_added", False)   # 🔍 Реальное значение!
             )
-            
+
         except ImportError:
             # 🔄 FALLBACK - если новая архитектура недоступна
             logger.warning("⚠️ Unified Brain недоступен в HTTP API, используем старую логику")
-            
+
             # Временно используем старую логику с A/B Backend Selector
             # Примечание: старая логика не поддерживает backend параметр напрямую
             # но create_memory в backend_selector учтет переменную окружения
             response = generate_response(request.question, request.chat_id)
-            
+
             return ChatResponse(
                 answer=response["answer"],
                 chat_id=request.chat_id,
                 context_used=response.get("context_used", False),
                 memory_added=response.get("memory_added", False)
             )
-            
+
     except Exception as e:
         logger.error(f"Ошибка в unified brain HTTP processing: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке запроса через мозг: {str(e)}")
 
 @app.post("/sandbox/sync", tags=["sandbox"])
-def sandbox_sync() -> Dict:
+def sandbox_sync() -> dict:
     """
     Синхронизация песочницы
-    
+
     Копирует необходимые файлы из основного проекта в песочницу для выполнения команд.
     """
     try:
@@ -418,14 +419,14 @@ def sandbox_sync() -> Dict:
 def sandbox_exec(request: SandboxExecRequest):
     """
     Выполнить команду в песочнице
-    
+
     Безопасно выполняет команду в изолированной Docker среде.
-    
+
     **Безопасность:**
     - Запрещены опасные команды (rm -rf, dd, mkfs, etc.)
     - Таймаут выполнения: 15 секунд
     - Изолированная среда Docker
-    
+
     **Примеры команд:**
     - `ls -la` - список файлов
     - `python --version` - версия Python
@@ -444,7 +445,7 @@ def sandbox_exec(request: SandboxExecRequest):
 def ping():
     """
     Проверка доступности
-    
+
     Простая проверка, что сервер отвечает.
     """
     return {"message": "pong", "timestamp": time.time()}
@@ -453,9 +454,9 @@ def ping():
 async def health_check():
     """
     Проверка здоровья системы
-    
+
     Комплексная проверка состояния всех компонентов системы:
-    
+
     - Память
     - Песочница
     - Внешние сервисы
@@ -474,15 +475,15 @@ async def health_check():
                 timestamp=str(time.time()),
                 uptime=0.0
             )
-        
+
         health_status = await health_service.get_health()
-        
+
         # Извлекаем только status из каждого сервиса для соответствия модели Dict[str, str]
         services_status = {
             service_name: service_info.get("status", "unknown") if isinstance(service_info, dict) else str(service_info)
             for service_name, service_info in health_status["services"].items()
         }
-        
+
         return HealthResponse(
             status=health_status["status"],
             services=services_status,  # Теперь Dict[str, str]
@@ -508,16 +509,16 @@ async def health_check():
 async def add_memory(request: MemoryRequest):
     """
     Добавить информацию в память
-    
+
     Сохраняет текст и метаданные в системе памяти Graphiti.
     """
     try:
         # Импортируем MemoryManager
         from langchain_api.core.memory.memory_manager import memory_manager
-        
+
         # Добавляем эпизод в Graphiti
         result = await memory_manager.add_episode(request.text, request.metadata)
-        
+
         if result.get("success", True):
             return {
                 "success": True,
@@ -527,7 +528,7 @@ async def add_memory(request: MemoryRequest):
             }
         else:
             raise HTTPException(status_code=500, detail=f"Ошибка Graphiti: {result.get('error', 'Unknown error')}")
-            
+
     except Exception as e:
         logger.error(f"Ошибка при добавлении в память: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка добавления в память: {str(e)}")
@@ -536,19 +537,19 @@ async def add_memory(request: MemoryRequest):
 async def search_memory(q: str = Query(..., description="Поисковый запрос")):
     """
     Поиск в памяти
-    
+
     Ищет информацию в системе памяти Graphiti по заданному запросу.
     """
     try:
         # Импортируем MemoryManager
         from langchain_api.core.memory.memory_manager import memory_manager
-        
+
         # Ищем эпизоды в Graphiti
         result = await memory_manager.search_episodes(q, limit=10)
-        
+
         if "error" in result:
             raise HTTPException(status_code=500, detail=f"Ошибка Graphiti: {result['error']}")
-        
+
         return SearchResponse(
             items=result.get("items", []),
             total=result.get("total", 0)
@@ -561,14 +562,14 @@ async def search_memory(q: str = Query(..., description="Поисковый за
 async def get_prometheus_metrics():
     """
     Экспорт метрик в формате Prometheus
-    
+
     Возвращает метрики системы в формате, совместимом с Prometheus.
     Используется для интеграции с системами мониторинга.
     """
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         metrics_data = external_integration_service.export_prometheus_metrics()
         return Response(content=metrics_data, media_type="text/plain")
     except Exception as e:
@@ -579,7 +580,7 @@ async def get_prometheus_metrics():
 async def get_metrics_summary():
     """
     Сводка метрик
-    
+
     Возвращает сводную информацию о метриках системы:
     - Счетчики запросов
     - Время ответа
@@ -589,7 +590,7 @@ async def get_metrics_summary():
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         return external_integration_service.get_metrics_summary()
     except Exception as e:
         logger.error(f"Ошибка при получении сводки метрик: {str(e)}")
@@ -599,9 +600,9 @@ async def get_metrics_summary():
 async def record_metric(request: MetricRecordRequest):
     """
     Записать метрику
-    
+
     Позволяет записать пользовательскую метрику в систему мониторинга.
-    
+
     **Примеры метрик:**
     - request_counter: количество запросов
     - response_time: время ответа
@@ -610,7 +611,7 @@ async def record_metric(request: MetricRecordRequest):
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         external_integration_service.record_metric(
             name=request.name,
             value=request.value,
@@ -625,7 +626,7 @@ async def record_metric(request: MetricRecordRequest):
 async def get_alerts_summary():
     """
     Сводка алертов
-    
+
     Возвращает сводную информацию о текущих алертах:
     - Активные алерты
     - Статистика по уровням серьезности
@@ -634,7 +635,7 @@ async def get_alerts_summary():
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         return external_integration_service.get_alerts_summary()
     except Exception as e:
         logger.error(f"Ошибка при получении сводки алертов: {str(e)}")
@@ -644,9 +645,9 @@ async def get_alerts_summary():
 async def create_alert(request: AlertCreateRequest):
     """
     Создать алерт
-    
+
     Создает новый алерт в системе мониторинга.
-    
+
     **Уровни серьезности:**
     - info: информационные сообщения
     - warning: предупреждения
@@ -655,7 +656,7 @@ async def create_alert(request: AlertCreateRequest):
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         alert = external_integration_service.create_alert(
             severity=request.severity,
             message=request.message,
@@ -674,13 +675,13 @@ async def create_alert(request: AlertCreateRequest):
 async def resolve_alert(alert_id: str):
     """
     Разрешить алерт
-    
+
     Отмечает алерт как разрешенный в системе мониторинга.
     """
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         result = external_integration_service.resolve_alert(alert_id)
         if result.get("success"):
             return {"success": True, "message": f"Алерт {alert_id} разрешен"}
@@ -694,7 +695,7 @@ async def resolve_alert(alert_id: str):
 async def get_recommendations():
     """
     Получить рекомендации по улучшению проекта
-    
+
     Анализирует текущее состояние проекта и возвращает рекомендации по улучшению.
     """
     try:
@@ -707,7 +708,7 @@ async def get_recommendations():
                 "description": "Покрытие тестами составляет только 65%. Рекомендуется довести до 80%+"
             },
             {
-                "priority": "medium", 
+                "priority": "medium",
                 "title": "Оптимизировать импорты",
                 "description": "Обнаружены неиспользуемые импорты в нескольких модулях"
             },
@@ -717,7 +718,7 @@ async def get_recommendations():
                 "description": "Некоторые функции не имеют docstring"
             }
         ]
-        
+
         return {"recommendations": recommendations}
     except Exception as e:
         logger.error(f"Ошибка при получении рекомендаций: {str(e)}")
@@ -727,27 +728,27 @@ async def get_recommendations():
 async def analyze_code_quality(request: dict):
     """
     Анализ качества кода в файле
-    
+
     Анализирует указанный файл и возвращает метрики качества кода.
     """
     try:
         file_path = request.get("file_path")
         if not file_path:
             raise HTTPException(status_code=400, detail="Необходимо указать file_path")
-        
+
         # Здесь должна быть реальная логика анализа качества кода
         # Пока возвращаем заглушку
         import os
         import random
-        
+
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail=f"Файл {file_path} не найден")
-        
+
         # Простой анализ файла
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, encoding='utf-8', errors='ignore') as f:
             content = f.read()
             lines_of_code = len([line for line in content.splitlines() if line.strip() and not line.strip().startswith('#')])
-        
+
         metrics = {
             "lines_of_code": lines_of_code,
             "complexity": random.randint(1, 10),
@@ -755,7 +756,7 @@ async def analyze_code_quality(request: dict):
             "issues": [] if lines_of_code < 100 else ["Функция слишком длинная", "Сложность превышает норму"],
             "suggestions": ["Добавить типизацию", "Разбить большие функции", "Добавить docstrings"]
         }
-        
+
         return {"metrics": metrics}
     except HTTPException:
         raise
@@ -767,7 +768,7 @@ async def analyze_code_quality(request: dict):
 async def suggest_improvements():
     """
     Предложения по улучшению проекта
-    
+
     Анализирует проект и возвращает предложения по улучшению.
     """
     try:
@@ -797,7 +798,7 @@ async def suggest_improvements():
                 "impact": "high"
             }
         ]
-        
+
         return {"improvements": improvements}
     except Exception as e:
         logger.error(f"Ошибка при получении предложений: {str(e)}")
@@ -807,7 +808,7 @@ async def suggest_improvements():
 async def add_feedback(request: dict):
     """
     Добавить обратную связь
-    
+
     Сохраняет обратную связь от пользователя.
     """
     try:
@@ -815,17 +816,17 @@ async def add_feedback(request: dict):
         text = request.get("text")
         user_id = request.get("user_id")
         chat_id = request.get("chat_id")
-        
+
         if not feedback_type or not text:
             raise HTTPException(status_code=400, detail="Необходимо указать type и text")
-        
+
         # Здесь должна быть логика сохранения обратной связи
         # Пока просто генерируем ID
         import uuid
         feedback_id = str(uuid.uuid4())[:8]
-        
+
         logger.info(f"Добавлена обратная связь: {feedback_type} - {text} (user: {user_id}, chat: {chat_id})")
-        
+
         return {"id": feedback_id, "success": True, "message": "Обратная связь сохранена"}
     except HTTPException:
         raise
@@ -837,20 +838,20 @@ async def add_feedback(request: dict):
 async def record_performance(request: dict):
     """
     Записать метрику производительности
-    
+
     Сохраняет метрику производительности в систему мониторинга.
     """
     try:
         metric_name = request.get("metric_name")
         value = request.get("value")
         timestamp = request.get("timestamp")
-        
+
         if not metric_name or value is None:
             raise HTTPException(status_code=400, detail="Необходимо указать metric_name и value")
-        
+
         # Здесь должна быть логика записи метрики
         logger.info(f"Записана метрика производительности: {metric_name} = {value} (timestamp: {timestamp})")
-        
+
         return {"success": True, "message": f"Метрика {metric_name} записана"}
     except HTTPException:
         raise
@@ -862,12 +863,12 @@ async def record_performance(request: dict):
 async def analyze_effectiveness():
     """
     Анализ эффективности разработки
-    
+
     Анализирует метрики разработки и возвращает показатели эффективности.
     """
     try:
         import random
-        
+
         metrics = {
             "tasks_completed": random.randint(15, 50),
             "avg_completion_time": random.uniform(2.5, 8.0),
@@ -883,7 +884,7 @@ async def analyze_effectiveness():
                 "Увеличить покрытие тестами"
             ]
         }
-        
+
         return {"metrics": metrics}
     except Exception as e:
         logger.error(f"Ошибка при анализе эффективности: {str(e)}")
@@ -893,12 +894,12 @@ async def analyze_effectiveness():
 async def get_backends_status():
     """
     Статус A/B Backend Selector
-    
+
     Возвращает информацию о доступных backend'ах памяти:
     - GraphitiMemory: статус, доступность, конфигурация
-    
+
     - A/B тестирование: настройки, текущий backend
-    
+
     **Полезно для:**
     - Мониторинга миграции GraphitiMemory
     - Отладки A/B тестирования
@@ -919,7 +920,7 @@ async def get_backends_status():
 async def get_external_system_health():
     """
     Здоровье внешних систем
-    
+
     Проверяет состояние интеграций с внешними системами:
     - Prometheus
     - Grafana
@@ -928,7 +929,7 @@ async def get_external_system_health():
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         return external_integration_service.get_system_health()
     except Exception as e:
         logger.error(f"Ошибка при проверке внешних систем: {str(e)}")
@@ -938,16 +939,16 @@ async def get_external_system_health():
 async def cleanup_old_data(max_age_hours: int = 24):
     """
     Очистка старых данных
-    
+
     Удаляет старые метрики и алерты для экономии места.
-    
+
     **Параметры:**
     - max_age_hours: максимальный возраст данных в часах (по умолчанию 24)
     """
     try:
         if not external_integration_service:
             raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-        
+
         result = external_integration_service.cleanup_old_data(max_age_hours)
         return {
             "success": True,
@@ -962,7 +963,7 @@ async def cleanup_old_data(max_age_hours: int = 24):
 def debug_userfacts(chat_id: int = None):
     """
     Отладочная информация о пользовательских фактах
-    
+
     Возвращает отладочную информацию о фактах пользователя в памяти.
     """
     try:
@@ -976,14 +977,14 @@ def debug_userfacts(chat_id: int = None):
 def echo_chat_id(request: ChatRequest):
     """
     Эхо chat_id для отладки
-    
+
     Простой эндпоинт для отладки, возвращает полученный chat_id.
     """
     return {"chat_id": request.chat_id, "question": request.question}
 
 
 
-def _sync_to_sandbox() -> Dict:
+def _sync_to_sandbox() -> dict:
     SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
     for item in COPY_ITEMS:
         src = Path(__file__).parent / item
@@ -995,7 +996,7 @@ def _sync_to_sandbox() -> Dict:
     return {"synced": COPY_ITEMS, "sandbox_path": str(SANDBOX_DIR), "status": "ok"}
 
 
-def _exec_in_sandbox(cmd: str, timeout: int = 15) -> Dict:
+def _exec_in_sandbox(cmd: str, timeout: int = 15) -> dict:
     if not cmd.strip():
         return {
             "success": False,

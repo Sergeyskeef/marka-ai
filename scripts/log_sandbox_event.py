@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import datetime
+import sys
 
 LOGFILE = "sandbox_experiments.log"
 
@@ -23,4 +23,4 @@ if __name__ == "__main__":
     result = sys.argv[3] if len(sys.argv) > 3 else None
     author = sys.argv[4] if len(sys.argv) > 4 else None
     log_event(event_type, description, result, author)
-    print(f"✅ Событие '{event_type}' зафиксировано в {LOGFILE}") 
+    print(f"✅ Событие '{event_type}' зафиксировано в {LOGFILE}")

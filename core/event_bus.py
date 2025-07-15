@@ -4,14 +4,14 @@ Event Bus System - центральная система управления с
 Обеспечивает автоматические триггеры и интеграцию между компонентами системы.
 """
 
-import asyncio
 import json
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
-from dataclasses import dataclass, asdict
 from pathlib import Path
+from typing import Any
 
 from langchain_api.core.command_monitoring import CommandEvent, CommandMonitoringSystem
 
@@ -34,10 +34,10 @@ class Event:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+    data: dict[str, Any]
+    metadata: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Преобразует событие в словарь для сериализации"""
         return {
             "event_type": self.event_type.value,
@@ -53,9 +53,9 @@ class CommandEventWrapper:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     command_event: CommandEvent
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         self.event_type = EventType.COMMAND
@@ -78,11 +78,11 @@ class TaskEvent:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     task_id: str
     task_type: str
     status: str  # created, started, completed, failed
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         self.data.update({
@@ -97,11 +97,11 @@ class ErrorEvent:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     error_type: str
     error_message: str
-    stack_trace: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    stack_trace: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         self.event_type = EventType.ERROR
@@ -117,10 +117,10 @@ class SuccessEvent:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     operation: str
     result: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         self.event_type = EventType.SUCCESS
@@ -135,11 +135,11 @@ class SystemEvent:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     system_component: str
     action: str
-    details: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    details: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         self.event_type = EventType.SYSTEM
@@ -152,24 +152,24 @@ class SystemEvent:
 
 class EventBus:
     """Центральная система управления событиями"""
-    
+
     def __init__(self):
-        self._subscribers: Dict[EventType, List[Callable]] = {
+        self._subscribers: dict[EventType, list[Callable]] = {
             event_type: [] for event_type in EventType
         }
-        self._event_history: List[Event] = []
+        self._event_history: list[Event] = []
         self._command_monitoring = CommandMonitoringSystem()
         self._log_file = Path("sandbox/event_bus.log")
         self._log_file.parent.mkdir(exist_ok=True)
-        
+
         # Автоматическая подписка на события CommandMonitoring
         self._setup_command_monitoring_integration()
-    
+
     def _setup_command_monitoring_integration(self):
         """Настраивает интеграцию с CommandMonitoringSystem"""
         # Перехватываем события команд для автоматической обработки
         original_log_command = self._command_monitoring.log_command
-        
+
         def enhanced_log_command(*args, **kwargs):
             event = original_log_command(*args, **kwargs)
             # Создаем событие Event Bus из CommandEvent
@@ -182,30 +182,30 @@ class EventBus:
             )
             self.publish(event_wrapper)
             return event
-        
+
         self._command_monitoring.log_command = enhanced_log_command
-    
+
     def subscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
         """Подписывает callback на события определенного типа"""
         if event_type not in self._subscribers:
             self._subscribers[event_type] = []
         self._subscribers[event_type].append(callback)
         logging.info(f"Подписка на события {event_type.value}: {callback.__name__}")
-    
+
     def unsubscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
         """Отписывает callback от событий определенного типа"""
         if event_type in self._subscribers and callback in self._subscribers[event_type]:
             self._subscribers[event_type].remove(callback)
             logging.info(f"Отписка от событий {event_type.value}: {callback.__name__}")
-    
+
     def publish(self, event: Event) -> None:
         """Публикует событие в Event Bus"""
         # Добавляем в историю
         self._event_history.append(event)
-        
+
         # Логируем событие
         self._log_event(event)
-        
+
         # Уведомляем подписчиков
         if event.event_type in self._subscribers:
             for callback in self._subscribers[event.event_type]:
@@ -213,7 +213,7 @@ class EventBus:
                     callback(event)
                 except Exception as e:
                     logging.error(f"Ошибка в callback {callback.__name__}: {e}")
-        
+
         # Уведомляем подписчиков на все события
         if EventType.SYSTEM in self._subscribers:
             for callback in self._subscribers[EventType.SYSTEM]:
@@ -221,7 +221,7 @@ class EventBus:
                     callback(event)
                 except Exception as e:
                     logging.error(f"Ошибка в системном callback {callback.__name__}: {e}")
-    
+
     def _log_event(self, event: Event) -> None:
         """Логирует событие в файл"""
         try:
@@ -232,31 +232,31 @@ class EventBus:
                 "data": event.data,
                 "metadata": event.metadata
             }
-            
+
             with open(self._log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-                
+
         except Exception as e:
             logging.error(f"Ошибка при логировании события: {e}")
-    
-    def get_events_by_type(self, event_type: EventType, limit: int = 100) -> List[Event]:
+
+    def get_events_by_type(self, event_type: EventType, limit: int = 100) -> list[Event]:
         """Возвращает события определенного типа"""
         return [event for event in self._event_history if event.event_type == event_type][-limit:]
-    
-    def get_recent_events(self, limit: int = 100) -> List[Event]:
+
+    def get_recent_events(self, limit: int = 100) -> list[Event]:
         """Возвращает последние события"""
         return self._event_history[-limit:]
-    
-    def get_events_by_source(self, source: str, limit: int = 100) -> List[Event]:
+
+    def get_events_by_source(self, source: str, limit: int = 100) -> list[Event]:
         """Возвращает события от определенного источника"""
         return [event for event in self._event_history if event.source == source][-limit:]
-    
+
     def clear_history(self) -> None:
         """Очищает историю событий"""
         self._event_history.clear()
         logging.info("История событий очищена")
-    
-    def get_statistics(self) -> Dict[str, Any]:
+
+    def get_statistics(self) -> dict[str, Any]:
         """Возвращает статистику по событиям"""
         stats = {
             "total_events": len(self._event_history),
@@ -264,22 +264,22 @@ class EventBus:
             "events_by_source": {},
             "subscribers_count": {}
         }
-        
+
         # Подсчет по типам
         for event_type in EventType:
             count = len([e for e in self._event_history if e.event_type == event_type])
             stats["events_by_type"][event_type.value] = count
-        
+
         # Подсчет по источникам
-        sources = set(event.source for event in self._event_history)
+        sources = {event.source for event in self._event_history}
         for source in sources:
             count = len([e for e in self._event_history if e.source == source])
             stats["events_by_source"][source] = count
-        
+
         # Количество подписчиков
         for event_type in EventType:
             stats["subscribers_count"][event_type.value] = len(self._subscribers.get(event_type, []))
-        
+
         return stats
 
 
@@ -299,4 +299,4 @@ def subscribe_to_events(event_type: EventType, callback: Callable[[Event], None]
 
 def get_event_bus() -> EventBus:
     """Возвращает глобальный экземпляр Event Bus"""
-    return event_bus 
+    return event_bus

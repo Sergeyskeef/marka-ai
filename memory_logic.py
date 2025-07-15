@@ -1,5 +1,6 @@
 import time
 
+
 def memory_search_logic(mem_type: str, query: str, memory) -> str:
     if mem_type in ["experience", "memory", "insight", "persona", "userfacts", "chatgptmemory"]:
         search_method = getattr(memory.memory_manager.memory_registry.get(mem_type.capitalize()), "search", None)
@@ -63,4 +64,4 @@ def memory_analyze_logic(memory) -> str:
     except Exception as e:
         report.append(f"- Experience: ошибка анализа ({e})")
     report.append("\n(В будущем анализ будет глубже: поиск устаревших, неиспользуемых, неактуальных данных и оптимизация)")
-    return "\n".join(report) 
+    return "\n".join(report)

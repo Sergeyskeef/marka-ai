@@ -2,10 +2,13 @@
 Тесты для модуля task_analyzer.py.
 """
 
-import pytest
-from datetime import datetime, timedelta
-from utils.task_analyzer import TaskAnalyzer, TaskMetrics, TaskAnalysis
 import json
+from datetime import datetime, timedelta
+
+import pytest
+
+from utils.task_analyzer import TaskAnalysis, TaskAnalyzer, TaskMetrics
+
 
 @pytest.fixture
 def task_analyzer():
@@ -39,7 +42,7 @@ def test_analyze_task(task_analyzer, sample_metrics):
     """Тест анализа задачи."""
     task_analyzer.add_metrics(sample_metrics)
     analysis = task_analyzer.analyze_task("test_task_1")
-    
+
     assert isinstance(analysis, TaskAnalysis)
     assert analysis.task_id == "test_task_1"
     assert analysis.task_type == "development"
@@ -77,10 +80,10 @@ def test_generate_recommendations(task_analyzer):
         error_message=None,
         execution_time=60.0
     )
-    
+
     recommendations = task_analyzer._generate_recommendations(high_cpu_metrics)
     assert "Оптимизировать использование CPU" in recommendations
-    
+
     # Тест с ошибкой
     failed_metrics = TaskMetrics(
         task_id="failed_task",
@@ -93,7 +96,7 @@ def test_generate_recommendations(task_analyzer):
         error_message="Test error",
         execution_time=60.0
     )
-    
+
     recommendations = task_analyzer._generate_recommendations(failed_metrics)
     assert "Исправить ошибку: Test error" in recommendations
 
@@ -114,7 +117,7 @@ def test_identify_patterns(task_analyzer):
             execution_time=300.0
         )
         task_analyzer.add_metrics(metrics)
-    
+
     # Добавляем задачу с аномальным временем выполнения
     anomaly_metrics = TaskMetrics(
         task_id="anomaly_task",
@@ -128,7 +131,7 @@ def test_identify_patterns(task_analyzer):
         execution_time=600.0  # В два раза больше среднего
     )
     task_analyzer.add_metrics(anomaly_metrics)
-    
+
     patterns = task_analyzer._identify_patterns(anomaly_metrics)
     assert "Время выполнения значительно выше среднего" in patterns
 
@@ -136,7 +139,7 @@ def test_get_task_statistics(task_analyzer, sample_metrics):
     """Тест получения статистики."""
     task_analyzer.add_metrics(sample_metrics)
     stats = task_analyzer.get_task_statistics()
-    
+
     assert stats["total_tasks"] == 1
     assert stats["successful_tasks"] == 1
     assert stats["success_rate"] == 1.0
@@ -147,13 +150,13 @@ def test_get_task_statistics(task_analyzer, sample_metrics):
 def test_export_analysis(task_analyzer, sample_metrics, tmp_path):
     """Тест экспорта анализа."""
     task_analyzer.add_metrics(sample_metrics)
-    analysis = task_analyzer.analyze_task("test_task_1")
-    
+    task_analyzer.analyze_task("test_task_1")
+
     export_path = tmp_path / "analysis.json"
     task_analyzer.export_analysis(str(export_path))
-    
+
     assert export_path.exists()
-    with open(export_path, 'r', encoding='utf-8') as f:
+    with open(export_path, encoding='utf-8') as f:
         data = json.load(f)
         assert "task_metrics" in data
         assert "statistics" in data
@@ -170,4 +173,4 @@ def test_export_analysis(task_analyzer, sample_metrics, tmp_path):
         assert data["statistics"]["success_rate"] == 1.0
         assert data["statistics"]["average_execution_time"] == 300.0
         assert data["statistics"]["average_cpu_usage"] == 50.0
-        assert data["statistics"]["average_memory_usage"] == 30.0 
+        assert data["statistics"]["average_memory_usage"] == 30.0

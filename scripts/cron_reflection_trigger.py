@@ -5,10 +5,9 @@ Cron-trigger для автоматических размышлений Марк
 """
 
 import os
-import sys
-import json
 import subprocess
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime
 from pathlib import Path
 
 # Добавляем путь к проекту
@@ -25,13 +24,13 @@ def get_system_status() -> dict:
         'recent_commands': [],
         'system_health': 'unknown'
     }
-    
+
     try:
         # Подсчитываем количество размышлений
         reflection_manager = ReflectionManager()
         reflections = reflection_manager.list_reflections()
         status['reflections_count'] = len(reflections)
-        
+
         # Получаем последние размышления
         recent_reflections = reflections[:5] if reflections else []
         status['recent_reflections'] = [
@@ -42,7 +41,7 @@ def get_system_status() -> dict:
             }
             for r in recent_reflections
         ]
-        
+
         # Проверяем здоровье системы через Docker
         try:
             result = subprocess.run(
@@ -55,20 +54,20 @@ def get_system_status() -> dict:
                 status['system_health'] = 'error'
         except Exception:
             status['system_health'] = 'unknown'
-            
+
     except Exception as e:
         status['error'] = str(e)
-        
+
     return status
 
 
 def generate_periodic_reflection() -> str:
     """Генерирует периодическое размышление"""
     reflection_manager = ReflectionManager()
-    
+
     # Получаем статус системы
     status = get_system_status()
-    
+
     # Определяем тему размышления
     current_hour = datetime.now().hour
     if 6 <= current_hour < 12:
@@ -79,9 +78,9 @@ def generate_periodic_reflection() -> str:
         time_period = "вечер"
     else:
         time_period = "ночь"
-    
+
     topic = f"Периодическое размышление ({time_period})"
-    
+
     # Генерируем содержание
     content = f"""## Статус системы на {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
@@ -92,17 +91,17 @@ def generate_periodic_reflection() -> str:
 
 ### Последние размышления
 """
-    
+
     if status.get('recent_reflections'):
         for reflection in status['recent_reflections']:
             content += f"- **{reflection['topic']}** ({reflection['date']}) - {reflection['size']} символов\n"
     else:
         content += "- Нет предыдущих размышлений\n"
-    
+
     content += f"""
 ### Анализ текущего состояния
 
-Это автоматическое размышление создано системой cron-trigger каждые 6 часов. 
+Это автоматическое размышление создано системой cron-trigger каждые 6 часов.
 
 **Время:** {time_period}
 **Дата:** {datetime.now().strftime('%Y-%m-%d')}
@@ -124,7 +123,7 @@ def generate_periodic_reflection() -> str:
 
 Периодические размышления помогают поддерживать самосознание и отслеживать развитие системы. Это важная часть автономного функционирования.
 """
-    
+
     # Создаем размышление
     context = {
         'description': f'Автоматическое размышление каждые 6 часов ({time_period})',
@@ -132,26 +131,26 @@ def generate_periodic_reflection() -> str:
         'trigger_type': 'cron',
         'interval_hours': 6
     }
-    
+
     filepath = reflection_manager.create_reflection(
         topic=topic,
         content=content,
         reflection_type="automatic",
         context=context
     )
-    
+
     return filepath
 
 
 def main():
     """Основная функция"""
     print(f"🔄 Запуск cron-trigger для размышлений: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     try:
         # Генерируем периодическое размышление
         filepath = generate_periodic_reflection()
         print(f"✅ Периодическое размышление создано: {filepath}")
-        
+
         # Логируем событие
         try:
             subprocess.run([
@@ -160,13 +159,13 @@ def main():
             ], check=False, cwd="/app/langchain_api")
         except Exception as e:
             print(f"⚠️ Не удалось залогировать событие: {e}")
-        
+
         return 0
-        
+
     except Exception as e:
         print(f"❌ Ошибка при создании размышления: {e}")
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

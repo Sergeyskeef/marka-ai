@@ -1,12 +1,13 @@
 import uuid
 
+
 class MemoryManager:
     def create_snapshot(self, session_id, object_types, with_state=False, meta=None):
         """Создает снапшот для указанных типов объектов"""
         try:
             # Генерируем уникальный ID для снапшота
             snapshot_id = str(uuid.uuid4())
-            
+
             # Получаем текущее состояние объектов
             object_states = None
             if with_state:
@@ -32,7 +33,7 @@ class MemoryManager:
                                 "importance": obj.get("importance")
                             } for obj in objects]
                 object_states = states
-            
+
             # Создаем объект снапшота
             snapshot_data = {
                 "snapshot_id": snapshot_id,
@@ -42,12 +43,12 @@ class MemoryManager:
                 "meta": meta,
                 "created_at": self._get_rfc3339_timestamp()
             }
-            # ... existing code ...
+
+            # TODO: Сохранить snapshot_data в память
+            return snapshot_data
         except Exception as e:
             print(f"Error creating snapshot: {str(e)}")
             raise
-        finally:
-            # ... existing cleanup code ... 
 
     def _get_object_states(self, object_types):
         """Получает текущее состояние объектов указанных типов"""
@@ -58,7 +59,7 @@ class MemoryManager:
                 # Получаем все объекты данного типа
                 objects = self._get_all_objects(obj_type)
                 print(f"Found {len(objects)} objects of type {obj_type}")
-                
+
                 # Сохраняем их состояние
                 states[obj_type] = objects
                 print(f"State size for {obj_type}: {len(str(objects))} characters")
@@ -66,7 +67,7 @@ class MemoryManager:
             return states
         except Exception as e:
             print(f"Error getting object states: {str(e)}")
-            return {} 
+            return {}
 
     def _get_all_objects(self, object_type):
         """Получает все объекты указанного типа"""
@@ -77,7 +78,7 @@ class MemoryManager:
             if not collection:
                 print(f"Collection {object_type} not found")
                 return []
-            
+
             # Получаем все объекты
             objects = collection.get_all()
             print(f"Found {len(objects)} objects")
@@ -88,4 +89,9 @@ class MemoryManager:
             return objects
         except Exception as e:
             print(f"Error getting objects: {str(e)}")
-            return [] 
+            return []
+
+    def _get_rfc3339_timestamp(self):
+        """Возвращает текущее время в формате RFC3339"""
+        from datetime import datetime
+        return datetime.utcnow().isoformat() + "Z"

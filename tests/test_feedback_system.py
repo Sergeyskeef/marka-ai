@@ -1,8 +1,8 @@
+
 import pytest
-import json
-from pathlib import Path
-from datetime import datetime
+
 from core.feedback_system import FeedbackSystem
+
 
 @pytest.fixture
 def feedback_system(tmp_path):
@@ -27,7 +27,7 @@ def sample_metrics():
 def test_record_task_execution(feedback_system, sample_metrics):
     task_id = "test_task_1"
     feedback_system.record_task_execution(task_id, sample_metrics)
-    
+
     assert task_id in feedback_system.metrics
     assert len(feedback_system.metrics[task_id]) == 1
     assert 'timestamp' in feedback_system.metrics[task_id][0]
@@ -40,9 +40,9 @@ def test_analyze_task_performance(feedback_system, sample_metrics):
         metrics = sample_metrics.copy()
         metrics['success'] = i < 2  # Два успешных, один неуспешный
         feedback_system.record_task_execution(task_id, metrics)
-    
+
     analysis = feedback_system.analyze_task_performance(task_id)
-    
+
     assert analysis['total_executions'] == 3
     assert analysis['average_execution_time'] == 45.5
     assert analysis['success_rate'] == pytest.approx(2/3)
@@ -65,9 +65,9 @@ def test_get_optimization_suggestions(feedback_system):
         }
     }
     feedback_system.record_task_execution(task_id, metrics)
-    
+
     suggestions = feedback_system.get_optimization_suggestions(task_id)
-    
+
     assert len(suggestions) > 0
     assert any(s['type'] == 'execution_time' for s in suggestions)
     assert any(s['type'] == 'resource_usage' for s in suggestions)
@@ -88,9 +88,9 @@ def test_adjust_task_parameters(feedback_system):
         }
     }
     feedback_system.record_task_execution(task_id, metrics)
-    
+
     adjusted_params = feedback_system.adjust_task_parameters(task_id)
-    
+
     assert adjusted_params['timeout'] == 45  # 30 * 1.5
     assert adjusted_params['max_retries'] == 4
     assert adjusted_params['max_parallel_tasks'] == 3
@@ -98,12 +98,12 @@ def test_adjust_task_parameters(feedback_system):
 
 def test_empty_metrics(feedback_system):
     task_id = "non_existent_task"
-    
+
     analysis = feedback_system.analyze_task_performance(task_id)
     assert analysis == {}
-    
+
     suggestions = feedback_system.get_optimization_suggestions(task_id)
     assert suggestions == []
-    
+
     adjusted_params = feedback_system.adjust_task_parameters(task_id)
-    assert adjusted_params == {} 
+    assert adjusted_params == {}

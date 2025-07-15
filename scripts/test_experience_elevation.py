@@ -1,4 +1,5 @@
 import time
+
 from langchain_api.memory.memory_manager import MemoryManager
 
 mm = MemoryManager()
@@ -79,4 +80,4 @@ for e in all_exp:
 all_insights = insight.collection.query.fetch_objects(limit=10, return_properties=["insight", "source_ids", "timestamp"]).objects
 print("\n=== Insight (созданные) ===")
 for ins in all_insights:
-    print(getattr(ins, 'properties', ins)) 
+    print(getattr(ins, 'properties', ins))

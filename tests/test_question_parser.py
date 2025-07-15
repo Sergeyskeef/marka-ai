@@ -1,5 +1,7 @@
 import pytest
+
 from scripts.question_parser import QuestionParser
+
 
 @pytest.fixture
 def parser():
@@ -19,7 +21,7 @@ def test_basic_questions(parser):
         "Какие у тебя функции?",
         "Расскажи о своих возможностях"
     ]
-    
+
     for question in questions:
         result = parser.parse(question)
         assert result['type'] in ['capabilities', 'modes', 'general']
@@ -39,7 +41,7 @@ def test_specific_questions(parser):
         "Как ты обрабатываешь ошибки?": "error_handling",
         "Как ты обеспечиваешь безопасность?": "security"
     }
-    
+
     for question, expected_type in questions.items():
         result = parser.parse(question)
         assert result['type'] == expected_type
@@ -54,7 +56,7 @@ def test_unknown_questions(parser):
         "Кто президент?",
         "Что нового?"
     ]
-    
+
     for question in questions:
         result = parser.parse(question)
         assert result['type'] == 'unknown'
@@ -76,7 +78,7 @@ def test_question_variations(parser):
             "Какие у тебя навыки?"
         ]
     }
-    
+
     for base, variations in base_questions.items():
         base_result = parser.parse(base)
         for variation in variations:
@@ -86,10 +88,9 @@ def test_question_variations(parser):
 
 def test_performance(parser):
     """Тест производительности парсера"""
-    import time
-    
     # Генерируем 1000 случайных вопросов
     import random
+    import time
     questions = [
         "Что ты умеешь?",
         "Как работает память?",
@@ -102,15 +103,15 @@ def test_performance(parser):
         "Какие у тебя возможности?",
         "Как ты можешь помочь?"
     ] * 100
-    
+
     random.shuffle(questions)
-    
+
     # Замеряем время
     start_time = time.time()
     for question in questions:
         parser.parse(question)
     end_time = time.time()
-    
+
     # Проверяем, что обработка 1000 вопросов занимает не более 1 секунды
     assert end_time - start_time < 1.0
 
@@ -120,12 +121,12 @@ def test_error_handling(parser):
     result = parser.parse("")
     assert result['type'] == 'unknown'
     assert result['confidence'] == 0.0
-    
+
     # Тест с очень длинным вопросом
     long_question = "Что ты умеешь? " * 1000
     result = parser.parse(long_question)
     assert result['type'] in ['capabilities', 'unknown']
-    
+
     # Тест с некорректными символами
     result = parser.parse("Что ты умеешь? " + "".join(chr(i) for i in range(1000)))
-    assert result['type'] in ['capabilities', 'unknown'] 
+    assert result['type'] in ['capabilities', 'unknown']

@@ -1,6 +1,6 @@
+
 from fastapi import APIRouter, HTTPException
-from typing import Dict, List
-from langchain_api.services.passport_sync_service import PassportSyncService
+
 from langchain_api.globals import passport_sync_service
 
 router = APIRouter(prefix="/passport/sync", tags=["passport"])
@@ -14,7 +14,7 @@ def check_service():
         )
 
 @router.get("/status")
-async def get_sync_status() -> Dict:
+async def get_sync_status() -> dict:
     """Получить статус автосинхронизации"""
     check_service()
     try:
@@ -27,7 +27,7 @@ async def get_sync_status() -> Dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/apply")
-async def apply_changes() -> Dict:
+async def apply_changes() -> dict:
     """Применить накопленные изменения"""
     check_service()
     try:
@@ -41,7 +41,7 @@ async def apply_changes() -> Dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/changes")
-async def get_changes() -> List[Dict]:
+async def get_changes() -> list[dict]:
     """Получить список накопленных изменений"""
     check_service()
     try:
@@ -52,11 +52,11 @@ async def get_changes() -> List[Dict]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/changes")
-async def clear_changes() -> Dict:
+async def clear_changes() -> dict:
     """Очистить накопленные изменения"""
     check_service()
     try:
         passport_sync_service.clear_changes()
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

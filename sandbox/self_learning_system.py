@@ -3,12 +3,12 @@ Self Learning System - заглушки для системы самообуче
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def analyze_performance() -> Dict[str, Any]:
+def analyze_performance() -> dict[str, Any]:
     """Анализирует производительность"""
     return {
         "score": 8.5,
@@ -16,7 +16,7 @@ def analyze_performance() -> Dict[str, Any]:
     }
 
 
-def update_knowledge_base() -> Dict[str, Any]:
+def update_knowledge_base() -> dict[str, Any]:
     """Обновляет базу знаний"""
     return {
         "success": True,
@@ -24,9 +24,9 @@ def update_knowledge_base() -> Dict[str, Any]:
     }
 
 
-def get_learning_stats() -> Dict[str, Any]:
+def get_learning_stats() -> dict[str, Any]:
     """Возвращает статистику обучения"""
     return {
         "total_lessons": 0,
         "success_rate": 100.0
-    } 
+    }

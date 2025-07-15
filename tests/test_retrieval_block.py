@@ -1,5 +1,7 @@
 import pytest
+
 from langchain_api.rag.enhanced_rag_chain import format_retrieval_block
+
 
 # Моки для retrieval-результатов
 @pytest.fixture
@@ -85,4 +87,4 @@ def test_prompt_structure_with_retrieval_block(retrieval_results):
     # Проверяем порядок
     assert messages[0].content.startswith(persona)
     assert messages[1].content.startswith("[RETRIEVAL]")
-    assert messages[2].content == "Привет!" or messages[2].content == "Здравствуйте!" 
+    assert messages[2].content == "Привет!" or messages[2].content == "Здравствуйте!"

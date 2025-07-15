@@ -2,20 +2,23 @@
 Модуль для управления задачами.
 """
 
-from typing import Dict, List, Optional, Any
-from datetime import datetime
-import uuid
+import asyncio
 import logging
-from dataclasses import dataclass
-from enum import Enum
-import psutil
 import threading
-from queue import PriorityQueue
-import random
 import time
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from queue import PriorityQueue
+from typing import Any
 
-from .task_analyzer import TaskAnalyzer, TaskMetrics
+import psutil
+
+from langchain_api.sandbox.self_awareness import TaskResult
+
 from .metrics import metrics_manager
+from .task_analyzer import TaskAnalyzer, TaskMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +45,20 @@ class Task:
     priority: TaskPriority
     status: TaskStatus
     created_at: datetime
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    error_message: Optional[str]
-    metrics: Optional[TaskMetrics]
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_message: str | None
+    metrics: TaskMetrics | None
 
 class TaskManager:
     """Менеджер задач."""
-    
+
     def __init__(self):
-        self.tasks: Dict[str, Task] = {}
+        self.tasks: dict[str, Task] = {}
         self.task_queue = PriorityQueue()
         self.analyzer = TaskAnalyzer()
         self._lock = threading.Lock()
-        
+
     def create_task(self, task_type: str, description: str, priority: TaskPriority = TaskPriority.MEDIUM) -> Task:
         """Создает новую задачу."""
         task_id = str(uuid.uuid4())
@@ -71,36 +74,36 @@ class TaskManager:
             error_message=None,
             metrics=None
         )
-        
+
         with self._lock:
             self.tasks[task_id] = task
             # Добавляем в очередь с приоритетом (меньше значение = выше приоритет)
             self.task_queue.put((priority.value, task_id))
-            
+
         logger.info(f"Created task {task_id}: {description}")
         return task
-    
-    def get_task(self, task_id: str) -> Optional[Task]:
+
+    def get_task(self, task_id: str) -> Task | None:
         """Получает задачу по ID."""
         return self.tasks.get(task_id)
-    
-    def list_tasks(self, status: Optional[TaskStatus] = None) -> List[Task]:
+
+    def list_tasks(self, status: TaskStatus | None = None) -> list[Task]:
         """Возвращает список задач с опциональной фильтрацией по статусу."""
         with self._lock:
             if status:
                 return [task for task in self.tasks.values() if task.status == status]
             return list(self.tasks.values())
-    
+
     def start_task(self, task_id: str) -> bool:
         """Запускает задачу."""
         task = self.get_task(task_id)
         if not task:
             return False
-            
+
         with self._lock:
             if task.status != TaskStatus.PENDING:
                 return False
-                
+
             task.status = TaskStatus.RUNNING
             task.started_at = datetime.now()
             # Создаем метрики выполнения
@@ -112,25 +115,24 @@ class TaskManager:
                 memory_usage=30.0  # Для тестов
             )
             task.metrics = metrics
-            
+
         logger.info(f"Started task {task_id}")
         return True
-    
-    def complete_task(self, task_id: str, success: bool = True, error_message: Optional[str] = None) -> bool:
+
+    def complete_task(self, task_id: str, success: bool = True, error_message: str | None = None) -> bool:
         """Завершает задачу."""
         task = self.get_task(task_id)
         if not task or task.status != TaskStatus.RUNNING:
             return False
-            
+
         with self._lock:
             task.status = TaskStatus.COMPLETED if success else TaskStatus.FAILED
             task.completed_at = datetime.now()
             task.error_message = error_message
-            
+
             # Создаем метрики выполнения
             if task.started_at:
                 execution_time = (task.completed_at - task.started_at).total_seconds()
-                # Используем значения из task.metrics, если они есть
                 cpu = task.metrics.cpu_usage if task.metrics else psutil.cpu_percent()
                 mem = task.metrics.memory_usage if task.metrics else psutil.virtual_memory().percent
                 metrics = TaskMetrics(
@@ -146,45 +148,44 @@ class TaskManager:
                 )
                 task.metrics = metrics
                 self.analyzer.add_metrics(metrics)
-            
-            # Обновляем метрики ресурсов
-            metrics_manager.update_resource_metrics(
-                task_id=task_id,
-                cpu_usage=cpu,
-                memory_usage=mem
-            )
-            
-            # Записываем время выполнения
-            execution_time = time.time() - start_time
-            metrics_manager.record_task_execution(task.type, execution_time)
-            
-            if success:
-                metrics_manager.record_task_success(task.type)
-            else:
-                metrics_manager.record_task_failure(task.type, "execution_error")
-            
+
+                # Обновляем метрики ресурсов
+                metrics_manager.update_resource_metrics(
+                    task_id=task_id,
+                    cpu_usage=cpu,
+                    memory_usage=mem
+                )
+
+                # Записываем время выполнения
+                metrics_manager.record_task_execution(task.type, execution_time)
+
+                if success:
+                    metrics_manager.record_task_success(task.type)
+                else:
+                    metrics_manager.record_task_failure(task.type, "execution_error")
+
         logger.info(f"Completed task {task_id} with status: {task.status}")
         return True
-    
+
     def cancel_task(self, task_id: str) -> bool:
         """Отменяет задачу."""
         task = self.get_task(task_id)
         if not task or task.status not in [TaskStatus.PENDING, TaskStatus.RUNNING]:
             return False
-            
+
         with self._lock:
             task.status = TaskStatus.CANCELLED
             task.completed_at = datetime.now()
-            
+
         logger.info(f"Cancelled task {task_id}")
         return True
-    
-    def get_task_status(self, task_id: str) -> Optional[Dict]:
+
+    def get_task_status(self, task_id: str) -> dict | None:
         """Возвращает статус задачи с дополнительной информацией."""
         task = self.get_task(task_id)
         if not task:
             return None
-            
+
         status_info = {
             "id": task.id,
             "type": task.type,
@@ -195,22 +196,22 @@ class TaskManager:
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "error_message": task.error_message
         }
-        
+
         if task.metrics:
             status_info["metrics"] = {
                 "cpu_usage": task.metrics.cpu_usage,
                 "memory_usage": task.metrics.memory_usage,
                 "execution_time": task.metrics.execution_time
             }
-            
+
         return status_info
-    
-    def analyze_task(self, task_id: str) -> Optional[Dict]:
+
+    def analyze_task(self, task_id: str) -> dict | None:
         """Анализирует выполнение задачи."""
         task = self.get_task(task_id)
         if not task or not task.metrics:
             return None
-            
+
         analysis = self.analyzer.analyze_task(task_id)
         return {
             "task_id": analysis.task_id,
@@ -220,8 +221,8 @@ class TaskManager:
             "recommendations": analysis.recommendations,
             "patterns": analysis.patterns
         }
-    
-    def get_statistics(self) -> Dict[str, Any]:
+
+    def get_statistics(self) -> dict[str, Any]:
         """Получение статистики по задачам."""
         total_tasks = len(self.tasks)
         if total_tasks == 0:
@@ -233,16 +234,16 @@ class TaskManager:
                 "average_cpu_usage": 0.0,
                 "average_memory_usage": 0.0
             }
-            
+
         successful_tasks = sum(1 for t in self.tasks.values() if t.status == TaskStatus.COMPLETED)
         success_rate = successful_tasks / total_tasks
-        
+
         # Собираем метрики только для завершенных задач
         completed_tasks = [t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]
         total_execution_time = sum(t.metrics.execution_time for t in completed_tasks if t.metrics and t.metrics.execution_time is not None)
         total_cpu_usage = sum(t.metrics.cpu_usage for t in completed_tasks if t.metrics)
         total_memory_usage = sum(t.metrics.memory_usage for t in completed_tasks if t.metrics)
-        
+
         return {
             "total_tasks": total_tasks,
             "successful_tasks": successful_tasks,
@@ -250,32 +251,46 @@ class TaskManager:
             "average_execution_time": total_execution_time / len(completed_tasks) if completed_tasks else 0.0,
             "average_cpu_usage": total_cpu_usage / len(completed_tasks) if completed_tasks else 0.0,
             "average_memory_usage": total_memory_usage / len(completed_tasks) if completed_tasks else 0.0
-        } 
+        }
 
     async def execute_task(self, task: Task) -> TaskResult:
+        """Выполняет задачу асинхронно."""
         start_time = time.time()
         try:
-            # ... existing code ...
-            
+            # Запускаем задачу
+            self.start_task(task.id)
+
+            # Симулируем выполнение задачи
+            await asyncio.sleep(0.1)  # Имитация работы
+
+            # Получаем метрики ресурсов
+            cpu_usage = psutil.cpu_percent()
+            memory_usage = psutil.virtual_memory().percent
+
             # Обновляем метрики ресурсов
             metrics_manager.update_resource_metrics(
                 task_id=task.id,
-                cpu_usage=cpu,
-                memory_usage=mem
+                cpu_usage=cpu_usage,
+                memory_usage=memory_usage
             )
-            
+
             # Записываем время выполнения
             execution_time = time.time() - start_time
             metrics_manager.record_task_execution(task.type, execution_time)
-            
-            if success:
-                metrics_manager.record_task_success(task.type)
-            else:
-                metrics_manager.record_task_failure(task.type, "execution_error")
-                
+
+            # Завершаем задачу успешно
+            self.complete_task(task.id, success=True)
+            metrics_manager.record_task_success(task.type)
+
             return TaskResult(
-                # ... existing code ...
+                task_id=task.id,
+                success=True,
+                result="Task completed successfully",
+                execution_time=execution_time,
+                error_message=None
             )
         except Exception as e:
+            # Завершаем задачу с ошибкой
+            self.complete_task(task.id, success=False, error_message=str(e))
             metrics_manager.record_task_failure(task.type, type(e).__name__)
-            raise 
+            raise

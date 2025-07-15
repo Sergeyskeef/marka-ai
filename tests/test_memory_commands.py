@@ -1,9 +1,10 @@
-import pytest
-import time
-import json
 from langchain_api.memory_logic import (
-    memory_save_logic, memory_update_logic, memory_delete_logic, memory_analyze_logic
+    memory_analyze_logic,
+    memory_delete_logic,
+    memory_save_logic,
+    memory_update_logic,
 )
+
 
 class DummyMemoryManager:
     def __init__(self, data=None):
@@ -69,4 +70,4 @@ def test_memory_analyze():
     ])
     result = memory_analyze_logic(memory)
     assert 'дубликатов' in result
-    assert '- Experience:' in result 
+    assert '- Experience:' in result

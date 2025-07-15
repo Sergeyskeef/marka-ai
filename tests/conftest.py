@@ -1,6 +1,8 @@
 import time
+
 import httpx
 import pytest
+
 
 @pytest.fixture(scope="session", autouse=True)
 def wait_graphiti():
@@ -12,4 +14,4 @@ def wait_graphiti():
         except httpx.TransportError:
             pass
         time.sleep(2)
-    pytest.exit("Graphiti did not become healthy in time", returncode=1) 
+    pytest.exit("Graphiti did not become healthy in time", returncode=1)

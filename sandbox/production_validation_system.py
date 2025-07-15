@@ -3,12 +3,12 @@ Production Validation System - заглушки для системы валид
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def validate_production_readiness() -> Dict[str, Any]:
+def validate_production_readiness() -> dict[str, Any]:
     """Проверяет готовность к продакшену"""
     return {
         "ready": True,
@@ -16,7 +16,7 @@ def validate_production_readiness() -> Dict[str, Any]:
     }
 
 
-def run_production_tests() -> Dict[str, Any]:
+def run_production_tests() -> dict[str, Any]:
     """Запускает продакшен тесты"""
     return {
         "success": True,
@@ -24,9 +24,9 @@ def run_production_tests() -> Dict[str, Any]:
     }
 
 
-def get_production_metrics() -> Dict[str, Any]:
+def get_production_metrics() -> dict[str, Any]:
     """Возвращает метрики продакшена"""
     return {
         "uptime": 99.9,
         "performance": "good"
-    } 
+    }

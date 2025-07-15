@@ -1,10 +1,13 @@
-import pytest
 from datetime import datetime
+
+import pytest
+
 from langchain_api.core.reflection.reasoning_chains import (
-    ReasoningStep,
     ReasoningChain,
-    ReasoningSystem
+    ReasoningStep,
+    ReasoningSystem,
 )
+
 
 def test_reasoning_step_creation():
     """Тест создания шага рассуждения"""
@@ -15,7 +18,7 @@ def test_reasoning_step_creation():
         timestamp=datetime.now(),
         confidence=0.8
     )
-    
+
     assert step.id == "step1"
     assert step.content == "Test step"
     assert step.context == {"test": "context"}
@@ -33,13 +36,13 @@ def test_reasoning_step_serialization():
         timestamp=timestamp,
         confidence=0.8
     )
-    
+
     data = step.to_dict()
     assert data["id"] == "step1"
     assert data["content"] == "Test step"
     assert data["context"] == {"test": "context"}
     assert data["confidence"] == 0.8
-    
+
     restored_step = ReasoningStep.from_dict(data)
     assert restored_step.id == step.id
     assert restored_step.content == step.content
@@ -63,7 +66,7 @@ def test_reasoning_chain_add_step():
         timestamp=datetime.now(),
         confidence=0.8
     )
-    
+
     chain.add_step(step)
     assert len(chain.steps) == 1
     assert chain.root_step_id == "step1"
@@ -72,7 +75,7 @@ def test_reasoning_chain_add_step():
 def test_reasoning_chain_hierarchy():
     """Тест иерархии шагов в цепочке"""
     chain = ReasoningChain("chain1")
-    
+
     # Создаем корневой шаг
     root_step = ReasoningStep(
         id="root",
@@ -81,7 +84,7 @@ def test_reasoning_chain_hierarchy():
         timestamp=datetime.now(),
         confidence=0.9
     )
-    
+
     # Создаем дочерний шаг
     child_step = ReasoningStep(
         id="child",
@@ -91,10 +94,10 @@ def test_reasoning_chain_hierarchy():
         confidence=0.8,
         parent_id="root"
     )
-    
+
     chain.add_step(root_step)
     chain.add_step(child_step)
-    
+
     assert len(chain.steps) == 2
     assert chain.root_step_id == "root"
     assert "child" in root_step.children_ids
@@ -103,7 +106,7 @@ def test_reasoning_chain_hierarchy():
 def test_reasoning_chain_evaluation():
     """Тест оценки цепочки рассуждений"""
     chain = ReasoningChain("chain1")
-    
+
     steps = [
         ReasoningStep(
             id=f"step{i}",
@@ -114,10 +117,10 @@ def test_reasoning_chain_evaluation():
         )
         for i in range(3)
     ]
-    
+
     for step in steps:
         chain.add_step(step)
-    
+
     evaluation = chain.evaluate_logical_consistency()
     assert evaluation == pytest.approx(0.8)  # Используем pytest.approx() для сравнения
 
@@ -130,12 +133,12 @@ def test_reasoning_system_creation():
 def test_reasoning_system_chain_management():
     """Тест управления цепочками в системе"""
     system = ReasoningSystem()
-    
+
     # Создаем цепочку
-    chain = system.create_chain("chain1")
+    system.create_chain("chain1")
     assert len(system.chains) == 1
     assert system.current_chain_id == "chain1"
-    
+
     # Добавляем шаг
     step = ReasoningStep(
         id="step1",
@@ -145,7 +148,7 @@ def test_reasoning_system_chain_management():
         confidence=0.8
     )
     system.add_step("chain1", step)
-    
+
     # Проверяем цепочку
     retrieved_chain = system.get_chain("chain1")
     assert retrieved_chain is not None
@@ -155,13 +158,13 @@ def test_reasoning_system_chain_management():
 def test_reasoning_system_context_analysis():
     """Тест анализа контекста"""
     system = ReasoningSystem()
-    
+
     context = {
         "code": "def test(): pass",
         "text": "Some text",
         "other": "data"
     }
-    
+
     analysis = system.analyze_context(context)
     assert analysis["context_size"] > 0
     assert analysis["has_code"] is True
@@ -170,8 +173,8 @@ def test_reasoning_system_context_analysis():
 def test_reasoning_system_chain_evaluation():
     """Тест оценки цепочки в системе"""
     system = ReasoningSystem()
-    chain = system.create_chain("chain1")
-    
+    system.create_chain("chain1")
+
     steps = [
         ReasoningStep(
             id=f"step{i}",
@@ -182,10 +185,10 @@ def test_reasoning_system_chain_evaluation():
         )
         for i in range(3)
     ]
-    
+
     for step in steps:
         system.add_step("chain1", step)
-    
+
     evaluation = system.evaluate_chain("chain1")
     assert evaluation["logical_consistency"] == pytest.approx(0.8)
     assert evaluation["step_count"] == 3
@@ -195,8 +198,8 @@ def test_reasoning_system_chain_evaluation():
 def test_reasoning_system_serialization(tmp_path):
     """Тест сериализации системы"""
     system = ReasoningSystem()
-    chain = system.create_chain("chain1")
-    
+    system.create_chain("chain1")
+
     step = ReasoningStep(
         id="step1",
         content="Test step",
@@ -205,17 +208,17 @@ def test_reasoning_system_serialization(tmp_path):
         confidence=0.8
     )
     system.add_step("chain1", step)
-    
+
     # Сохраняем систему
     filepath = tmp_path / "reasoning_system.json"
     system.save_chains(str(filepath))
-    
+
     # Загружаем систему
     loaded_system = ReasoningSystem.load_chains(str(filepath))
     assert len(loaded_system.chains) == 1
     assert loaded_system.current_chain_id == "chain1"
-    
+
     loaded_chain = loaded_system.get_chain("chain1")
     assert loaded_chain is not None
     assert len(loaded_chain.steps) == 1
-    assert loaded_chain.get_step("step1") is not None 
+    assert loaded_chain.get_step("step1") is not None

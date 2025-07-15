@@ -1,6 +1,7 @@
-import pytest
-from langchain_api.core.command_monitoring import CommandMonitoringSystem, CommandEvent
 import os
+
+from langchain_api.core.command_monitoring import CommandEvent, CommandMonitoringSystem
+
 
 def test_log_command_and_result(tmp_path):
     cms = CommandMonitoringSystem()
@@ -48,4 +49,4 @@ def test_export_and_clear_history(tmp_path):
     assert cms.export_history(str(export_path)) is True
     assert os.path.exists(export_path)
     cms.clear_history()
-    assert len(cms.command_history) == 0 
+    assert len(cms.command_history) == 0

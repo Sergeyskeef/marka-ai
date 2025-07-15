@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
 from datetime import datetime
-from langchain_api.services.task_executor import task_executor, TaskPriority, TaskStatus, Task
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from langchain_api.services.task_executor import TaskPriority, TaskStatus, task_executor
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -12,7 +14,7 @@ class TaskCreate(BaseModel):
     name: str
     description: str
     priority: TaskPriority
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 class TaskResponse(BaseModel):
     id: str
@@ -22,9 +24,9 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     created_at: datetime
     updated_at: datetime
-    parameters: Dict[str, Any]
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    parameters: dict[str, Any]
+    result: dict[str, Any] | None = None
+    error: str | None = None
 
     class Config:
         from_attributes = True
@@ -47,12 +49,12 @@ async def get_task(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-@router.get("/", response_model=List[TaskResponse])
-async def list_tasks(status: Optional[TaskStatus] = None):
+@router.get("/", response_model=list[TaskResponse])
+async def list_tasks(status: TaskStatus | None = None):
     """Получение списка задач с возможностью фильтрации по статусу"""
     return task_executor.get_task_list(status)
 
-@router.get("/queue/status", response_model=List[TaskResponse])
+@router.get("/queue/status", response_model=list[TaskResponse])
 async def get_queue_status():
     """Получение текущего состояния очереди задач"""
     return task_executor.get_queue_status()
@@ -82,11 +84,11 @@ async def resume_task(task_id: str):
 async def update_task_status(
     task_id: str,
     status: TaskStatus,
-    result: Optional[Dict[str, Any]] = None,
-    error: Optional[str] = None
+    result: dict[str, Any] | None = None,
+    error: str | None = None
 ):
     """Обновление статуса задачи"""
     task = task_executor.update_task_status(task_id, status, result, error)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task 
+    return task

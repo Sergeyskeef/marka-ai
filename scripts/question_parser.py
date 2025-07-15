@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Tuple
+
 
 class QuestionParser:
     def __init__(self):
@@ -125,7 +125,7 @@ class QuestionParser:
             for category, patterns in self.question_patterns.items()
         }
 
-    def parse(self, question: str) -> Dict[str, any]:
+    def parse(self, question: str) -> dict[str, any]:
         if not question or not question.strip():
             return {'type': 'unknown', 'confidence': 0.0}
         question = question.lower().strip()
@@ -133,4 +133,4 @@ class QuestionParser:
             for pattern in self.compiled_patterns.get(category, []):
                 if pattern.search(question):
                     return {'type': category, 'confidence': 0.95}
-        return {'type': 'unknown', 'confidence': 0.0} 
+        return {'type': 'unknown', 'confidence': 0.0}

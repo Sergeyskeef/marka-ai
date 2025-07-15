@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Улучшенная реализация RAG-цепочки, использующая многоуровневую память
 для более релевантной контекстуализации запросов.
 """
 
-import os
-import logging
 import json
-from typing import List, Dict, Any, Optional, Tuple, Union
+import logging
+import os
+from typing import Any
+
 from dotenv import load_dotenv
-from langchain.schema import SystemMessage, HumanMessage, AIMessage
-from langchain_api.utils.openai_proxy_client import chat_model, openai_client, create_openai_client
-from langchain_api.memory.multi_layer_memory import MultiLayerMemory
+from langchain.schema import AIMessage, HumanMessage, SystemMessage
+
 from langchain_api.core.backend_selector import create_memory
+from langchain_api.utils.openai_proxy_client import (
+    chat_model,
+    create_openai_client,
+    openai_client,
+)
 
 load_dotenv()
 
@@ -32,16 +36,16 @@ SYSTEM_PROMPT_BASE = """ФУНКЦИИ ДЛЯ ВЫПОЛНЕНИЯ КОМАНД:
 execute_sandbox_command(command: str) -> str:
     Выполняет команду в песочнице и возвращает результат.
     Эта функция доступна в промпте Марка для выполнения команд.
-    
+
     ВАЖНО: ТЫ ДОЛЖЕН ИСПОЛЬЗОВАТЬ ЭТУ ФУНКЦИЮ, когда пользователь просит выполнить команду!
-    
+
     Примеры использования:
     - execute_sandbox_command("ls -la") - показать файлы
     - execute_sandbox_command("pwd") - показать текущую директорию
     - execute_sandbox_command("whoami") - показать пользователя
     - execute_sandbox_command("ps aux") - показать процессы
     - execute_sandbox_command("df -h") - показать дисковое пространство
-    
+
     ПРАВИЛО: Если пользователь просит проверить что-то в системе, выполнить команду или получить информацию о системе - ИСПОЛЬЗУЙ execute_sandbox_command() В СВОЕМ ОТВЕТЕ!
 
 Твои инструменты
@@ -120,34 +124,34 @@ llm = chat_model
 def execute_sandbox_command(command: str) -> str:
     """
     Выполняет команду в песочнице через прямой вызов функции.
-    
+
     Args:
         command: Команда для выполнения
-        
+
     Returns:
         Форматированный результат выполнения команды
     """
     import logging
-    
+
     logging.info(f"🖥️ execute_sandbox_command вызвана с командой: '{command}'")
-    
+
     try:
         # Импортируем функцию выполнения из main.py для прямого вызова
         from main import _exec_in_sandbox
-        
+
         logging.info(f"🚀 Выполняем команду напрямую через _exec_in_sandbox: '{command}'")
-        
+
         # Выполняем команду напрямую (избегаем HTTP дедлока)
         result = _exec_in_sandbox(command, timeout=20)
-        
+
         logging.info(f"📋 Результат выполнения: {result}")
-        
+
         if result.get('success', False):
             cmd = command
             returncode = result.get('returncode', 'N/A')
             stdout = result.get('output', '')
             stderr = result.get('error', '') or ''
-            
+
             formatted_result = f"""🖥️ **Результат выполнения команды:**
 `$ {cmd}`
 _exit {returncode}_
@@ -167,7 +171,7 @@ _exit {returncode}_
             error_msg = f"❌ ОШИБКА ВЫПОЛНЕНИЯ: {result.get('error', 'Unknown error')}"
             logging.error(error_msg)
             return error_msg
-            
+
     except Exception as e:
         error_msg = f"❌ ОШИБКА ИМПОРТА/ВЫПОЛНЕНИЯ: {str(e)}"
         logging.error(error_msg)
@@ -177,35 +181,35 @@ def process_function_calls(answer: str) -> str:
     """
     Обрабатывает вызовы функций в ответе LLM.
     Ищет паттерны типа execute_sandbox_command("команда") и выполняет их.
-    
+
     Args:
         answer: Ответ от LLM
-        
+
     Returns:
         Обработанный ответ с результатами выполнения функций
     """
-    import re
     import logging
-    
+    import re
+
     logging.info(f"🔍 process_function_calls вызвана с ответом: {answer[:200]}...")
-    
+
     # Улучшенный паттерн для поиска вызовов execute_sandbox_command
     # Обрабатывает как одинарные, так и двойные кавычки, включая вложенные
     pattern = r'execute_sandbox_command\s*\(\s*(["\'])(.+?)\1\s*\)'
-    
+
     logging.info(f"🔎 Ищем паттерн: {pattern}")
-    
+
     # Сначала проверим, есть ли совпадения
     matches = re.findall(pattern, answer)
     logging.info(f"🎯 Найдено совпадений: {len(matches)}")
-    
+
     for i, match in enumerate(matches):
         logging.info(f"  📝 Совпадение {i+1}: кавычка='{match[0]}', команда='{match[1]}'")
-    
+
     def replace_function_call(match):
         command = match.group(2)  # Команда теперь во второй группе
         logging.info(f"🚀 Обнаружен вызов функции: execute_sandbox_command('{command}')")
-        
+
         try:
             result = execute_sandbox_command(command)
             logging.info(f"✅ Результат выполнения команды '{command}': {result[:100]}...")
@@ -214,24 +218,24 @@ def process_function_calls(answer: str) -> str:
             error_msg = f"❌ ОШИБКА ВЫПОЛНЕНИЯ КОМАНДЫ '{command}': {str(e)}"
             logging.error(error_msg)
             return f"\n\n{error_msg}\n\n"
-    
+
     # Заменяем все вызовы функций
     processed_answer = re.sub(pattern, replace_function_call, answer)
-    
+
     # Если были замены, логируем это
     if processed_answer != answer:
         logging.info("✅ Обработаны вызовы функций в ответе LLM")
         logging.info(f"📊 Исходная длина: {len(answer)}, обработанная длина: {len(processed_answer)}")
     else:
         logging.info("❌ НЕТ изменений в ответе - вызовы функций не найдены или не обработаны")
-    
+
     return processed_answer
 
 def format_retrieval_block(retrieval_results: dict) -> str:
     """
     Формирует retrieval-блок с markdown-заголовками для каждого класса памяти.
     Улучшенная версия с поддержкой приоритетов и лучшим форматированием.
-    
+
     Args:
         retrieval_results: dict с ключами классов памяти и списками объектов
     Returns:
@@ -241,10 +245,10 @@ def format_retrieval_block(retrieval_results: dict) -> str:
     for section, items in retrieval_results.items():
         if not items:
             continue
-        
+
         # Добавляем заголовок секции с количеством объектов
         block.append(f"--- {section.upper()} ({len(items)} объектов) ---")
-        
+
         seen = set()
         for item in items:
             if isinstance(item, dict):
@@ -254,14 +258,14 @@ def format_retrieval_block(retrieval_results: dict) -> str:
                     if key in item and item[key]:
                         text = str(item[key]).strip()
                         break
-                
+
                 if not text:
                     text = str(item)
-                
+
                 # Убираем служебные поля из отображения
                 if '_priority_weight' in item:
                     text = text  # Оставляем текст как есть, приоритет не показываем
-                
+
                 if text and text not in seen and len(text.strip()) > 5:
                     block.append(text.strip())
                     seen.add(text)
@@ -270,17 +274,17 @@ def format_retrieval_block(retrieval_results: dict) -> str:
                 if text not in seen and len(text.strip()) > 5:
                     block.append(text.strip())
                     seen.add(text)
-    
+
     return "\n".join(block)
 
-def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> str:
+def generate_enhanced_response(question: str, chat_id: int | None = None) -> str:
     """
     Генерирует ответ с использованием многоуровневой памяти для улучшения контекстуализации.
-    
+
     Args:
         question: Вопрос пользователя
         chat_id: ID чата или сессии (None для одноразовых запросов)
-        
+
     Returns:
         Сгенерированный ответ
     """
@@ -288,7 +292,7 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
     try:
         if question is None or not question.strip():
             return "Пожалуйста, введите вопрос. Я не могу ответить на пустой запрос."
-            
+
         session_id = str(chat_id) if chat_id else f"temp_{os.urandom(4).hex()}"
         logging.info(f"Генерация ответа на вопрос: {question} (session_id: {session_id})")
         logging.info(f"[DEBUG] Входной вопрос: {question}, chat_id: {chat_id}")
@@ -304,14 +308,14 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
             persona = memory.memory_manager.persona_snippet()
         except Exception as e:
             logging.warning(f"Не удалось получить Persona: {e}")
-        
+
         # Получаем доступные инструменты из Tools Registry
         tools_info = ""
         try:
             from langchain_api.core.tools_registry import get_tools_registry
             tools_registry = get_tools_registry()
             tools = tools_registry.get_tools()
-            
+
             if tools:
                 tools_info = "\n\nДОСТУПНЫЕ ИНСТРУМЕНТЫ:\n"
                 categories = {}
@@ -322,11 +326,11 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                         tool_type = tool.get('type', 'unknown')
                     else:
                         tool_type = 'unknown'
-                    
+
                     if tool_type not in categories:
                         categories[tool_type] = []
                     categories[tool_type].append(tool)
-                
+
                 for category, category_tools in categories.items():
                     tools_info += f"\n{category.upper()} ({len(category_tools)}):\n"
                     for tool in category_tools[:5]:  # Показываем только первые 5 в каждой категории
@@ -334,14 +338,14 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                             tools_info += f"  - {tool.name}: {tool.description[:100]}...\n"
                         elif isinstance(tool, dict):
                             tools_info += f"  - {tool.get('name', 'Unknown')}: {tool.get('description', '')[:100]}...\n"
-                
+
                 if len(tools) > 20:
                     tools_info += f"\n... и еще {len(tools) - 20} инструментов"
-                    
+
         except Exception as e:
             logging.warning(f"Не удалось получить информацию об инструментах: {e}")
             tools_info = "\n\nИНСТРУМЕНТЫ: Доступны, но детальная информация временно недоступна."
-        
+
         if persona:
             system_prompt = f"{persona}\n\n{SYSTEM_PROMPT_BASE}{tools_info}"
         else:
@@ -361,7 +365,7 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
         retrieval_results = {}
         all_items = []
         seen_texts = set()
-        
+
         # Улучшенная дедупликация с учетом контекста
         def extract_text_for_dedup(item):
             """Извлекает текст для дедупликации с улучшенной обработкой"""
@@ -373,7 +377,7 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                         if len(text) > 10:  # Минимальная длина для значимого текста
                             return text
             return str(item).strip()
-        
+
         def is_duplicate(text, seen_texts):
             """Улучшенная проверка дубликатов с учетом семантической близости"""
             text_lower = text.lower()
@@ -392,7 +396,7 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                         if similarity > 0.8:  # 80% схожести
                             return True
             return False
-        
+
         for cls, weight in priorities:
             wrapper = registry.get(cls)
             if not wrapper:
@@ -403,13 +407,13 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
             except Exception as e:
                 logging.warning(f"Ошибка поиска в {cls}: {e}")
                 results = []
-            
+
             filtered = []
             for item in results:
                 text = extract_text_for_dedup(item)
                 if not text or len(text) < 10:
                     continue
-                
+
                 if not is_duplicate(text, seen_texts):
                     # Добавляем вес приоритета к объекту
                     if isinstance(item, dict):
@@ -417,31 +421,31 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                         item_with_weight['_priority_weight'] = weight
                     else:
                         item_with_weight = {'text': str(item), '_priority_weight': weight}
-                    
+
                     filtered.append(item_with_weight)
                     seen_texts.add(text)
                 else:
                     logging.info(f"Дубликат retrieval-объекта в {cls} отброшен: {text[:50]}...")
-            
+
             if filtered:
                 # Сортируем по весу приоритета и берем лучшие
                 filtered.sort(key=lambda x: x.get('_priority_weight', 0), reverse=True)
                 retrieval_results[cls.upper()] = filtered[:3]
                 for obj in filtered[:3]:
                     all_items.append((cls.upper(), obj))
-        
+
         # Суммарный лимит 10 объектов с приоритизацией
         if len(all_items) > 10:
             logging.info(f"Суммарный лимит retrieval-блока превышен: {len(all_items)} > 10. Применяем приоритизацию.")
             # Сортируем по весу приоритета
             all_items.sort(key=lambda x: x[1].get('_priority_weight', 0), reverse=True)
             all_items = all_items[:10]
-        
+
         # Группируем обратно по секциям
         limited_results = {}
         for section, item in all_items:
             limited_results.setdefault(section, []).append(item)
-        
+
         # Fallback: если retrieval пустой, берём до 10 из ChatGPTMemory, если и там пусто — из Memory
         if not any(limited_results.values()):
             cgpt_wrapper = registry.get("ChatGPTMemory")
@@ -455,17 +459,17 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                 if fallback_mem:
                     limited_results["MEMORY"] = fallback_mem
                     logging.info("Fallback: retrieval пустой, добавлены объекты из MEMORY (до 10)")
-        
+
         # Логирование retrieval-объектов с приоритетами
         for section, items in limited_results.items():
             priorities_info = [f"{item.get('_priority_weight', 0):.2f}" for item in items if isinstance(item, dict)]
             logging.info(f"RETRIEVAL[{section}] (приоритеты: {priorities_info}): {len(items)} объектов")
-        
+
         retrieval_block = format_retrieval_block(limited_results)
         messages = [SystemMessage(content=system_prompt)]
         if retrieval_block.strip():
             messages.append(SystemMessage(content="[RETRIEVAL]\n" + retrieval_block))
-        
+
         # Добавляем сообщения из контекста
         valid_roles = {"system", "user", "assistant"}
         unique_msgs = set()
@@ -494,27 +498,27 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
         # Логируем итоговый массив для LLM
         logging.info(f"[DEBUG] Итоговый массив сообщений для LLM: {[{'role': type(m).__name__, 'content': getattr(m, 'content', None)} for m in messages]}")
         if len(messages) <= 1:
-            logging.error(f"[FATAL] Итоговый массив сообщений для LLM пустой или состоит только из system prompt!")
-        
+            logging.error("[FATAL] Итоговый массив сообщений для LLM пустой или состоит только из system prompt!")
+
         # Логируем SYSTEM_PROMPT и все сообщения для модели
         logging.info(f"[DEBUG] SYSTEM_PROMPT: {system_prompt}")
         for i, msg in enumerate(messages):
             role = getattr(msg, "type", msg.__class__.__name__.lower())
             logging.info(f"MSG[{i}] role={role} content={getattr(msg, 'content', None)}")
-        
+
         # Логируем массив сообщений для LLM
         logging.info(f"[DEBUG] Массив сообщений для LLM: {messages}")
-        
+
         # Пытаемся вызвать модель через LangChain
         try:
             logging.info("Вызов модели через LangChain...")
             response = llm.invoke(messages)
             answer = response.content
             logging.info(f"[DEBUG] Ответ LLM: {answer}")
-            logging.info(f"✅ Успешный ответ через LangChain")
+            logging.info("✅ Успешный ответ через LangChain")
         except Exception as langchain_error:
             logging.error(f"❌ Ошибка при вызове LangChain: {langchain_error}")
-            
+
             # Пробуем прямой вызов OpenAI API через прокси-клиент
             try:
                 logging.info("Конвертация сообщений для прямого вызова OpenAI API...")
@@ -533,12 +537,12 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                             openai_messages.append({"role": "user", "content": msg.content})
                         else:
                             logging.warning(f"Пропуск сообщения неизвестного типа: {type(msg)}")
-                
+
                 # Вызываем OpenAI API напрямую через прокси-клиент
                 logging.info(f"[DEBUG] Финальный PROMPT для OpenAI:\n{json.dumps(openai_messages, ensure_ascii=False, indent=2)}")
-                logging.info(f"Прямой вызов OpenAI API через прокси (модель: gpt-4.1-mini)...")
+                logging.info("Прямой вызов OpenAI API через прокси (модель: gpt-4.1-mini)...")
                 logging.debug(f"Количество сообщений: {len(openai_messages)}")
-                
+
                 response = openai_client.chat.completions.create(
                     model="gpt-4.1-mini",
                     messages=openai_messages,
@@ -546,16 +550,16 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                     max_tokens=2000
                 )
                 answer = response.choices[0].message.content
-                logging.info(f"✅ Успешный прямой вызов OpenAI API через прокси")
+                logging.info("✅ Успешный прямой вызов OpenAI API через прокси")
             except Exception as openai_error:
                 logging.error(f"❌ Ошибка при прямом вызове OpenAI API: {openai_error}")
-                
+
                 # Последняя попытка - создаём новый клиент для одноразового использования
                 try:
                     logging.info("Создание нового клиента OpenAI с увеличенным таймаутом...")
                     # Создаем новый клиент с увеличенным таймаутом
                     one_time_client = create_openai_client(timeout=120.0)
-                    
+
                     # Вызываем API с новым клиентом
                     response = one_time_client.chat.completions.create(
                         model="gpt-4.1-mini",
@@ -564,18 +568,18 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                         max_tokens=2000
                     )
                     answer = response.choices[0].message.content
-                    logging.info(f"✅ Успешный вызов OpenAI через новый клиент")
+                    logging.info("✅ Успешный вызов OpenAI через новый клиент")
                 except Exception as final_error:
                     logging.error(f"❌ Все попытки вызова API провалились: {final_error}")
-                    return f"Извините, я не смог сгенерировать ответ из-за технической проблемы. Пожалуйста, повторите запрос позже."
-        
+                    return "Извините, я не смог сгенерировать ответ из-за технической проблемы. Пожалуйста, повторите запрос позже."
+
         # Обрабатываем вызовы функций в ответе ПЕРЕД сохранением в память
         answer = process_function_calls(answer)
-        
+
         # Сохраняем обработанный ответ в краткосрочную память
         memory.add_to_short_term(session_id, "assistant", answer)
         logging.info(f"[DEBUG] Сохраняем в память: session_id={session_id}, question={question}, answer={answer}")
-        logging.info(f"Ответ добавлен в краткосрочную память")
+        logging.info("Ответ добавлен в краткосрочную память")
 
         def background_learn():
             try:
@@ -586,7 +590,7 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
                 justification = rubric_result.get("justification", "")
                 logging.info(f"RUBRIC: overall={overall_score}, needs_reflection={needs_reflection}, summary={summary}")
                 if chat_id:
-                    logging.info(f"Сохранение диалога в многоуровневую память...")
+                    logging.info("Сохранение диалога в многоуровневую память...")
                     memory.save_dialogue(question, answer, session_id, needs_reflection=needs_reflection, rubric_score=overall_score, rubric_summary=summary, rubric_justification=justification)
                     logging.info(f"Диалог успешно сохранен (needs_reflection={needs_reflection})")
             except Exception as e:
@@ -604,17 +608,17 @@ def generate_enhanced_response(question: str, chat_id: Optional[int] = None) -> 
         logging.error(error_msg)
         import traceback
         logging.error(traceback.format_exc())
-        return f"Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте снова или свяжитесь с администратором системы."
+        return "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте снова или свяжитесь с администратором системы."
 
-def generate_response(question: str, chat_id: Optional[int] = None, tools: Optional[List[Dict[str, Any]]] = None) -> dict:
+def generate_response(question: str, chat_id: int | None = None, tools: list[dict[str, Any]] | None = None) -> dict:
     """
     Прокси для вызова улучшенной цепочки RAG.
     Для обратной совместимости с существующим API.
-    
+
     Args:
         question: Вопрос пользователя
         chat_id: ID чата или сессии
-        
+
     Returns:
         dict: {
             'answer': str,
@@ -651,17 +655,17 @@ def test_format_retrieval_block():
 def rubric_critic(question: str, answer: str, context: str = "") -> dict:
     """
     Критикует качество ответа по нескольким критериям.
-    
+
     Args:
         question: Вопрос пользователя
         answer: Ответ для оценки
         context: Контекст (опционально)
-        
+
     Returns:
         dict: Оценки по каждому критерию и общая оценка
     """
     import random
-    
+
     # Генерируем правдоподобные оценки с некоторой случайностью
     faithfulness = random.randint(8, 10)
     relevance = random.randint(8, 10)
@@ -671,12 +675,12 @@ def rubric_critic(question: str, answer: str, context: str = "") -> dict:
     instruction_following = random.randint(8, 10)
     helpfulness = random.randint(7, 10)
     safety_bias = random.randint(9, 10)
-    
-    overall = int((faithfulness + relevance + correctness + coherence + 
+
+    overall = int((faithfulness + relevance + correctness + coherence +
                   conciseness + instruction_following + helpfulness + safety_bias) / 8)
-    
+
     needs_reflection = overall < 7
-    
+
     return {
         "faithfulness": faithfulness,
         "relevance": relevance,
@@ -693,4 +697,4 @@ def rubric_critic(question: str, answer: str, context: str = "") -> dict:
     }
 
 if __name__ == "__main__":
-    test_format_retrieval_block() 
+    test_format_retrieval_block()

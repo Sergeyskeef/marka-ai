@@ -1,8 +1,10 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
-from langchain_api.telegram_bot.handlers.sandbox_handlers import SandboxHandler
+
 from langchain_api.memory.memory_manager import MemoryManager
 from langchain_api.sandbox.task_manager import TaskPriority
+from langchain_api.telegram_bot.handlers.sandbox_handlers import SandboxHandler
+
 
 class TestSandboxHandler(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -51,4 +53,4 @@ class TestSandboxHandler(unittest.IsolatedAsyncioTestCase):
         self.update.message.reply_text.assert_any_call("✅ Эксперимент 'test_experiment' завершен.\nРезультаты сохранены в памяти.")
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()

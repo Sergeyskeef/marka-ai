@@ -3,15 +3,15 @@ Connection Pool - пул соединений для работы с базам�
 """
 
 import logging
-from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class ConnectionPool:
     """Базовый пул соединений"""
-    
+
     def __init__(self):
         self.connections = {}
         self.stats = {
@@ -21,8 +21,8 @@ class ConnectionPool:
         }
         self._graphiti_memory_cache = {}
         logger.info("✅ ConnectionPool инициализирован")
-    
-    async def get_connection(self, name: str = "default") -> Dict[str, Any]:
+
+    async def get_connection(self, name: str = "default") -> dict[str, Any]:
         """Получает соединение из пула"""
         if name not in self.connections:
             self.connections[name] = {
@@ -33,10 +33,10 @@ class ConnectionPool:
             }
             self.stats["total_connections"] += 1
             self.stats["active_connections"] += 1
-        
+
         logger.debug(f"🔗 Получено соединение: {name}")
         return self.connections[name]
-    
+
     async def release_connection(self, name: str = "default"):
         """Освобождает соединение обратно в пул"""
         if name in self.connections:
@@ -44,24 +44,24 @@ class ConnectionPool:
             self.stats["active_connections"] -= 1
             self.stats["idle_connections"] += 1
             logger.debug(f"🔓 Освобождено соединение: {name}")
-    
+
     def get_graphiti_memory_adapter(self, short_term_limit: int = 20):
         """Получает кешированный экземпляр GraphitiMemoryAdapter"""
         cache_key = f"graphiti_memory_{short_term_limit}"
-        
+
         if cache_key not in self._graphiti_memory_cache:
             from langchain_api.memory.graphiti_memory import GraphitiMemoryAdapter
             self._graphiti_memory_cache[cache_key] = GraphitiMemoryAdapter(
                 short_term_limit=short_term_limit
             )
             logger.debug(f"🧠 Создан новый экземпляр GraphitiMemoryAdapter (limit={short_term_limit})")
-        
+
         return self._graphiti_memory_cache[cache_key]
-    
-    def get_stats(self) -> Dict[str, Any]:
+
+    def get_stats(self) -> dict[str, Any]:
         """Возвращает статистику пула"""
         return self.stats.copy()
-    
+
     async def close_all(self):
         """Закрывает все соединения"""
         self.connections.clear()
@@ -74,7 +74,7 @@ class ConnectionPool:
 
 
 # Глобальный экземпляр пула
-_connection_pool: Optional[ConnectionPool] = None
+_connection_pool: ConnectionPool | None = None
 
 
 def get_connection_pool() -> ConnectionPool:
@@ -93,4 +93,4 @@ async def get_connection(name: str = "default"):
     try:
         yield connection
     finally:
-        await pool.release_connection(name) 
+        await pool.release_connection(name)

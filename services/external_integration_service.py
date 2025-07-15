@@ -2,17 +2,17 @@
 ExternalIntegrationService - сервис для интеграции с внешними системами
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+import logging
 from datetime import datetime, timedelta
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class ExternalIntegrationService:
     """Сервис для интеграции с внешними системами"""
-    
+
     def __init__(self):
         self.integrations = {
             "telegram": {"status": "connected", "last_check": datetime.now()},
@@ -21,18 +21,18 @@ class ExternalIntegrationService:
         }
         self.alerts = []
         logger.info("✅ ExternalIntegrationService инициализирован")
-    
-    async def check_integration_health(self, integration_name: str) -> Dict[str, Any]:
+
+    async def check_integration_health(self, integration_name: str) -> dict[str, Any]:
         """Проверяет здоровье интеграции"""
         try:
             # Симуляция проверки интеграции
             await asyncio.sleep(0.1)
-            
+
             status = "connected"
             if integration_name in self.integrations:
                 self.integrations[integration_name]["last_check"] = datetime.now()
                 self.integrations[integration_name]["status"] = status
-            
+
             return {
                 "integration": integration_name,
                 "status": status,
@@ -47,19 +47,19 @@ class ExternalIntegrationService:
                 "error": str(e),
                 "last_check": datetime.now().isoformat()
             }
-    
-    async def get_all_integrations_health(self) -> Dict[str, Any]:
+
+    async def get_all_integrations_health(self) -> dict[str, Any]:
         """Проверяет здоровье всех интеграций"""
         results = {}
         for integration_name in self.integrations.keys():
             results[integration_name] = await self.check_integration_health(integration_name)
-        
+
         return {
             "integrations": results,
             "overall_status": "healthy",
             "timestamp": datetime.now().isoformat()
         }
-    
+
     def add_alert(self, severity: str, message: str, source: str):
         """Добавляет алерт"""
         alert = {
@@ -72,13 +72,13 @@ class ExternalIntegrationService:
         }
         self.alerts.append(alert)
         logger.warning(f"🚨 Алерт добавлен: {severity} - {message}")
-    
-    def get_alerts(self, unresolved_only: bool = True) -> List[Dict[str, Any]]:
+
+    def get_alerts(self, unresolved_only: bool = True) -> list[dict[str, Any]]:
         """Возвращает список алертов"""
         if unresolved_only:
             return [alert for alert in self.alerts if not alert["resolved"]]
         return self.alerts.copy()
-    
+
     def resolve_alert(self, alert_id: str) -> bool:
         """Разрешает алерт"""
         for alert in self.alerts:
@@ -88,21 +88,21 @@ class ExternalIntegrationService:
                 logger.info(f"✅ Алерт разрешен: {alert_id}")
                 return True
         return False
-    
-    async def cleanup_old_data(self, max_age_hours: int = 24) -> Dict[str, Any]:
+
+    async def cleanup_old_data(self, max_age_hours: int = 24) -> dict[str, Any]:
         """Очищает старые данные"""
         try:
             cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
-            
+
             # Очищаем старые алерты
-            old_alerts = [alert for alert in self.alerts 
+            old_alerts = [alert for alert in self.alerts
                          if datetime.fromisoformat(alert["timestamp"]) < cutoff_time]
-            
+
             for alert in old_alerts:
                 self.alerts.remove(alert)
-            
+
             logger.info(f"🧹 Очищено {len(old_alerts)} старых алертов")
-            
+
             return {
                 "success": True,
                 "cleaned_alerts": len(old_alerts),
@@ -113,4 +113,4 @@ class ExternalIntegrationService:
             return {
                 "success": False,
                 "error": str(e)
-            } 
+            }

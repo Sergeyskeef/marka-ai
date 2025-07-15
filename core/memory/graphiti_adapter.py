@@ -2,13 +2,12 @@
 GraphitiMemoryAdapter - HTTP-клиент для работы с Graphiti Memory API
 """
 
+import json
 import logging
 import time
-import json
-import urllib.request
 import urllib.parse
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+import urllib.request
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +26,12 @@ def parse_node(raw: dict) -> dict:
 
 class GraphitiMemoryAdapter:
     """Адаптер для работы с Graphiti Memory через HTTP API"""
-    
+
     def __init__(self, base_url: str = "http://graphiti:7878"):
         self.base_url = base_url.rstrip('/')
         logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url}")
-    
-    async def health_check(self) -> Dict[str, Any]:
+
+    async def health_check(self) -> dict[str, Any]:
         """Проверяет здоровье Graphiti"""
         try:
             response = urllib.request.urlopen(f"{self.base_url}/health")
@@ -46,14 +45,14 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Graphiti health check error: {str(e)}")
             return {"status": "error", "error": str(e)}
-    
-    async def create_episode(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+    async def create_episode(self, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Создает новый эпизод в Graphiti"""
         try:
             # Создаем уникальный ID для узла
             import uuid
             node_id = str(uuid.uuid4())
-            
+
             # Формируем payload согласно схеме Graphiti
             # Neo4j принимает только примитивные типы в properties
             properties = {
@@ -62,11 +61,11 @@ class GraphitiMemoryAdapter:
                 "test_run": False,
                 "pytest_test": False
             }
-            
+
             # Добавляем метаданные, сериализуя сложные типы
             if metadata:
                 for key, value in metadata.items():
-                    if isinstance(value, (str, int, float, bool)):
+                    if isinstance(value, str | int | float | bool):
                         properties[key] = value
                         logger.info(f"Добавляем метаданное {key}: {value}")
                     elif isinstance(value, list):
@@ -80,15 +79,15 @@ class GraphitiMemoryAdapter:
                         # Сериализуем сложные типы в JSON строку
                         properties[key] = json.dumps(value)
                         logger.info(f"Сериализуем метаданное {key}: {value}")
-            
+
             payload = {
                 "id": node_id,
                 "type": "Episode",
                 "properties": properties
             }
-            
+
             logger.info(f"Отправляем payload: {json.dumps(payload, indent=2)}")
-            
+
             # Создаем запрос
             data = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(
@@ -96,7 +95,7 @@ class GraphitiMemoryAdapter:
                 data=data,
                 headers={'Content-Type': 'application/json'}
             )
-            
+
             response = urllib.request.urlopen(req)
             if response.status == 201:  # Graphiti возвращает 201 для создания
                 response_data = json.loads(response.read().decode())
@@ -109,8 +108,8 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка создания эпизода: {str(e)}")
             return {"success": False, "error": str(e)}
-    
-    async def search_episodes(self, query: str, limit: int = 10) -> Dict[str, Any]:
+
+    async def search_episodes(self, query: str, limit: int = 10) -> dict[str, Any]:
         """Ищет эпизоды в Graphiti с использованием полнотекстового поиска"""
         try:
             # URL-кодируем параметр поиска для безопасной передачи
@@ -120,7 +119,7 @@ class GraphitiMemoryAdapter:
             if response.status == 200:
                 data = json.loads(response.read().decode())
                 episodes = []
-                
+
                 for node in data.get("nodes", []):
                     if node.get("type") == "Episode":
                         parsed = parse_node(node.get("properties", {}))
@@ -131,7 +130,7 @@ class GraphitiMemoryAdapter:
                             "metadata": parsed["metadata"],
                             "similarity": similarity
                         })
-                
+
                 logger.info(f"🔍 Полнотекстовый поиск в Graphiti: '{query}' -> {len(episodes)} результатов")
                 return {"items": episodes, "total": len(episodes)}
             else:
@@ -141,8 +140,8 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка поиска: {str(e)}")
             return {"items": [], "total": 0, "error": str(e)}
-    
-    async def get_episode(self, episode_id: str) -> Dict[str, Any]:
+
+    async def get_episode(self, episode_id: str) -> dict[str, Any]:
         """Получает эпизод по ID"""
         try:
             response = urllib.request.urlopen(f"{self.base_url}/nodes/{episode_id}")
@@ -156,8 +155,8 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка получения эпизода {episode_id}: {str(e)}")
             return {"error": str(e)}
-    
-    async def list_episodes(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+
+    async def list_episodes(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         """Получает список эпизодов"""
         try:
             response = urllib.request.urlopen(f"{self.base_url}/nodes?limit={limit}&offset={offset}")
@@ -171,19 +170,19 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка получения списка эпизодов: {str(e)}")
             return {"items": [], "total": 0, "error": str(e)}
-    
+
     async def close(self):
         """Закрывает HTTP сессию (не нужно для urllib)"""
         logger.info("🔒 GraphitiMemoryAdapter закрыт")
-    
+
     async def __aenter__(self):
         """Async context manager entry"""
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         await self.close()
 
 
 # Глобальный экземпляр адаптера
-graphiti_adapter = GraphitiMemoryAdapter() 
+graphiti_adapter = GraphitiMemoryAdapter()

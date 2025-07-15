@@ -2,17 +2,15 @@
 Обработчики команд для работы с задачами.
 """
 
-from typing import Optional, List, Dict, Any
+import logging
+import time
+
 from telegram import Update
 from telegram.ext import ContextTypes
-from telegram.constants import ParseMode
-import asyncio
-import logging
-from langchain_api.services.task_executor import task_executor, Task, TaskStatus, TaskPriority
-from langchain_api.services.security import TaskCategory, AccessLevel
+
 from langchain_api.sandbox.self_awareness import MarkSelfAwareness, TaskResult
-from datetime import datetime
-import time
+from langchain_api.services.security import AccessLevel, TaskCategory
+from langchain_api.services.task_executor import TaskPriority, TaskStatus, task_executor
 
 # Инициализация логгера
 logger = logging.getLogger(__name__)
@@ -28,11 +26,11 @@ async def task_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Получаем все задачи и фильтруем активные
         all_tasks = task_executor.get_task_list()
         active_tasks = [task for task in all_tasks if task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]]
-        
+
         if not active_tasks:
             await update.message.reply_text("📋 Нет активных задач")
             return
-            
+
         response = "📋 Активные задачи:\n\n"
         for task in active_tasks:
             status_emoji = {
@@ -41,14 +39,14 @@ async def task_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 TaskStatus.COMPLETED: "✅",
                 TaskStatus.FAILED: "❌"
             }.get(task.status, "❓")
-            
+
             response += f"{status_emoji} {task.id}: {task.description}\n"
             response += f"   Статус: {task.status.value}\n"
             response += f"   Приоритет: {task.priority.value}\n"
             response += f"   Начало: {task.created_at.strftime('%H:%M:%S')}\n\n"
-            
+
         await update.message.reply_text(response)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {str(e)}")
         await update.message.reply_text("❌ Произошла ошибка при получении списка задач")
@@ -59,28 +57,28 @@ async def task_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not context.args:
             await update.message.reply_text("❌ Укажите ID задачи")
             return
-            
+
         task_id = context.args[0]
         task = task_executor.get_task(task_id)
-        
+
         if not task:
             await update.message.reply_text(f"❌ Задача {task_id} не найдена")
             return
-            
+
         response = f"📊 Статус задачи {task_id}:\n\n"
         response += f"Описание: {task.description}\n"
         response += f"Статус: {task.status.value}\n"
         response += f"Приоритет: {task.priority.value}\n"
         response += f"Начало: {task.created_at.strftime('%H:%M:%S')}\n"
-        
+
         if task.updated_at and task.updated_at != task.created_at:
             response += f"Обновление: {task.updated_at.strftime('%H:%M:%S')}\n"
-            
+
         if task.error:
             response += f"\n❌ Ошибка: {task.error}\n"
-            
+
         await update.message.reply_text(response)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при получении статуса задачи: {str(e)}")
         await update.message.reply_text("❌ Произошла ошибка при получении статуса задачи")
@@ -91,14 +89,14 @@ async def task_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not context.args:
             await update.message.reply_text("❌ Укажите ID задачи")
             return
-            
+
         task_id = context.args[0]
         task = task_executor.get_task(task_id)
-        
+
         if not task:
             await update.message.reply_text(f"❌ Задача {task_id} не найдена")
             return
-            
+
         # Создаем TaskResult для анализа
         task_result = TaskResult(
             task_id=task.id,
@@ -114,19 +112,19 @@ async def task_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             error_messages=[task.error] if task.error else [],
             insights=[]
         )
-        
+
         # Получаем анализ и рекомендации
         analysis = await self_awareness.analyze_task_execution(task_result)
-        
+
         response = f"🔍 Анализ задачи {task_id}:\n\n"
         response += f"📈 Успешность: {analysis['success_rate']*100:.1f}%\n\n"
-        
+
         response += "⚡ Производительность:\n"
         response += f"   Время выполнения: {analysis['performance_analysis']['execution_time']:.1f} сек\n"
         response += f"   CPU: {analysis['performance_analysis']['cpu_usage']:.1f}%\n"
         response += f"   Память: {analysis['performance_analysis']['memory_usage']:.1f}%\n"
         response += f"   Оценка эффективности: {analysis['performance_analysis']['efficiency_score']:.2f}\n\n"
-        
+
         if analysis['error_analysis']['error_count'] > 0:
             response += "⚠️ Ошибки:\n"
             response += f"   Количество: {analysis['error_analysis']['error_count']}\n"
@@ -136,14 +134,14 @@ async def task_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 for pattern in analysis['error_analysis']['patterns']:
                     response += f"   - {pattern}\n"
             response += "\n"
-            
+
         if analysis['recommendations']:
             response += "💡 Рекомендации:\n"
             for rec in analysis['recommendations']:
                 response += f"- {rec}\n"
-                
+
         await update.message.reply_text(response)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при анализе задачи: {str(e)}")
         await update.message.reply_text("❌ Произошла ошибка при анализе задачи")
@@ -154,17 +152,17 @@ async def task_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not context.args:
             await update.message.reply_text("❌ Укажите описание задачи")
             return
-            
+
         description = " ".join(context.args[:-1]) if len(context.args) > 1 else context.args[0]
         priority = TaskPriority.MEDIUM
-        
+
         if len(context.args) > 1:
             try:
                 priority = TaskPriority(context.args[-1].lower())
             except ValueError:
                 await update.message.reply_text("❌ Неверный приоритет. Используйте: low, medium, high")
                 return
-                
+
         # Создаем задачу с минимальными параметрами
         task = task_executor.create_task(
             name=f"task_{int(time.time())}",
@@ -174,13 +172,13 @@ async def task_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             category=TaskCategory.CUSTOM,
             access_level=AccessLevel.EXECUTE
         )
-        
+
         response = f"✅ Создана задача {task.id}:\n"
         response += f"Описание: {task.description}\n"
         response += f"Приоритет: {task.priority.value}"
-        
+
         await update.message.reply_text(response)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при создании задачи: {str(e)}")
         await update.message.reply_text("❌ Произошла ошибка при создании задачи")
@@ -191,15 +189,15 @@ async def task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not context.args:
             await update.message.reply_text("❌ Укажите ID задачи")
             return
-            
+
         task_id = context.args[0]
         success = task_executor.cancel_task(task_id)
-        
+
         if success:
             await update.message.reply_text(f"✅ Задача {task_id} отменена")
         else:
             await update.message.reply_text(f"❌ Не удалось отменить задачу {task_id}")
-            
+
     except Exception as e:
         logger.error(f"Ошибка при отмене задачи: {str(e)}")
-        await update.message.reply_text("❌ Произошла ошибка при отмене задачи") 
+        await update.message.reply_text("❌ Произошла ошибка при отмене задачи")

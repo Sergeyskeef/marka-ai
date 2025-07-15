@@ -1,4 +1,5 @@
 import logging
+
 from langchain_api.memory.memory_manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO)
@@ -18,4 +19,4 @@ if __name__ == "__main__":
         except Exception as e:
             logging.error(f"Ошибка при очистке {col}: {e}")
     logging.info("Все коллекции очищены.")
-    logging.shutdown() 
+    logging.shutdown()

@@ -1,5 +1,5 @@
-import pytest
 from langchain_api.memory_logic import memory_search_logic
+
 
 class DummyMemoryManager:
     def __init__(self, data):
@@ -31,4 +31,4 @@ def test_memory_search_not_found():
 def test_memory_search_unsupported_type():
     memory = DummyMemory([])
     result = memory_search_logic('unknown', 'Архетип', memory)
-    assert result is None 
+    assert result is None

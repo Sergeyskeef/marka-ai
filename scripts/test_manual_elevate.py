@@ -1,4 +1,5 @@
 import time
+
 from langchain_api.memory.memory_manager import MemoryManager
 
 mm = MemoryManager()
@@ -30,4 +31,4 @@ for e in all_exp:
     if e.get("session_id") == session_id:
         print(f"id={e.get('id')}, elevated={e.get('elevated')}, summary={e.get('summary')}, manual_elevate={e.get('manual_elevate')}")
         assert e.get("elevated") is True, "manual_elevate Experience не был поднят!"
-print("\nПроверка manual_elevate: OK!") 
+print("\nПроверка manual_elevate: OK!")

@@ -6,8 +6,8 @@
   GROWTH     — python3 log_awakening_event.py GROWTH "Оптимизирована скорость тестов" SUCCESS sergey
   REFLECTION — python3 log_awakening_event.py REFLECTION "После внедрения diff багов не выявлено" SUCCESS sergey
 """
-import sys
 import datetime
+import sys
 
 LOGFILE = "sandbox_awakenings.log"
 
@@ -30,4 +30,4 @@ if __name__ == "__main__":
     result = sys.argv[3] if len(sys.argv) > 3 else None
     author = sys.argv[4] if len(sys.argv) > 4 else None
     log_event(event_type, description, result, author)
-    print(f"✅ Событие '{event_type}' зафиксировано в {LOGFILE}") 
+    print(f"✅ Событие '{event_type}' зафиксировано в {LOGFILE}")

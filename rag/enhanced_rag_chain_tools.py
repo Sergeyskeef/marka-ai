@@ -1,36 +1,51 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Enhanced RAG Chain с интеграцией OpenAI Tools API.
 Новая версия с поддержкой tool_calls для выполнения команд.
 """
 
+import asyncio
 import json
 import logging
-import asyncio
-import httpx
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 
-from langchain_api.memory.multi_layer_memory import MultiLayerMemory
+import httpx
+
 from langchain_api.core.backend_selector import create_memory
-from langchain_api.utils.openai_proxy_client import create_openai_client
-from langchain_api.core.analysis_engine import AnalysisEngine
-from langchain_api.sandbox.ci_pipeline import run_tests, validate_code_quality, get_ci_status
-from langchain_api.sandbox.autonomous_development_system import AutonomousDevelopmentSystem
-from langchain_api.sandbox.task_planning_system import (
-    analyze_task_requirements, create_task_plan, estimate_task_complexity,
-    get_task_plan, list_task_plans
+from langchain_api.memory.multi_layer_memory import MultiLayerMemory
+from langchain_api.sandbox.autonomous_development_system import (
+    AutonomousDevelopmentSystem,
 )
-from langchain_api.sandbox.self_learning_system import (
-    analyze_development_effectiveness, analyze_code_quality, record_task_performance,
-    add_feedback, get_improvement_recommendations, suggest_process_improvements
+from langchain_api.sandbox.ci_pipeline import (
+    get_ci_status,
+    run_tests,
+    validate_code_quality,
 )
 from langchain_api.sandbox.production_validation_system import (
-    validate_changes_for_deployment, approve_validation_for_deployment, deploy_validated_changes,
-    create_pull_request_for_changes, monitor_deployment_status, rollback_deployment_safe,
-    get_validation_report_safe, list_all_validations, list_all_deployments
+    approve_validation_for_deployment,
+    create_pull_request_for_changes,
+    deploy_validated_changes,
+    get_validation_report_safe,
+    list_all_deployments,
+    list_all_validations,
+    monitor_deployment_status,
+    rollback_deployment_safe,
+    validate_changes_for_deployment,
 )
+from langchain_api.sandbox.self_learning_system import (
+    add_feedback,
+    analyze_code_quality,
+    analyze_development_effectiveness,
+    get_improvement_recommendations,
+    record_task_performance,
+    suggest_process_improvements,
+)
+from langchain_api.sandbox.task_planning_system import (
+    create_task_plan,
+    estimate_task_complexity,
+    get_task_plan,
+    list_task_plans,
+)
+from langchain_api.utils.openai_proxy_client import create_openai_client
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -910,11 +925,11 @@ async def execute_sandbox_command(command: str) -> str:
         "dd if=/dev/zero", "mkfs", "fdisk", "parted",
         "shutdown", "reboot", "halt", "poweroff"
     ]
-    
+
     for forbidden in forbidden_commands:
         if forbidden in command:
             return f"❌ КОМАНДА ЗАПРЕЩЕНА: {command} (опасная операция)"
-    
+
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(
@@ -932,7 +947,7 @@ async def execute_sandbox_command(command: str) -> str:
 def read_project_file(path: str) -> str:
     """Читает содержимое файла проекта."""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             content = f.read()
             return f"File: {path}\nSize: {len(content)} characters\n\nContent:\n{content}"
     except FileNotFoundError:
@@ -953,7 +968,7 @@ async def execute_tool_call(tool_call) -> str:
     try:
         function_name = tool_call.function.name
         arguments = json.loads(tool_call.function.arguments)
-        
+
         if function_name == "execute_sandbox_command":
             return await execute_sandbox_command(arguments["command"])
         elif function_name == "read_project_file":
@@ -1061,15 +1076,15 @@ async def execute_tool_call(tool_call) -> str:
                             return _task_executor
                     except (ImportError, AttributeError) as e:
                         print(f"🔍 DEBUG: Не удалось получить _task_executor из main.py: {e}")
-                    
+
                     # Fallback на оригинальный
                     from langchain_api.services.task_executor import task_executor
                     print(f"🔍 DEBUG: Используем task_executor из модуля, задач в нем: {len(task_executor.tasks)}")
                     return task_executor
-                
+
                 task_executor = get_global_task_executor()
                 tasks = task_executor.get_task_list(status=status if status else None)
-                
+
                 # 🔍 ДИАГНОСТИКА: Логируем детали
                 logger.info(f"🔍 GET_TASK_LIST: Найдено {len(tasks)} задач, статус фильтр: {status}")
                 logger.info(f"🔍 GET_TASK_LIST: ID экземпляра TaskExecutor: {id(task_executor)}")
@@ -1077,11 +1092,11 @@ async def execute_tool_call(tool_call) -> str:
                 if tasks:
                     for task in tasks[:3]:  # Логируем первые 3 задачи
                         logger.info(f"🔍 GET_TASK_LIST: Задача {task.id}: {task.name} (статус: {task.status.value})")
-                
+
                 # Форматируем результат для пользователя
                 if not tasks:
                     return f"📝 Список задач пуст{' (статус: ' + status + ')' if status else ''} (Проверено {len(task_executor.tasks)} общих задач)"
-                
+
                 result = f"📝 Список задач{' (статус: ' + status + ')' if status else ''} ({len(tasks)} шт.):\n\n"
                 for i, task in enumerate(tasks, 1):
                     result += f"{i}. **{task.name}** (ID: {task.id})\n"
@@ -1090,7 +1105,7 @@ async def execute_tool_call(tool_call) -> str:
                     if hasattr(task, 'description') and task.description:
                         result += f"   Описание: {task.description[:100]}{'...' if len(task.description) > 100 else ''}\n"
                     result += "\n"
-                
+
                 return result
             except Exception as e:
                 return f"❌ Ошибка получения списка задач: {str(e)}"
@@ -1107,22 +1122,22 @@ async def execute_tool_call(tool_call) -> str:
                             return _task_executor
                     except (ImportError, AttributeError) as e:
                         print(f"🔍 DEBUG: Не удалось получить _task_executor из main.py для execute_task: {e}")
-                    
+
                     # Fallback на оригинальный
                     from langchain_api.services.task_executor import task_executor
                     print(f"🔍 DEBUG: Используем task_executor из модуля для execute_task, задач в нем: {len(task_executor.tasks)}")
                     return task_executor
-                
+
                 task_executor = get_global_task_executor()
-                
+
                 # Получаем задачу для проверки её существования
                 task = task_executor.get_task(task_id)
                 if not task:
                     return f"❌ Задача с ID {task_id} не найдена"
-                
+
                 # Выполняем задачу
                 executed_task = task_executor.execute_next_task()
-                
+
                 if executed_task and executed_task.id == task_id:
                     if executed_task.status.value == "completed":
                         return f"✅ Задача '{executed_task.name}' (ID: {task_id}) успешно выполнена!\n\nРезультат: {executed_task.result}"
@@ -1130,7 +1145,7 @@ async def execute_tool_call(tool_call) -> str:
                         return f"❌ Задача '{executed_task.name}' (ID: {task_id}) завершилась с ошибкой:\n{executed_task.error}"
                 else:
                     return f"⏳ Задача '{task.name}' (ID: {task_id}) поставлена в очередь на выполнение"
-                    
+
             except Exception as e:
                 return f"❌ Ошибка выполнения задачи: {str(e)}"
         # Инструменты системы самообучения
@@ -1147,7 +1162,7 @@ async def execute_tool_call(tool_call) -> str:
             test_coverage = arguments.get("test_coverage", 0.0)
             code_quality_score = arguments.get("code_quality_score", 0.0)
             user_satisfaction = arguments.get("user_satisfaction")
-            
+
             result = record_task_performance(
                 task_id=arguments["task_id"],
                 task_type=arguments["task_type"],
@@ -1166,13 +1181,13 @@ async def execute_tool_call(tool_call) -> str:
             # Парсим дополнительные параметры
             context = arguments.get("context")
             priority = arguments.get("priority", "medium")
-            
+
             if context and isinstance(context, str):
                 try:
                     context = json.loads(context)
-                except:
+                except Exception:
                     context = None
-            
+
             result = add_feedback(
                 source=arguments["source"],
                 feedback_type=arguments["feedback_type"],
@@ -1239,87 +1254,87 @@ async def generate_enhanced_response_with_tools(
 ) -> str:
     """
     Генерирует ответ с использованием OpenAI Tools API.
-    
+
     Args:
         question: Вопрос пользователя
         chat_id: ID чата
         memory: Система памяти
         use_tools: Использовать ли инструменты
-        
+
     Returns:
         Ответ с результатами выполнения инструментов
     """
     try:
         # Строим контекст из памяти
         context = memory.build_context(chat_id, question)
-        
+
         # 🚀 F1 OPTIMIZATION: Fast-path для простых вопросов
         simple_question_patterns = [
             'привет', 'hello', 'как дела', 'how are you', 'спасибо', 'thank you',
             'пока', 'bye', 'хорошо', 'ok', 'да', 'yes', 'нет', 'no',
             'понятно', 'understood', 'ясно', 'clear'
         ]
-        
+
         # Определяем - простой ли это вопрос
         is_simple_question = any(pattern in question.lower() for pattern in simple_question_patterns)
         question_length = len(question.split())
-        
+
         # 🔧 ИСПРАВЛЕНИЕ: Определяем требует ли запрос обязательного использования инструментов
         tool_keywords = [
             'список задач', 'задач', 'get_task_list', 'покажи задачи', 'показать задачи',
             'выполни команду', 'команду', 'execute', 'файл', 'директория', 'ls', 'cat',
             'проверь', 'прочитай', 'запусти', 'тест', 'статус'
         ]
-        
+
         requires_tools = any(keyword in question.lower() for keyword in tool_keywords)
-        
+
         # 🚀 F1 FAST-PATH: Для простых вопросов (≤3 слова) без tool keywords - один запрос
         if (is_simple_question or question_length <= 3) and not requires_tools:
             logger.info(f"🚀 F1 FAST-PATH: Простой вопрос ({question_length} слов), пропускаем tools")
-            
+
             # Формируем простой prompt без инструментов
             simple_prompt = f"Контекст: {context}\n\nВопрос: {question}"
-            
+
             messages = [
                 {"role": "system", "content": "Ты - полезный AI ассистент. Отвечай кратко и по делу."},
                 {"role": "user", "content": simple_prompt}
             ]
-            
+
             # Единственный запрос к OpenAI БЕЗ инструментов
             response = openai_client.chat.completions.create(
                 model="gpt-4.1-mini",
                 temperature=0,
                 messages=messages
             )
-            
+
             answer = response.choices[0].message.content or "Извините, не удалось сгенерировать ответ."
-            
+
             # Сохраняем в память
             memory.add_to_short_term(chat_id, "user", question)
             memory.add_to_short_term(chat_id, "assistant", answer)
-            
-            logger.info(f"🚀 F1 FAST-PATH: Ответ сгенерирован одним запросом")
+
+            logger.info("🚀 F1 FAST-PATH: Ответ сгенерирован одним запросом")
             return answer
-        
+
         # 🔧 ОБЫЧНЫЙ ПУТЬ: Для сложных вопросов или требующих инструментов
-        logger.info(f"🔧 NORMAL PATH: Сложный вопрос или требует инструментов")
-        
+        logger.info("🔧 NORMAL PATH: Сложный вопрос или требует инструментов")
+
         # Формируем сообщения
         user_prompt = f"Контекст: {context}\n\nВопрос: {question}"
-        
+
         # 🔧 УЛУЧШЕНИЕ: Если запрос требует инструментов - делаем промпт более директивным
         if requires_tools:
             user_prompt += "\n\n⚠️ ВАЖНО: Этот запрос требует использования инструментов! Обязательно используй соответствующий инструмент для получения актуальных данных, не отвечай по памяти!"
-            
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT_TOOLS},
             *FEW_SHOT_EXAMPLES,
             {"role": "user", "content": user_prompt}
         ]
-        
+
         # 🔧 ИСПРАВЛЕНИЕ: Используем "required" для запросов требующих инструментов
         tool_choice = "required" if (requires_tools and use_tools) else ("auto" if use_tools else None)
-        
+
         # Первый запрос - получаем tool_calls
         response = openai_client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -1328,13 +1343,13 @@ async def generate_enhanced_response_with_tools(
             tool_choice=tool_choice,
             messages=messages
         )
-        
+
         msg = response.choices[0].message
         logger.info(f"Ответ LLM: {msg.content or 'Нет текста'}")
-        
+
         if msg.tool_calls and use_tools:
             logger.info(f"Обнаружены tool_calls: {len(msg.tool_calls)}")
-            
+
             # Выполняем все инструменты
             tool_results = []
             for call in msg.tool_calls:
@@ -1345,12 +1360,12 @@ async def generate_enhanced_response_with_tools(
                     "name": call.function.name,
                     "content": result
                 })
-            
+
             # Добавляем результаты в историю
             messages.extend([
                 {"role": "assistant", "content": None, "tool_calls": msg.tool_calls}
             ])
-            
+
             for result in tool_results:
                 messages.append({
                     "role": "tool",
@@ -1358,26 +1373,26 @@ async def generate_enhanced_response_with_tools(
                     "name": result["name"],
                     "content": result["content"]
                 })
-            
+
             # Второй запрос - получаем финальный ответ
             final_response = openai_client.chat.completions.create(
                 model="gpt-4.1-mini",
                 temperature=0,
                 messages=messages
             )
-            
+
             final_msg = final_response.choices[0].message
             answer = final_msg.content
-            
+
         else:
             answer = msg.content or "Извините, не удалось сгенерировать ответ."
-        
+
         # Сохраняем в память
         memory.add_to_short_term(chat_id, "user", question)
         memory.add_to_short_term(chat_id, "assistant", answer)
-        
+
         return answer
-        
+
     except Exception as e:
         logger.error(f"Ошибка генерации ответа: {e}")
         return f"❌ ОШИБКА: {str(e)}"
@@ -1396,27 +1411,27 @@ async def test_tools_integration():
     """Тестирует интеграцию инструментов."""
     print("🧪 Тестирование интеграции OpenAI Tools API")
     print("=" * 50)
-    
+
     memory = create_memory()  # A/B Backend Selector
     chat_id = 12345
-    
+
     test_questions = [
         "Проверь файлы в директории",
         "Какая текущая директория?",
         "Прочитай файл README.md"
     ]
-    
+
     for i, question in enumerate(test_questions, 1):
         print(f"\n{i}. Вопрос: {question}")
         print("-" * 30)
-        
+
         try:
             answer = await generate_enhanced_response_with_tools(question, chat_id, memory)
             print(f"Ответ: {answer[:200]}...")
         except Exception as e:
             print(f"❌ Ошибка: {e}")
-        
+
         print("=" * 50)
 
 if __name__ == "__main__":
-    asyncio.run(test_tools_integration()) 
+    asyncio.run(test_tools_integration())

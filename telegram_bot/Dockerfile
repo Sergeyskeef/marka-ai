@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
 ENV PYTHONPATH=/bot
 
 # Запускаем бота
-CMD ["python", "-m", "langchain_api.telegram_bot.bot"]
+CMD ["python", "-c", "import asyncio; from langchain_api.telegram_bot.bot import main; asyncio.run(main())"]

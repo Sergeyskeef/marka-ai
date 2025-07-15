@@ -3,9 +3,9 @@ SecurityManager - сервис для управления безопаснос�
 """
 
 import logging
-from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +29,13 @@ class TaskCategory(Enum):
 
 class SecurityManager:
     """Менеджер безопасности"""
-    
+
     def __init__(self):
-        self.users: Dict[str, Dict[str, Any]] = {}
-        self.permissions: Dict[str, List[str]] = {}
-        self.access_log: List[Dict[str, Any]] = []
+        self.users: dict[str, dict[str, Any]] = {}
+        self.permissions: dict[str, list[str]] = {}
+        self.access_log: list[dict[str, Any]] = []
         logger.info("✅ SecurityManager инициализирован")
-    
+
     def add_user(self, user_id: str, access_level: AccessLevel = AccessLevel.USER):
         """Добавляет пользователя"""
         self.users[user_id] = {
@@ -44,15 +44,15 @@ class SecurityManager:
             "last_access": datetime.now().isoformat()
         }
         logger.info(f"👤 Добавлен пользователь: {user_id} (уровень: {access_level.value})")
-    
+
     def check_permission(self, user_id: str, required_level: AccessLevel) -> bool:
         """Проверяет права доступа пользователя"""
         if user_id not in self.users:
             return False
-        
+
         user_level = AccessLevel(self.users[user_id]["access_level"])
         return user_level.value >= required_level.value
-    
+
     def log_access(self, user_id: str, action: str, resource: str, success: bool):
         """Логирует попытку доступа"""
         log_entry = {
@@ -63,24 +63,24 @@ class SecurityManager:
             "timestamp": datetime.now().isoformat()
         }
         self.access_log.append(log_entry)
-        
+
         if user_id in self.users:
             self.users[user_id]["last_access"] = datetime.now().isoformat()
-        
+
         level = "INFO" if success else "WARNING"
         logger.log(
             getattr(logging, level),
             f"🔐 Доступ: {user_id} -> {action} {resource} ({'разрешено' if success else 'отклонено'})"
         )
-    
-    def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
+
+    def get_user_info(self, user_id: str) -> dict[str, Any] | None:
         """Возвращает информацию о пользователе"""
         return self.users.get(user_id)
-    
-    def get_access_log(self, limit: int = 100) -> List[Dict[str, Any]]:
+
+    def get_access_log(self, limit: int = 100) -> list[dict[str, Any]]:
         """Возвращает лог доступа"""
         return self.access_log[-limit:] if self.access_log else []
-    
+
     def validate_task_category(self, category: TaskCategory, user_level: AccessLevel) -> bool:
         """Проверяет, может ли пользователь выполнять задачи данной категории"""
         if category == TaskCategory.SYSTEM:
@@ -89,8 +89,8 @@ class SecurityManager:
             return user_level in [AccessLevel.ADMIN, AccessLevel.SYSTEM]
         else:
             return True  # DEFAULT, OPTIONAL, MAINTENANCE доступны всем
-    
-    def get_security_stats(self) -> Dict[str, Any]:
+
+    def get_security_stats(self) -> dict[str, Any]:
         """Возвращает статистику безопасности"""
         return {
             "total_users": len(self.users),

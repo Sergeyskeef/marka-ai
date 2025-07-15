@@ -1,11 +1,12 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from telegram import Update, Message
-from telegram.ext import ContextTypes
-from langchain_api.services.task_executor import TaskExecutor, TaskPriority, TaskCategory, AccessLevel
-import langchain_api.telegram_bot.bot as bot_module
-import subprocess
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from telegram import Message, Update
+from telegram.ext import ContextTypes
+
+import langchain_api.telegram_bot.bot as bot_module
+
 
 @pytest.fixture
 def update():
@@ -45,9 +46,9 @@ async def test_sandbox_exec_cmd_success(update, context, patch_task_executor):
     """Тест успешного выполнения команды /sandbox_exec"""
     context.args = ["echo", "test"]
     patch_task_executor.execute_sandbox_command.return_value = (True, "test output")
-    
+
     await bot_module.sandbox_exec_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("✅ Команда выполнена успешно:\n\ntest output")
 
@@ -56,9 +57,9 @@ async def test_sandbox_exec_cmd_failure(update, context, patch_task_executor):
     """Тест ошибки выполнения команды /sandbox_exec"""
     context.args = ["invalid_command"]
     patch_task_executor.execute_sandbox_command.return_value = (False, "command not found")
-    
+
     await bot_module.sandbox_exec_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("❌ Ошибка выполнения команды:\n\ncommand not found")
 
@@ -66,9 +67,9 @@ async def test_sandbox_exec_cmd_failure(update, context, patch_task_executor):
 async def test_sandbox_diff_cmd_success(update, context, patch_task_executor):
     """Тест успешного получения диффа через /sandbox_diff"""
     patch_task_executor.create_sandbox_diff.return_value = (True, "diff output")
-    
+
     await bot_module.sandbox_diff_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("📝 Изменения в песочнице:\n\n```\ndiff output\n```")
 
@@ -76,9 +77,9 @@ async def test_sandbox_diff_cmd_success(update, context, patch_task_executor):
 async def test_sandbox_diff_cmd_no_changes(update, context, patch_task_executor):
     """Тест получения пустого диффа через /sandbox_diff"""
     patch_task_executor.create_sandbox_diff.return_value = (True, "")
-    
+
     await bot_module.sandbox_diff_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("ℹ️ Нет изменений в песочнице")
 
@@ -86,9 +87,9 @@ async def test_sandbox_diff_cmd_no_changes(update, context, patch_task_executor)
 async def test_sandbox_diff_cmd_failure(update, context, patch_task_executor):
     """Тест ошибки получения диффа через /sandbox_diff"""
     patch_task_executor.create_sandbox_diff.return_value = (False, "error getting diff")
-    
+
     await bot_module.sandbox_diff_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("❌ Ошибка получения изменений:\n\nerror getting diff")
 
@@ -96,9 +97,9 @@ async def test_sandbox_diff_cmd_failure(update, context, patch_task_executor):
 async def test_sandbox_apply_cmd_success(update, context, patch_task_executor):
     """Тест успешного применения изменений через /sandbox_apply"""
     patch_task_executor.apply_sandbox_changes.return_value = (True, "success")
-    
+
     await bot_module.sandbox_apply_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("✅ Изменения успешно применены")
 
@@ -106,9 +107,9 @@ async def test_sandbox_apply_cmd_success(update, context, patch_task_executor):
 async def test_sandbox_apply_cmd_failure(update, context, patch_task_executor):
     """Тест ошибки применения изменений через /sandbox_apply"""
     patch_task_executor.apply_sandbox_changes.return_value = (False, "error applying changes")
-    
+
     await bot_module.sandbox_apply_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("❌ Ошибка применения изменений:\n\nerror applying changes")
 
@@ -116,9 +117,9 @@ async def test_sandbox_apply_cmd_failure(update, context, patch_task_executor):
 async def test_sandbox_validate_cmd_success(update, context, patch_task_executor):
     """Тест успешной валидации изменений через /sandbox_validate"""
     patch_task_executor.validate_sandbox_changes.return_value = (True, "success")
-    
+
     await bot_module.sandbox_validate_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("✅ Изменения прошли валидацию")
 
@@ -126,9 +127,9 @@ async def test_sandbox_validate_cmd_success(update, context, patch_task_executor
 async def test_sandbox_validate_cmd_failure(update, context, patch_task_executor):
     """Тест ошибки валидации изменений через /sandbox_validate"""
     patch_task_executor.validate_sandbox_changes.return_value = (False, "validation failed")
-    
+
     await bot_module.sandbox_validate_cmd(update, context)
-    
+
     patch_task_executor.create_task.assert_called_once()
     update.message.reply_text.assert_called_once_with("❌ Ошибка валидации изменений:\n\nvalidation failed")
 
@@ -187,4 +188,4 @@ def test_accept_improvement_creates_task(monkeypatch):
     # Проверяем, что бот сообщил о создании задачи
     reply_text = update.message.reply_text.call_args[0][0]
     assert "Автоматически создана задача" in reply_text
-    assert "test-task-id" in reply_text 
+    assert "test-task-id" in reply_text

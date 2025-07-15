@@ -1,5 +1,6 @@
 import time
 import uuid
+
 from langchain_api.memory.memory_manager import MemoryManager
 
 TEST_QUESTION = "Тестовый вопрос для проверки рефлексии и важно сохранить опыт"
@@ -64,4 +65,4 @@ if __name__ == "__main__":
     else:
         print("[SKIP] Вопрос не содержит ключевых слов для Experience.")
 
-    print("[TEST] Проверка завершена.") 
+    print("[TEST] Проверка завершена.")

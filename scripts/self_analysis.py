@@ -1,10 +1,11 @@
-import os
 import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any
+
 from core.code_analysis import CodeAnalyzer
+
 
 class SelfAnalyzer:
     def __init__(self, project_root: str = None):
@@ -15,10 +16,10 @@ class SelfAnalyzer:
         else:
             self.project_root = Path(project_root)
         self.logger = logging.getLogger(__name__)
-        
+
         # Инициализация CodeAnalyzer
         self.code_analyzer = CodeAnalyzer(project_root)
-        
+
         # Пути к важным файлам и директориям
         self.paths = {
             'logs': self.project_root / 'logs',
@@ -27,7 +28,7 @@ class SelfAnalyzer:
             'tests': self.project_root / 'tests',
             'scripts': self.project_root / 'scripts'
         }
-        
+
         # Шаблоны для типовых выводов
         self.templates = {
             'system_health': {
@@ -51,8 +52,8 @@ class SelfAnalyzer:
                 'error': "Критические проблемы с качеством кода: {details}"
             }
         }
-        
-    def analyze_logs(self) -> Dict:
+
+    def analyze_logs(self) -> dict:
         """Анализирует логи системы и возвращает статистику"""
         stats = {
             'errors': [],
@@ -60,11 +61,11 @@ class SelfAnalyzer:
             'info': [],
             'last_update': None
         }
-        
+
         # Анализ основных логов
         for log_file in self.paths['logs'].glob('*.log'):
             try:
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(log_file, encoding='utf-8') as f:
                     for line in f:
                         if 'ERROR' in line:
                             stats['errors'].append(line.strip())
@@ -74,11 +75,11 @@ class SelfAnalyzer:
                             stats['info'].append(line.strip())
             except Exception as e:
                 self.logger.error(f"Ошибка при чтении лога {log_file}: {e}")
-        
+
         # Анализ логов песочницы
         if self.paths['sandbox_logs'].exists():
             try:
-                with open(self.paths['sandbox_logs'], 'r', encoding='utf-8') as f:
+                with open(self.paths['sandbox_logs'], encoding='utf-8') as f:
                     for line in f:
                         if 'ERROR' in line:
                             stats['errors'].append(line.strip())
@@ -88,16 +89,16 @@ class SelfAnalyzer:
                             stats['info'].append(line.strip())
             except Exception as e:
                 self.logger.error(f"Ошибка при чтении лога песочницы: {e}")
-        
+
         stats['last_update'] = datetime.now().isoformat()
         return stats
-    
-    def analyze_passport(self) -> Dict:
+
+    def analyze_passport(self) -> dict:
         """Анализирует текущее состояние паспорта"""
         try:
-            with open(self.paths['passport'], 'r', encoding='utf-8') as f:
+            with open(self.paths['passport'], encoding='utf-8') as f:
                 passport = json.load(f)
-            
+
             return {
                 'version': passport.get('version', 'unknown'),
                 'last_update': passport.get('last_update', 'unknown'),
@@ -107,18 +108,18 @@ class SelfAnalyzer:
         except Exception as e:
             self.logger.error(f"Ошибка при анализе паспорта: {e}")
             return {'status': 'error', 'error': str(e)}
-    
-    def _validate_passport(self, passport: Dict) -> bool:
+
+    def _validate_passport(self, passport: dict) -> bool:
         """Проверяет валидность паспорта"""
         required_fields = ['version', 'last_update', 'components']
         return all(field in passport for field in required_fields)
-    
-    def analyze_codebase(self) -> Dict[str, Any]:
+
+    def analyze_codebase(self) -> dict[str, Any]:
         """Анализ кодовой базы"""
         try:
             # Анализируем кодовую базу
             analysis = self.code_analyzer.analyze_codebase()
-            
+
             # Проверяем наличие метрик
             if not analysis:
                 return {
@@ -126,14 +127,14 @@ class SelfAnalyzer:
                     'message': 'Не удалось получить метрики кода',
                     'metrics': {}
                 }
-            
+
             # Получаем метрики сложности
             complexity_metrics = analysis.get('complexity_metrics', {})
-            
+
             # Определяем статус на основе метрик
             status = 'good'
             message = 'Код в хорошем состоянии'
-            
+
             if analysis.get('total_files', 0) > 0:
                 test_ratio = complexity_metrics.get('test_files', 0) / analysis.get('total_files', 1)
                 if test_ratio < 0.3:
@@ -145,7 +146,7 @@ class SelfAnalyzer:
                 elif complexity_metrics.get('avg_args_per_function', 0) > 5:
                     status = 'warning'
                     message = 'Высокая сложность функций'
-            
+
             return {
                 'status': status,
                 'message': message,
@@ -159,7 +160,7 @@ class SelfAnalyzer:
                     'test_files': complexity_metrics.get('test_files', 0)
                 }
             }
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка при анализе кодовой базы: {str(e)}")
             return {
@@ -167,13 +168,13 @@ class SelfAnalyzer:
                 'message': f'Ошибка при анализе кода: {str(e)}',
                 'metrics': {}
             }
-    
-    def generate_report(self) -> Dict:
+
+    def generate_report(self) -> dict:
         """Генерирует полный отчёт о состоянии системы"""
         log_stats = self.analyze_logs()
         passport_stats = self.analyze_passport()
         code_quality = self.analyze_codebase()
-        
+
         report = {
             'timestamp': datetime.now().isoformat(),
             'system_health': self._assess_system_health(log_stats),
@@ -183,10 +184,10 @@ class SelfAnalyzer:
             'code_quality': code_quality,
             'recommendations': self._generate_recommendations(log_stats, passport_stats, code_quality)
         }
-        
+
         return report
-    
-    def _assess_system_health(self, log_stats: Dict) -> Dict:
+
+    def _assess_system_health(self, log_stats: dict) -> dict:
         """Оценивает общее состояние системы"""
         if not log_stats['errors']:
             return {'status': 'good', 'message': self.templates['system_health']['good']}
@@ -204,44 +205,44 @@ class SelfAnalyzer:
                     issues=', '.join(log_stats['errors'][:3])
                 )
             }
-    
-    def _assess_memory_status(self) -> Dict:
+
+    def _assess_memory_status(self) -> dict:
         """Оценивает состояние памяти"""
         # TODO: Реализовать проверку использования памяти
         return {'status': 'good', 'message': self.templates['memory_usage']['good']}
-    
-    def _assess_performance(self) -> Dict:
+
+    def _assess_performance(self) -> dict:
         """Оценивает производительность системы"""
         # TODO: Реализовать проверку производительности
         return {'status': 'good', 'message': self.templates['performance']['good']}
-    
-    def _generate_recommendations(self, log_stats: Dict, passport_stats: Dict, code_quality: Dict) -> List[str]:
+
+    def _generate_recommendations(self, log_stats: dict, passport_stats: dict, code_quality: dict) -> list[str]:
         """Генерирует рекомендации на основе анализа"""
         recommendations = []
-        
+
         # Рекомендации на основе логов
         if log_stats['errors']:
             recommendations.append("Рекомендуется проверить и исправить ошибки в логах")
         if log_stats['warnings']:
             recommendations.append("Обратить внимание на предупреждения в логах")
-        
+
         # Рекомендации на основе паспорта
         if passport_stats['status'] == 'invalid':
             recommendations.append("Требуется обновление паспорта")
-        
+
         # Рекомендации на основе качества кода
         if code_quality['status'] == 'warning':
             if code_quality['metrics'].get('test_files', 0) / code_quality['metrics'].get('total_files', 1) < 0.3:
                 recommendations.append("Рекомендуется увеличить покрытие тестами")
             if code_quality['metrics'].get('avg_methods_per_class', 0) > 10:
                 recommendations.append("Рекомендуется уменьшить сложность классов")
-        
+
         return recommendations
-    
+
     def get_analysis(self) -> str:
         """Возвращает человеко-понятный отчёт о состоянии системы"""
         report = self.generate_report()
-        
+
         analysis = f"""Отчёт о состоянии системы (сгенерирован {report['timestamp']})
 
 1. Общее состояние: {report['system_health']['message']}
@@ -261,4 +262,4 @@ class SelfAnalyzer:
 Рекомендации:
 {chr(10).join('- ' + rec for rec in report['recommendations'])}
 """
-        return analysis 
+        return analysis

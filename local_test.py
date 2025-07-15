@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Тест для проверки работы LLM."""
 
+import logging
 import os
 import sys
+
 import httpx
-import logging
+from langchain.schema import HumanMessage, SystemMessage
 from openai import OpenAI
-from langchain.schema import SystemMessage, HumanMessage
 
 # Настройка логирования
 logging.basicConfig(
@@ -19,17 +19,17 @@ def get_proxy_config():
     """Получает настройки прокси из переменных окружения."""
     http_proxy = os.getenv("HTTP_PROXY", "")
     https_proxy = os.getenv("HTTPS_PROXY", "")
-    
+
     if not (http_proxy or https_proxy):
         print("ВНИМАНИЕ: Переменные HTTP_PROXY и HTTPS_PROXY не найдены!")
         return {}
-    
+
     proxies = {}
     if http_proxy:
         proxies["http://"] = http_proxy
     if https_proxy:
         proxies["https://"] = https_proxy
-    
+
     return proxies
 
 def get_httpx_client():
@@ -44,11 +44,11 @@ def get_httpx_client():
 def create_openai_client():
     """Создает клиент OpenAI с настроенным прокси."""
     http_client = get_httpx_client()
-    
+
     # Если прокси не настроен, вернем клиент по умолчанию
     if http_client is None:
         return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    
+
     return OpenAI(
         api_key=os.getenv("OPENAI_API_KEY"),
         http_client=http_client
@@ -85,21 +85,21 @@ def chat_with_gpt(prompt, model="gpt-4.1-mini"):
 if __name__ == "__main__":
     # Загружаем переменные окружения из .env файла
     # Считываем API_KEY из .env файла
-    with open('.env', 'r') as f:
+    with open('.env') as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith('#'):
                 key, value = line.split('=', 1)
                 os.environ[key] = value.strip('"\'')
-    
+
     # Получаем запрос
     query = sys.argv[1] if len(sys.argv) > 1 else "Кто такой Марк?"
-    
+
     print(f"Запрос: {query}")
     print("-" * 80)
-    
+
     # Отправляем запрос
     answer = chat_with_gpt(query)
-    
+
     print(f"Ответ: {answer}")
-    print("-" * 80) 
+    print("-" * 80)

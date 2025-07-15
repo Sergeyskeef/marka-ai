@@ -9,9 +9,9 @@
 Запускать из контейнера app или sandbox:
     python3 langchain_api/scripts/generate_project_map.py
 """
-import os
 import ast
 import json
+import os
 import subprocess
 
 PROJECT_ROOTS = [
@@ -19,7 +19,7 @@ PROJECT_ROOTS = [
     "memory",
     "utils",
     "rag",
-    
+
     "telegram_bot",
     "core_docs",
     "extras",
@@ -37,7 +37,7 @@ for root in PROJECT_ROOTS:
             fpath = os.path.join(dirpath, fname)
             rel_fpath = os.path.relpath(fpath)
             try:
-                with open(fpath, "r", encoding="utf-8") as f:
+                with open(fpath, encoding="utf-8") as f:
                     source = f.read()
                 tree = ast.parse(source, filename=fpath)
             except Exception as e:
@@ -58,9 +58,9 @@ for root in PROJECT_ROOTS:
                 elif isinstance(node, ast.FunctionDef):
                     functions.add(node.name)
             result["modules"][rel_fpath] = {
-                "imports": sorted(list(imports)),
-                "classes": sorted(list(classes)),
-                "functions": sorted(list(functions)),
+                "imports": sorted(imports),
+                "classes": sorted(classes),
+                "functions": sorted(functions),
             }
             # Добавляем рёбра для внутренних импортов
             for imp in imports:
@@ -70,7 +70,7 @@ for root in PROJECT_ROOTS:
 
 # Добавляем инсайты из дневника пробуждения
 try:
-    with open("sandbox_awakenings.log", "r", encoding="utf-8") as f:
+    with open("sandbox_awakenings.log", encoding="utf-8") as f:
         lines = f.readlines()
     for line in reversed(lines):
         if "| INSIGHT |" in line or "| REFLECTION |" in line:
@@ -109,4 +109,4 @@ try:
         f.write('</graphml>\n')
     print("✅ Карта архитектуры сохранена в project_map.graphml (GraphML)")
 except Exception as e:
-    print(f"❌ Ошибка при сохранении GraphML: {e}") 
+    print(f"❌ Ошибка при сохранении GraphML: {e}")
