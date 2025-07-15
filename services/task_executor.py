@@ -274,6 +274,77 @@ class TaskExecutor:
                 for category in TaskCategory
             }
         }
+    
+    async def enqueue(self, task: dict) -> str:
+        """Добавляет задачу в очередь (Slim TaskExecutor API)"""
+        task_type = task.get("type", "unknown")
+        content = task.get("content", "")
+        metadata = task.get("metadata", {})
+        
+        # Создаем задачу
+        new_task = self.create_task(
+            title=f"Task {task_type}",
+            description=content[:100] + "..." if len(content) > 100 else content,
+            parameters={"type": task_type, "content": content, "metadata": metadata}
+        )
+        
+        # Запускаем выполнение в фоне
+        asyncio.create_task(self.execute_task(new_task.id))
+        
+        return new_task.id
+    
+    async def get_status(self, task_id: str) -> dict:
+        """Получает статус задачи (Slim TaskExecutor API)"""
+        task = self.get_task(task_id)
+        if not task:
+            return {"status": "not_found", "error": "Task not found"}
+        
+        return {
+            "status": task.status.value,
+            "result": task.result,
+            "error": task.error
+        }
+    
+    async def complete_task(self, task_id: str, result: dict) -> None:
+        """Завершает задачу с результатом (Slim TaskExecutor API)"""
+        task = self.get_task(task_id)
+        if not task:
+            return
+        
+        success = result.get("success", True)
+        error_message = result.get("error") if not success else None
+        
+        updated_task = self.complete_task(task_id, success=success, error_message=error_message)
+        
+        # Записываем завершение задачи в память Graphiti
+        if updated_task:
+            try:
+                from langchain_api.core.memory.memory_manager import memory_manager
+                
+                # Создаем текст эпизода
+                episode_text = f"Task {task_id} completed: {updated_task.title}"
+                if updated_task.result:
+                    episode_text += f" - Result: {str(updated_task.result)}"
+                if updated_task.error:
+                    episode_text += f" - Error: {updated_task.error}"
+                
+                # Метаданные задачи
+                metadata = {
+                    "task_id": task_id,
+                    "type": "task_completion",
+                    "success": success,
+                    "category": updated_task.category.value,
+                    "priority": updated_task.priority.value,
+                    "execution_time": (updated_task.completed_at - updated_task.started_at).total_seconds() if updated_task.started_at and updated_task.completed_at else None
+                }
+                
+                # Добавляем в память
+                await memory_manager.add_episode(episode_text, metadata)
+                logger.info(f"✅ Завершение задачи {task_id} записано в память Graphiti")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка записи завершения задачи {task_id} в память: {str(e)}")
+                # Не прерываем выполнение, если запись в память не удалась
 
 
 # Глобальный экземпляр TaskExecutor

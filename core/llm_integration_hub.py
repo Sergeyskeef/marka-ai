@@ -13,11 +13,12 @@ from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, asdict
 import re
 
-from .context.context_manager import ContextManager
+# Удалены импорты context и learning_system
+# from .context.context_manager import ContextManager
+# from .context.action_system import ActionSystem
+# from .learning_system import LearningSystem
 
 from .memory.enhanced_memory import EnhancedMemory
-from .context.action_system import ActionSystem
-from .learning_system import LearningSystem
 from .tools_registry import ToolsRegistry, get_tools_registry
 from .command_monitoring import CommandMonitoringSystem
 from langchain_api.services.task_executor import task_executor, Task, TaskPriority, TaskStatus, TaskCategory, AccessLevel
@@ -75,10 +76,11 @@ class LLMIntegrationHub:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.memory_manager = None  # Удален MemoryManager
-        self.context_manager = ContextManager(self.memory_manager)
-        self.action_system = ActionSystem(self.memory_manager)
+        # Удалены context_manager, action_system, learning_system
+        # self.context_manager = ContextManager(self.memory_manager)
+        # self.action_system = ActionSystem(self.memory_manager)
+        # self.learning_system = LearningSystem(self.enhanced_memory, self.context_manager)
         self.enhanced_memory = EnhancedMemory()
-        self.learning_system = LearningSystem(self.enhanced_memory, self.context_manager)
         self.tools_registry = get_tools_registry()
         self.command_monitoring = CommandMonitoringSystem()
         self.task_executor = task_executor
@@ -113,13 +115,7 @@ class LLMIntegrationHub:
     async def _load_system_context(self) -> None:
         """Загрузка системного контекста."""
         try:
-            # Обновляем контекст без memory_manager
-            await self.context_manager.update_context({
-                'identity': {'name': 'Mark', 'version': '2.0'},
-                'system_capabilities': {'memory': 'enhanced', 'learning': 'active'},
-                'initialization_time': datetime.now().isoformat()
-            })
-            
+            # Упрощенная загрузка контекста без context_manager
             self.logger.info("Системный контекст загружен")
             
         except Exception as e:
@@ -135,12 +131,6 @@ class LLMIntegrationHub:
             # Получаем доступные инструменты
             tools = self.tools_registry.get_tools()
             
-            # Обновляем контекст с информацией об инструментах
-            await self.context_manager.update_context({
-                'available_tools_count': len(tools),
-                'tools_categories': self._categorize_tools(tools)
-            })
-            
             self.logger.info(f"Реестр инструментов обновлен: {len(tools)} инструментов")
             
         except Exception as e:
@@ -150,12 +140,7 @@ class LLMIntegrationHub:
     async def _initialize_components(self) -> None:
         """Инициализация компонентов системы."""
         try:
-            # Инициализируем систему обучения
-            await self.learning_system.initialize()
-            
-            # Инициализируем систему действий
-            await self.action_system.initialize()
-            
+            # Упрощенная инициализация без context и learning систем
             self.logger.info("Компоненты системы инициализированы")
             
         except Exception as e:
@@ -242,8 +227,8 @@ class LLMIntegrationHub:
         """Получение последних действий."""
         try:
             # Получаем последние действия из ActionSystem
-            actions = await self.action_system.get_recent_actions(limit=10)
-            return actions  # Метод уже возвращает список словарей
+            # Удален ActionSystem, поэтому заглушка
+            return []
         except Exception as e:
             self.logger.error(f"Ошибка получения последних действий: {e}")
             return []
@@ -280,8 +265,8 @@ class LLMIntegrationHub:
         """Получение последних инсайтов."""
         try:
             # Получаем инсайты из системы обучения
-            insights = await self.learning_system.get_recent_insights(limit=5)
-            return insights  # Метод уже возвращает список словарей
+            # Удален LearningSystem, поэтому заглушка
+            return []
         except Exception as e:
             self.logger.error(f"Ошибка получения последних инсайтов: {e}")
             return []
@@ -466,7 +451,8 @@ class LLMIntegrationHub:
         """Анализ ответа от LLM."""
         try:
             # Анализируем ответ через ContextManager
-            analysis = await self.context_manager.analyze_llm_response(response.content, request.prompt)
+            # Удален ContextManager, поэтому заглушка
+            analysis = {}
             
             # Обновляем метаданные ответа
             response.metadata = {
@@ -485,7 +471,8 @@ class LLMIntegrationHub:
         """Обновление контекста на основе ответа."""
         try:
             # Обновляем контекст через ContextManager
-            await self.context_manager.update_context_from_analysis(response.metadata.get('analysis', {}))
+            # Удален ContextManager, поэтому заглушка
+            pass
             
             # Обновляем время последнего обновления
             self.last_context_update = datetime.now().isoformat()
@@ -570,15 +557,25 @@ class LLMIntegrationHub:
     async def update_context(self, updates: Dict[str, Any]) -> None:
         """Обновление контекста системы."""
         try:
-            await self.context_manager.update_context(updates)
-            self.last_context_update = datetime.now().isoformat()
+            # Удален ContextManager, поэтому заглушка
+            pass
+            
+            # Логируем обновление контекста
+            self.command_monitoring.log_command(
+                command="update_system_context",
+                source="llm_integration_hub",
+                user_id="system",
+                parameters=updates
+            )
+            
         except Exception as e:
             self.logger.error(f"Ошибка обновления контекста: {e}")
     
     async def get_context(self) -> Dict[str, Any]:
         """Получение текущего контекста."""
         try:
-            return self.context_manager.get_context()
+            # Удален ContextManager, поэтому заглушка
+            return {}
         except Exception as e:
             self.logger.error(f"Ошибка получения контекста: {e}")
             return {}
@@ -596,10 +593,7 @@ class LLMIntegrationHub:
                     'success_rate': self.response_count / max(self.request_count, 1)
                 },
                 'component_status': {
-                    'context_manager': 'active',
                     'memory_manager': 'active',
-                    'action_system': 'active',
-                    'learning_system': 'active',
                     'tools_registry': 'active'
                 }
             }
@@ -651,8 +645,8 @@ class LLMIntegrationHub:
         """Завершение работы компонентов."""
         try:
             # Завершаем работу компонентов
-            await self.learning_system.shutdown()
-            await self.action_system.shutdown()
+            # Удалены learning_system, action_system, context_manager
+            pass
             
         except Exception as e:
             self.logger.error(f"Ошибка завершения компонентов: {e}")
@@ -660,7 +654,7 @@ class LLMIntegrationHub:
     async def _analyze_task_creation(self, request: LLMRequest, context: Dict[str, Any]) -> Dict[str, Any]:
         """Анализ запроса на предмет необходимости создания задачи."""
         try:
-            # 🔧 ИСПРАВЛЕНИЕ: Анализируем оригинальное сообщение пользователя, а не полный промпт
+            # �� ИСПРАВЛЕНИЕ: Анализируем оригинальное сообщение пользователя, а не полный промпт
             original_message = self._extract_original_message(request)
             
             prompt_lower = original_message.lower()
@@ -1071,7 +1065,8 @@ class LLMIntegrationHub:
         """Обновление контекста системы на основе изменений."""
         try:
             # Обновляем контекст в ContextManager
-            await self.context_manager.update_context(changes)
+            # Удален ContextManager, поэтому заглушка
+            pass
             
             # Логируем обновление контекста
             self.command_monitoring.log_command(
@@ -1091,7 +1086,8 @@ class LLMIntegrationHub:
         """Связывание связанных событий в контексте."""
         try:
             # Добавляем связи в контекст
-            await self.context_manager.add_event_links(event_id, related_events)
+            # Удален ContextManager, поэтому заглушка
+            pass
             
             # Логируем связывание
             self.command_monitoring.log_command(

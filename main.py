@@ -9,11 +9,11 @@ import subprocess
 import time
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import logging
 import json
 
-from fastapi import Body, FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import Body, FastAPI, HTTPException, Request, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -288,6 +288,14 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(..., description="Временная метка проверки")
     uptime: float = Field(..., description="Время работы системы в секундах")
 
+class MemoryRequest(BaseModel):
+    text: str = Field(..., description="Текст для сохранения в памяти")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Дополнительные метаданные")
+
+class SearchResponse(BaseModel):
+    items: List[Dict[str, Any]] = Field(..., description="Найденные элементы")
+    total: int = Field(..., description="Общее количество результатов")
+
 # API эндпоинты с улучшенной документацией
 
 @app.get("/", tags=["root"])
@@ -453,8 +461,19 @@ async def health_check():
     - Внешние сервисы
     """
     try:
+        # Базовый статус, если HealthService недоступен
         if not health_service:
-            raise HTTPException(status_code=503, detail="HealthService не инициализирован")
+            return HealthResponse(
+                status="degraded",
+                services={
+                    "health_service": "unavailable",
+                    "app": "running",
+                    "memory": "unknown",
+                    "sandbox": "unknown"
+                },
+                timestamp=str(time.time()),
+                uptime=0.0
+            )
         
         health_status = await health_service.get_health()
         
@@ -472,7 +491,71 @@ async def health_check():
         )
     except Exception as e:
         logger.error(f"Ошибка при проверке здоровья: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Ошибка проверки здоровья: {str(e)}")
+        # Возвращаем базовый статус вместо ошибки
+        return HealthResponse(
+            status="degraded",
+            services={
+                "health_service": "error",
+                "app": "running",
+                "memory": "unknown",
+                "sandbox": "unknown"
+            },
+            timestamp=str(time.time()),
+            uptime=0.0
+        )
+
+@app.post("/memory", tags=["memory"])
+async def add_memory(request: MemoryRequest):
+    """
+    Добавить информацию в память
+    
+    Сохраняет текст и метаданные в системе памяти Graphiti.
+    """
+    try:
+        # Импортируем MemoryManager
+        from langchain_api.core.memory.memory_manager import memory_manager
+        
+        # Добавляем эпизод в Graphiti
+        result = await memory_manager.add_episode(request.text, request.metadata)
+        
+        if result.get("success", True):
+            return {
+                "success": True,
+                "message": "Информация добавлена в память Graphiti",
+                "text": request.text[:100] + "..." if len(request.text) > 100 else request.text,
+                "episode_id": result.get("id")
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Ошибка Graphiti: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении в память: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка добавления в память: {str(e)}")
+
+@app.get("/search", response_model=SearchResponse, tags=["memory"])
+async def search_memory(q: str = Query(..., description="Поисковый запрос")):
+    """
+    Поиск в памяти
+    
+    Ищет информацию в системе памяти Graphiti по заданному запросу.
+    """
+    try:
+        # Импортируем MemoryManager
+        from langchain_api.core.memory.memory_manager import memory_manager
+        
+        # Ищем эпизоды в Graphiti
+        result = await memory_manager.search_episodes(q, limit=10)
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=f"Ошибка Graphiti: {result['error']}")
+        
+        return SearchResponse(
+            items=result.get("items", []),
+            total=result.get("total", 0)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при поиске в памяти: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка поиска в памяти: {str(e)}")
 
 @app.get("/metrics/prometheus", tags=["metrics"])
 async def get_prometheus_metrics():

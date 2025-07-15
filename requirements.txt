@@ -8,6 +8,7 @@ langchain-community==0.0.34
 # HTTP клиенты и серверы
 httpx[http2]==0.27.2
 h2
+aiohttp>=3.8.0
 fastapi>=0.68.0
 uvicorn>=0.15.0
 sse-starlette
@@ -44,3 +45,7 @@ matplotlib
 scikit-learn>=1.0.2
 numpy>=1.21.0
 
+
+# Graphiti и Neo4j
+neo4j==5.11.0
+graphiti==0.1.0

@@ -6,6 +6,9 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+# Импортируем GraphitiMemoryAdapter
+from .graphiti_adapter import graphiti_adapter
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,6 +60,56 @@ class MemoryManager:
         for name in self.memory_instances:
             self.clear_memory(name)
         logger.info("🧹 Очищены все типы памяти")
+    
+    # Новые методы для работы с Graphiti
+    async def add_episode(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Добавляет эпизод в Graphiti память"""
+        try:
+            result = await graphiti_adapter.create_episode(text, metadata)
+            if result.get("success", True):  # Graphiti может не возвращать success поле
+                self.memory_stats["total_entries"] += 1
+                logger.info(f"✅ Эпизод добавлен в память: {text[:50]}...")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка добавления эпизода: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def search_episodes(self, query: str, limit: int = 10) -> Dict[str, Any]:
+        """Ищет эпизоды в Graphiti памяти"""
+        try:
+            result = await graphiti_adapter.search_episodes(query, limit)
+            logger.info(f"🔍 Поиск выполнен: '{query}' -> {len(result.get('items', []))} результатов")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка поиска эпизодов: {str(e)}")
+            return {"items": [], "total": 0, "error": str(e)}
+    
+    async def get_episode(self, episode_id: str) -> Dict[str, Any]:
+        """Получает эпизод по ID"""
+        try:
+            result = await graphiti_adapter.get_episode(episode_id)
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения эпизода {episode_id}: {str(e)}")
+            return {"error": str(e)}
+    
+    async def list_episodes(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """Получает список эпизодов"""
+        try:
+            result = await graphiti_adapter.list_episodes(limit, offset)
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения списка эпизодов: {str(e)}")
+            return {"items": [], "total": 0, "error": str(e)}
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Проверяет здоровье Graphiti памяти"""
+        try:
+            result = await graphiti_adapter.health_check()
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки здоровья Graphiti: {str(e)}")
+            return {"status": "error", "error": str(e)}
 
 
 # Глобальный экземпляр MemoryManager

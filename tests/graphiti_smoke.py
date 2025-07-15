@@ -3,6 +3,7 @@
 GraphitiMemory Smoke Test
 Базовая валидация GraphitiMemory REST API и Neo4j подключения
 """
+import pytest
 import requests
 import uuid
 import time
@@ -12,6 +13,7 @@ from typing import Dict, Any
 BASE_URL = "http://localhost:7878"
 TIMEOUT = 10
 
+@pytest.mark.core
 def test_graphiti_health():
     """Проверка health endpoint GraphitiMemory"""
     print("🔍 Проверка health endpoint GraphitiMemory...")
@@ -24,6 +26,7 @@ def test_graphiti_health():
         print(f"❌ Health endpoint недоступен: {e}")
         return False
 
+@pytest.mark.core
 def test_put_get_node():
     """Основной smoke тест: создание и получение узла"""
     print("\n🔍 Тест PUT/GET операций с узлами...")
@@ -70,6 +73,7 @@ def test_put_get_node():
         print(f"❌ Ошибка в PUT/GET операциях: {e}")
         return False
 
+@pytest.mark.core
 def test_neo4j_connectivity():
     """Проверка подключения к Neo4j через GraphitiMemory"""
     print("\n🔍 Проверка подключения к Neo4j...")
@@ -90,6 +94,7 @@ def test_neo4j_connectivity():
         print(f"❌ Ошибка проверки Neo4j: {e}")
         return False
 
+@pytest.mark.core
 def test_graphiti_version():
     """Проверка версии GraphitiMemory"""
     print("\n🔍 Проверка версии GraphitiMemory...")

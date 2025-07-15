@@ -26,6 +26,9 @@ class NodeProperties(BaseModel):
     test_run: Optional[bool] = None
     pytest_test: Optional[bool] = None
 
+    class Config:
+        extra = "allow"  # ← разрешить любые дополнительные ключи
+
 class Node(BaseModel):
     """Модель узла GraphitiMemory"""
     id: str = Field(..., description="Уникальный идентификатор узла")
@@ -107,6 +110,17 @@ async def startup_event():
     
     if neo4j_connected:
         logger.info("✅ Neo4j подключение установлено")
+        
+        # Инициализация индексов и constraints
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(__file__))
+            from init_neo4j import init_neo4j_constraints_and_indexes
+            init_neo4j_constraints_and_indexes()
+            logger.info("✅ Индексы и constraints инициализированы")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка инициализации индексов: {e}")
     else:
         logger.warning("⚠️ Neo4j недоступен, используется in-memory режим")
 
@@ -160,33 +174,41 @@ async def get_stats():
 async def create_node(node: Node):
     """Создание узла"""
     node_id = node.id
-    
+    logger.info(f"Создание узла {node_id} типа {node.type}")
+    logger.info(f"Полученные свойства: {node.properties}")
+
+    # --- КОРРЕКТНАЯ ОБРАБОТКА extra-полей Pydantic v1 ---
+    base_props = node.properties.dict(exclude_none=True)
+    extra_props = getattr(node.properties, "__dict__", {}).get("_pydantic_extra", {})
+    props = {**base_props, **extra_props}
+    import json
+    for k, v in list(props.items()):
+        if isinstance(v, (list, dict)):
+            props[k] = json.dumps(v, ensure_ascii=False)
+    logger.info(f"PROPS to Neo4j → {props}")
+
     # Проверка на существование
     if node_id in in_memory_nodes:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Узел с ID {node_id} уже существует"
         )
-    
-    # Создание узла
+
     node_data = {
         "id": node_id,
         "type": node.type,
-        "properties": node.properties.dict(),
+        "properties": props,
         "created_at": datetime.now(),
         "updated_at": datetime.now()
     }
-    
+
     # Сохранение в Neo4j или in-memory
     if check_neo4j_connection():
         try:
             with neo4j_driver.session() as session:
                 session.run(
-                    "CREATE (n:GraphitiNode {id: $id, type: $type, properties: $properties, created_at: $created_at})",
-                    id=node_id,
-                    type=node.type,
-                    properties=node.properties.dict(),
-                    created_at=datetime.now().isoformat()
+                    f"CREATE (n:{node.type} $props)",
+                    props=props
                 )
             logger.info(f"Узел {node_id} создан в Neo4j")
         except Exception as e:
@@ -196,7 +218,7 @@ async def create_node(node: Node):
     else:
         # In-memory storage
         in_memory_nodes[node_id] = node_data
-    
+
     return {"message": f"Узел {node_id} создан", "id": node_id}
 
 @app.get("/nodes/{node_id}", response_model=NodeResponse)
@@ -208,16 +230,16 @@ async def get_node(node_id: str):
         try:
             with neo4j_driver.session() as session:
                 result = session.run(
-                    "MATCH (n:GraphitiNode {id: $id}) RETURN n",
+                    "MATCH (n {id: $id}) RETURN n",
                     id=node_id
                 )
                 record = result.single()
                 if record:
                     node = record["n"]
                     return NodeResponse(
-                        id=node["id"],
-                        type=node["type"],
-                        properties=node.get("properties", {}),
+                        id=node.get("id", node_id),
+                        type=list(node.labels)[0] if node.labels else "Unknown",
+                        properties=dict(node),
                         created_at=datetime.now(),
                         updated_at=datetime.now()
                     )
@@ -241,12 +263,115 @@ async def get_node(node_id: str):
     )
 
 @app.get("/nodes")
-async def list_nodes(limit: int = 10, offset: int = 0):
-    """Получение списка узлов"""
-    # Пока только in-memory
-    nodes_list = list(in_memory_nodes.values())
+async def list_nodes(limit: int = 10, offset: int = 0, search: Optional[str] = None):
+    """Получение списка узлов с опциональным поиском"""
+    nodes_list = []
     
-    # Пагинация
+    # Чтение из Neo4j
+    if check_neo4j_connection():
+        try:
+            with neo4j_driver.session() as session:
+                if search:
+                    # Поиск по тексту (с fallback для Community Edition)
+                    logger.info(f"Выполняется поиск: '{search}'")
+                    try:
+                        # Пробуем полнотекстовый поиск (Enterprise Edition)
+                        result = session.run("""
+                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search) 
+                            YIELD node, score 
+                            RETURN node, score 
+                            ORDER BY score DESC 
+                            SKIP $offset LIMIT $limit
+                        """, search=search, offset=offset, limit=limit)
+                        
+                        for record in result:
+                            node = record["node"]
+                            score = record["score"]
+                            node_data = {
+                                "id": node.get("id", str(uuid.uuid4())),
+                                "type": list(node.labels)[0] if node.labels else "Unknown",
+                                "properties": dict(node),
+                                "score": score,
+                                "created_at": datetime.now(),
+                                "updated_at": datetime.now()
+                            }
+                            nodes_list.append(node_data)
+                        
+                        # Общее количество для поиска
+                        count_result = session.run("""
+                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search) 
+                            YIELD node 
+                            RETURN count(node) as total
+                        """, search=search)
+                        total = count_result.single()["total"]
+                        
+                    except Exception as e:
+                        if "ProcedureNotFound" in str(e) or "There is no such fulltext schema index" in str(e):
+                            # Fallback для Community Edition - поиск через LIKE
+                            logger.info("Используется LIKE поиск (Community Edition)")
+                            result = session.run("""
+                                MATCH (n:Episode) 
+                                WHERE toLower(n.msg) CONTAINS toLower($search)
+                                RETURN n
+                                ORDER BY n.created_at DESC 
+                                SKIP $offset LIMIT $limit
+                            """, search=search, offset=offset, limit=limit)
+                            
+                            for record in result:
+                                node = record["n"]
+                                node_data = {
+                                    "id": node.get("id", str(uuid.uuid4())),
+                                    "type": list(node.labels)[0] if node.labels else "Unknown",
+                                    "properties": dict(node),
+                                    "score": 1.0,  # Нет score для LIKE поиска
+                                    "created_at": datetime.now(),
+                                    "updated_at": datetime.now()
+                                }
+                                nodes_list.append(node_data)
+                            
+                            # Общее количество для поиска
+                            count_result = session.run("""
+                                MATCH (n:Episode) 
+                                WHERE toLower(n.msg) CONTAINS toLower($search)
+                                RETURN count(n) as total
+                            """, search=search)
+                            total = count_result.single()["total"]
+                        else:
+                            raise e
+                else:
+                    # Обычный список узлов
+                    result = session.run(
+                        "MATCH (n) RETURN n ORDER BY n.created_at DESC SKIP $offset LIMIT $limit",
+                        offset=offset, limit=limit
+                    )
+                    for record in result:
+                        node = record["n"]
+                        node_data = {
+                            "id": node.get("id", str(uuid.uuid4())),
+                            "type": list(node.labels)[0] if node.labels else "Unknown",
+                            "properties": dict(node),
+                            "created_at": datetime.now(),
+                            "updated_at": datetime.now()
+                        }
+                        nodes_list.append(node_data)
+                    
+                    # Общее количество
+                    count_result = session.run("MATCH (n) RETURN count(n) as total")
+                    total = count_result.single()["total"]
+                
+                logger.info(f"Загружено {len(nodes_list)} узлов из Neo4j")
+                return {
+                    "nodes": nodes_list,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "search": search
+                }
+        except Exception as e:
+            logger.error(f"Ошибка чтения узлов из Neo4j: {e}")
+    
+    # Fallback to in-memory
+    nodes_list = list(in_memory_nodes.values())
     start = offset
     end = offset + limit
     paginated_nodes = nodes_list[start:end]
@@ -255,7 +380,8 @@ async def list_nodes(limit: int = 10, offset: int = 0):
         "nodes": paginated_nodes,
         "total": len(nodes_list),
         "limit": limit,
-        "offset": offset
+        "offset": offset,
+        "search": search
     }
 
 @app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -267,7 +393,7 @@ async def delete_node(node_id: str):
         try:
             with neo4j_driver.session() as session:
                 result = session.run(
-                    "MATCH (n:GraphitiNode {id: $id}) DELETE n RETURN count(n) as deleted",
+                    "MATCH (n {id: $id}) DELETE n RETURN count(n) as deleted",
                     id=node_id
                 )
                 record = result.single()
