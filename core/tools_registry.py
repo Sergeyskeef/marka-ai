@@ -362,6 +362,62 @@ class ToolsRegistry:
                     })
         
         return status
+    
+    def get_tools_summary(self) -> Dict[str, List[Dict[str, str]]]:
+        """
+        Получение краткой сводки инструментов для Telegram бота.
+        
+        Returns:
+            Словарь с группировкой инструментов по категориям
+        """
+        # Сначала сканируем проект, если инструменты не загружены
+        if not self.tools:
+            self.scan_project()
+            
+        summary = {}
+        
+        # Группируем инструменты по типам/категориям
+        for tool in self.tools.values():
+            if not tool.is_available:
+                continue
+                
+            # Определяем категорию на основе типа и тегов
+            category = self._get_tool_category(tool)
+            
+            if category not in summary:
+                summary[category] = []
+            
+            summary[category].append({
+                'name': tool.name,
+                'description': tool.description[:100] + '...' if len(tool.description) > 100 else tool.description,
+                'type': tool.type,
+                'file_path': tool.file_path
+            })
+        
+        # Сортируем инструменты в каждой категории по приоритету
+        for category in summary:
+            summary[category] = sorted(summary[category], key=lambda x: x['name'])
+        
+        return summary
+    
+    def _get_tool_category(self, tool: ToolMetadata) -> str:
+        """Определяет категорию инструмента"""
+        if 'scripts' in (tool.tags or []) or tool.type == 'script':
+            return 'Скрипты'
+        elif 'services' in (tool.tags or []) or 'service' in tool.type:
+            return 'Сервисы'
+        elif 'core' in (tool.tags or []) or 'core' in tool.type:
+            return 'Ядро системы'
+        elif 'utils' in (tool.tags or []) or 'utility' in tool.type:
+            return 'Утилиты'
+        elif 'sandbox' in (tool.tags or []):
+            return 'Песочница'
+        elif tool.type == 'function':
+            return 'Функции'
+        elif tool.type == 'class':
+            return 'Классы'
+        else:
+            return 'Прочие'
 
 
 # Глобальный экземпляр реестра

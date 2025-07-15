@@ -14,13 +14,13 @@ from dataclasses import dataclass, asdict
 import re
 
 from .context.context_manager import ContextManager
-from .memory.memory_manager import MemoryManager
+
 from .memory.enhanced_memory import EnhancedMemory
 from .context.action_system import ActionSystem
 from .learning_system import LearningSystem
 from .tools_registry import ToolsRegistry, get_tools_registry
 from .command_monitoring import CommandMonitoringSystem
-from langchain_api.services.task_executor import TaskExecutor, Task, TaskPriority, TaskStatus, TaskCategory, AccessLevel
+from langchain_api.services.task_executor import task_executor, Task, TaskPriority, TaskStatus, TaskCategory, AccessLevel
 
 
 @dataclass
@@ -74,14 +74,14 @@ class LLMIntegrationHub:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.memory_manager = MemoryManager()
+        self.memory_manager = None  # Удален MemoryManager
         self.context_manager = ContextManager(self.memory_manager)
         self.action_system = ActionSystem(self.memory_manager)
         self.enhanced_memory = EnhancedMemory()
         self.learning_system = LearningSystem(self.enhanced_memory, self.context_manager)
         self.tools_registry = get_tools_registry()
         self.command_monitoring = CommandMonitoringSystem()
-        self.task_executor = TaskExecutor()
+        self.task_executor = task_executor
         
         # Состояние системы
         self.is_initialized = False
@@ -113,19 +113,10 @@ class LLMIntegrationHub:
     async def _load_system_context(self) -> None:
         """Загрузка системного контекста."""
         try:
-            # Получаем системную память
-            system_memory = self.memory_manager.get_system_memory()
-            
-            # Загружаем основные документы
-            self.memory_manager.load_core_documents("/app/langchain_api/core_docs")
-            
-            # Получаем контекст идентичности
-            identity_context = system_memory.get_identity_context()
-            
-            # Обновляем контекст
+            # Обновляем контекст без memory_manager
             await self.context_manager.update_context({
-                'identity': identity_context,
-                'system_capabilities': system_memory.get_system_capabilities(),
+                'identity': {'name': 'Mark', 'version': '2.0'},
+                'system_capabilities': {'memory': 'enhanced', 'learning': 'active'},
                 'initialization_time': datetime.now().isoformat()
             })
             
@@ -297,6 +288,10 @@ class LLMIntegrationHub:
     
     async def process_request(self, request: LLMRequest) -> LLMResponse:
         """Обработка запроса к LLM."""
+        
+        # 🔧 ДИАГНОСТИКА: Проверяем что метод вызывается
+        self.logger.info(f"🚀 LLM_HUB.PROCESS_REQUEST ЗАПУЩЕН! Request prompt: '{request.prompt[:100]}...'")
+        
         try:
             self.request_count += 1
             
@@ -316,15 +311,56 @@ class LLMIntegrationHub:
             # Анализируем запрос на предмет создания задач
             task_creation_result = await self._analyze_task_creation(request, full_context)
             
+            # 🔧 ОТЛАДКА: Логируем результат анализа создания задач
+            self.logger.info(f"📋 PROCESS_REQUEST - Результат анализа: {task_creation_result}")
+            
             # Если нужно создать задачу, создаем её
             if task_creation_result.get('should_create_task'):
+                self.logger.info(f"📋 PROCESS_REQUEST - Создаем задачу...")
                 task = await self._create_task_from_request(request, task_creation_result)
-                return LLMResponse(
-                    content=f"Задача '{task.name}' создана успешно. ID: {task.id}",
-                    confidence=0.9,
-                    reasoning="Запрос был проанализирован как требующий создания задачи",
-                    suggestions=["Выполнить задачу", "Проверить статус задачи", "Отменить задачу"]
-                )
+                self.logger.info(f"📋 PROCESS_REQUEST - Задача создана: {task.name} (ID: {task.id})")
+                
+                # 🔥 АВТОМАТИЧЕСКОЕ ВЫПОЛНЕНИЕ: Сразу выполняем созданную задачу
+                try:
+                    self.logger.info(f"🚀 АВТОВЫПОЛНЕНИЕ - Запускаем задачу {task.id}...")
+                    executed_task = self.task_executor.execute_next_task()
+                    
+                    if executed_task and executed_task.id == task.id:
+                        if executed_task.status.value == "completed":
+                            self.logger.info(f"✅ АВТОВЫПОЛНЕНИЕ - Задача {task.id} успешно выполнена!")
+                            return LLMResponse(
+                                content=f"✅ Задача '{task.name}' создана и выполнена успешно!\n\n📋 ID: {task.id}\n🎯 Результат: {executed_task.result}",
+                                confidence=0.95,
+                                reasoning="Задача была создана и автоматически выполнена",
+                                suggestions=["Создать похожую задачу", "Проверить другие задачи"]
+                            )
+                        elif executed_task.status.value == "failed":
+                            self.logger.warning(f"❌ АВТОВЫПОЛНЕНИЕ - Задача {task.id} завершилась с ошибкой!")
+                            return LLMResponse(
+                                content=f"⚠️ Задача '{task.name}' создана, но выполнилась с ошибкой:\n\n📋 ID: {task.id}\n❌ Ошибка: {executed_task.error}",
+                                confidence=0.7,
+                                reasoning="Задача была создана но выполнилась неуспешно",
+                                suggestions=["Попробовать исправить задачу", "Создать новую задачу"]
+                            )
+                    else:
+                        self.logger.info(f"⏳ АВТОВЫПОЛНЕНИЕ - Задача {task.id} поставлена в очередь")
+                        return LLMResponse(
+                            content=f"📋 Задача '{task.name}' создана и поставлена в очередь на выполнение.\n\nID: {task.id}",
+                            confidence=0.8,
+                            reasoning="Задача создана и помещена в очередь выполнения",
+                            suggestions=["Проверить статус задачи", "Посмотреть список задач"]
+                        )
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ АВТОВЫПОЛНЕНИЕ - Ошибка выполнения задачи {task.id}: {e}")
+                    return LLMResponse(
+                        content=f"📋 Задача '{task.name}' создана (ID: {task.id}), но при автоматическом выполнении произошла ошибка: {str(e)}",
+                        confidence=0.6,
+                        reasoning="Задача создана но не удалось её автоматически выполнить",
+                        suggestions=["Попробовать выполнить задачу вручную", "Проверить статус системы"]
+                    )
+            else:
+                self.logger.info(f"📋 PROCESS_REQUEST - Задача НЕ создается, переходим к LLM")
             
             # Здесь должен быть вызов к LLM
             # Пока возвращаем заглушку
@@ -379,15 +415,36 @@ class LLMIntegrationHub:
                     reasoning="Отсутствует текст запроса"
                 )
             
-            # Импортируем generate_response из Enhanced RAG Chain
-            from langchain_api.rag.enhanced_rag_chain import generate_response
+            # Импортируем generate_enhanced_response_with_tools из Enhanced RAG Chain Tools
+            from langchain_api.rag.enhanced_rag_chain_tools import generate_enhanced_response_with_tools
+            from langchain_api.memory.multi_layer_memory import MultiLayerMemory
+            from langchain_api.core.backend_selector import create_memory
             
-            # Вызываем Enhanced RAG Chain
-            answer = generate_response(prompt, chat_id)
+            # Получаем память для передачи в RAG chain
+            memory = create_memory()  # A/B Backend Selector
+            
+            # Извлекаем инструменты из контекста
+            tools_list = context.get('tools', [])
+            
+            # Вызываем Enhanced RAG Chain Tools с поддержкой инструментов
+            rag_response = await generate_enhanced_response_with_tools(
+                question=prompt,
+                chat_id=chat_id,
+                memory=memory,
+                use_tools=True  # Включаем использование инструментов
+            )
+            
+            # 🔧 ИСПРАВЛЕНИЕ: generate_response возвращает dict, извлекаем строку
+            if isinstance(rag_response, dict):
+                answer = rag_response.get("answer", str(rag_response))
+                self.logger.info(f"🔧 RAG Chain вернул dict, извлекли answer: '{answer[:100]}...'")
+            else:
+                answer = str(rag_response)
+                self.logger.info(f"🔧 RAG Chain вернул строку: '{answer[:100]}...'")
             
             # Формируем ответ
             return LLMResponse(
-                content=answer,
+                content=answer,  # Теперь гарантированно строка!
                 confidence=0.8,  # Высокая уверенность для Enhanced RAG Chain
                 reasoning="Ответ сгенерирован через Enhanced RAG Chain с многоуровневой памятью",
                 suggestions=[
@@ -603,18 +660,69 @@ class LLMIntegrationHub:
     async def _analyze_task_creation(self, request: LLMRequest, context: Dict[str, Any]) -> Dict[str, Any]:
         """Анализ запроса на предмет необходимости создания задачи."""
         try:
-            # Ключевые слова для создания задач
-            task_keywords = [
+            # 🔧 ИСПРАВЛЕНИЕ: Анализируем оригинальное сообщение пользователя, а не полный промпт
+            original_message = self._extract_original_message(request)
+            
+            prompt_lower = original_message.lower()
+            
+            # 🔧 ОТЛАДКА: Логируем исходный запрос
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Оригинальное сообщение: '{original_message}'")
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Промпт (lower): '{prompt_lower}'")
+            
+            # 🔧 УЛУЧШЕННАЯ ЛОГИКА: Различаем "создать задачу" vs "выполнить задачу"
+            
+            # Ключевые слова для ВЫПОЛНЕНИЯ существующих задач
+            execute_keywords = [
+                'выполни эту задачу', 'выполнить эту задачу', 'выполни задачу',
+                'запусти эту задачу', 'запустить эту задачу', 'запусти задачу',
+                'сделай эту задачу', 'сделать эту задачу', 'выполни её',
+                'task_', 'id:', 'эта задача', 'эту задачу', 'данную задачу'
+            ]
+            
+            # Ключевые слова для СОЗДАНИЯ новых задач
+            create_keywords = [
                 'создай задачу', 'создать задачу', 'поставь задачу', 'поставить задачу',
-                'выполни', 'выполнить', 'запусти', 'запустить', 'сделай', 'сделать',
+                'хочу чтобы ты', 'можешь ли ты', 'в песочнице',
                 'проанализируй', 'проанализировать', 'проверь', 'проверить',
                 'тест', 'тестирование', 'оптимизация', 'оптимизировать'
             ]
             
-            prompt_lower = request.prompt.lower()
+            # Проверяем что нужно ВЫПОЛНИТЬ задачу (приоритет выше)
+            wants_execute = any(keyword in prompt_lower for keyword in execute_keywords)
             
-            # Проверяем наличие ключевых слов
-            should_create = any(keyword in prompt_lower for keyword in task_keywords)
+            # Проверяем что нужно СОЗДАТЬ задачу
+            wants_create = any(keyword in prompt_lower for keyword in create_keywords)
+            
+            # Логика принятия решения
+            if wants_execute:
+                should_create = False  # НЕ создаем задачу, если хотят выполнить
+                self.logger.info(f"🔍 АНАЛИЗ: Обнаружен запрос на ВЫПОЛНЕНИЕ задачи - НЕ создаем новую")
+            elif wants_create:
+                should_create = True   # Создаем задачу
+                self.logger.info(f"🔍 АНАЛИЗ: Обнаружен запрос на СОЗДАНИЕ задачи")
+            else:
+                should_create = False  # По умолчанию НЕ создаем
+                self.logger.info(f"🔍 АНАЛИЗ: Не обнаружено явных намерений - НЕ создаем задачу")
+            
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - wants_execute: {wants_execute}, wants_create: {wants_create}, should_create: {should_create}")
+            
+            # 🔧 ИСПРАВЛЕНИЕ: НЕ создаем задачи для простых сообщений/приветствий
+            simple_greetings = ['привет', 'hello', 'тест', 'проверка', 'test', 'марк', 'как дела', 'можешь показать', 'покажи список']
+            has_greetings = any(greeting in prompt_lower for greeting in simple_greetings)
+            word_count = len(original_message.split())
+            is_simple_message = has_greetings and word_count < 10
+            
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Содержит приветствия: {has_greetings}")
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Количество слов: {word_count}")
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Простое сообщение: {is_simple_message}")
+            
+            # Блокируем создание для простых сообщений или запросов на выполнение
+            if is_simple_message or wants_execute:
+                should_create = False
+                reason = "простое приветствие" if is_simple_message else "запрос на выполнение"
+                self.logger.info(f"🔧 БЛОКИРОВКА СОЗДАНИЯ ЗАДАЧ - {reason}, задача НЕ создается")
+            
+            self.logger.info(f"🔍 АНАЛИЗ СОЗДАНИЯ ЗАДАЧ - Финальное решение should_create: {should_create}")
             
             # Определяем приоритет на основе контекста
             priority = TaskPriority.MEDIUM
@@ -638,7 +746,7 @@ class LLMIntegrationHub:
                 'should_create_task': should_create,
                 'priority': priority,
                 'category': category,
-                'extracted_parameters': self._extract_task_parameters(request.prompt)
+                'extracted_parameters': self._extract_task_parameters(original_message)
             }
             
         except Exception as e:
@@ -679,13 +787,16 @@ class LLMIntegrationHub:
     async def _create_task_from_request(self, request: LLMRequest, analysis: Dict[str, Any]) -> Task:
         """Создание задачи на основе запроса."""
         try:
-            # Генерируем имя задачи
-            task_name = self._generate_task_name(request.prompt)
+            # 🔧 ИСПРАВЛЕНИЕ: Извлекаем оригинальное сообщение пользователя для имени задачи
+            original_message = self._extract_original_message(request)
+            
+            # Генерируем имя задачи на основе оригинального сообщения
+            task_name = self._generate_task_name(original_message)
             
             # Создаем задачу через TaskExecutor
             task = self.task_executor.create_task(
                 name=task_name,
-                description=request.prompt,
+                description=original_message,  # Используем оригинальное сообщение и в описании
                 priority=analysis['priority'],
                 parameters=analysis['extracted_parameters'],
                 category=analysis['category'],
@@ -710,18 +821,54 @@ class LLMIntegrationHub:
             self.logger.error(f"Ошибка создания задачи: {e}")
             raise
 
+    def _extract_original_message(self, request: LLMRequest) -> str:
+        """Извлечение оригинального сообщения пользователя из контекста запроса."""
+        try:
+            # Проверяем context.original_message (новая архитектура)
+            if request.context and 'original_message' in request.context:
+                return request.context['original_message']
+            
+            # Если нет контекста, ищем в самом промпте
+            if "Сообщение пользователя:" in request.prompt:
+                # Извлекаем между "Сообщение пользователя:" и следующим переносом строки
+                import re
+                match = re.search(r'Сообщение пользователя:\s*(.+)', request.prompt)
+                if match:
+                    # Берем до первого двойного переноса или конца строки
+                    message = match.group(1).split('\n')[0].strip()
+                    self.logger.info(f"🔧 ИЗВЛЕЧЕНО: '{message}' из промпта")
+                    return message
+            
+            # Fallback - возвращаем весь промпт (как было раньше)
+            self.logger.warning("⚠️ Не удалось извлечь оригинальное сообщение, используем полный промпт")
+            return request.prompt
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка извлечения оригинального сообщения: {e}")
+            return request.prompt
+
     def _generate_task_name(self, prompt: str) -> str:
         """Генерация имени задачи на основе промпта."""
+        # 🔧 ОТЛАДКА: Логируем исходный промпт для генерации имени
+        self.logger.info(f"🏷️ ГЕНЕРАЦИЯ ИМЕНИ ЗАДАЧИ - Исходный промпт: '{prompt}'")
+        
         # Извлекаем ключевые слова для имени
         words = prompt.split()[:5]  # Берем первые 5 слов
+        self.logger.info(f"🏷️ ГЕНЕРАЦИЯ ИМЕНИ ЗАДАЧИ - Первые 5 слов: {words}")
+        
         name = "_".join(words).lower()
+        self.logger.info(f"🏷️ ГЕНЕРАЦИЯ ИМЕНИ ЗАДАЧИ - Объединенное имя: '{name}'")
         
         # Очищаем от специальных символов
         import re
         name = re.sub(r'[^\w\s-]', '', name)
         name = re.sub(r'[-\s]+', '_', name)
+        self.logger.info(f"🏷️ ГЕНЕРАЦИЯ ИМЕНИ ЗАДАЧИ - Очищенное имя: '{name}'")
         
-        return f"llm_task_{name}"
+        final_name = f"llm_task_{name}"
+        self.logger.info(f"🏷️ ГЕНЕРАЦИЯ ИМЕНИ ЗАДАЧИ - Финальное имя: '{final_name}'")
+        
+        return final_name
 
     async def execute_task(self, task_id: str) -> Dict[str, Any]:
         """Выполнение задачи через TaskExecutor."""

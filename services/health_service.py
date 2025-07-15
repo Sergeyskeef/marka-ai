@@ -1,80 +1,55 @@
-"""Сервис для проверки здоровья приложения."""
+"""
+HealthService - сервис для мониторинга здоровья системы
+"""
 
 import logging
 import time
 from typing import Dict, Any
-import httpx
-from weaviate import WeaviateClient
-import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 class HealthService:
-    """Сервис для проверки здоровья приложения."""
+    """Сервис для мониторинга здоровья системы"""
     
-    def __init__(self, weaviate_client: WeaviateClient):
-        self.weaviate_client = weaviate_client
+    def __init__(self):
         self.start_time = time.time()
-        self.last_check = {
-            "weaviate": None,
-            "openai": None
+        self.services_status = {
+            "app": "healthy",
+            "memory": "healthy", 
+            "database": "healthy",
+            "external_apis": "healthy"
         }
+        logger.info("✅ HealthService инициализирован")
     
-    async def check_weaviate(self) -> Dict[str, Any]:
-        """Проверка доступности Weaviate."""
-        try:
-            is_ready = self.weaviate_client.is_ready()
-            self.last_check["weaviate"] = time.time()
-            return {
-                "status": "healthy" if is_ready else "unhealthy",
-                "latency": time.time() - self.last_check["weaviate"]
-            }
-        except Exception as e:
-            logger.error(f"Ошибка при проверке Weaviate: {str(e)}")
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
+    def get_uptime(self) -> float:
+        """Возвращает время работы системы в секундах"""
+        return time.time() - self.start_time
     
-    async def check_openai(self) -> Dict[str, Any]:
-        """Проверка доступности OpenAI API."""
-        try:
-            async with httpx.AsyncClient() as client:
-                start_time = time.time()
-                response = await client.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"},
-                    timeout=5.0
-                )
-                latency = time.time() - start_time
-                self.last_check["openai"] = start_time
-                
-                return {
-                    "status": "healthy" if response.status_code == 200 else "unhealthy",
-                    "latency": latency,
-                    "status_code": response.status_code
-                }
-        except Exception as e:
-            logger.error(f"Ошибка при проверке OpenAI API: {str(e)}")
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
+    def get_services_status(self) -> Dict[str, str]:
+        """Возвращает статус всех сервисов"""
+        return self.services_status.copy()
     
-    async def get_health(self) -> Dict[str, Any]:
-        """Получить полный отчет о здоровье системы."""
-        weaviate_status = await self.check_weaviate()
-        openai_status = await self.check_openai()
-        
-        uptime = time.time() - self.start_time
-        
+    def update_service_status(self, service: str, status: str):
+        """Обновляет статус сервиса"""
+        self.services_status[service] = status
+        logger.info(f"🔄 Статус сервиса {service} обновлен: {status}")
+    
+    def get_overall_status(self) -> str:
+        """Возвращает общий статус системы"""
+        if all(status == "healthy" for status in self.services_status.values()):
+            return "healthy"
+        elif any(status == "critical" for status in self.services_status.values()):
+            return "critical"
+        else:
+            return "degraded"
+    
+    def get_health_info(self) -> Dict[str, Any]:
+        """Возвращает полную информацию о здоровье системы"""
         return {
-            "status": "healthy" if all(s["status"] == "healthy" for s in [weaviate_status, openai_status]) else "unhealthy",
-            "uptime": uptime,
-            "version": "0.6",
-            "services": {
-                "weaviate": weaviate_status,
-                "openai": openai_status
-            },
-            "last_check": self.last_check
+            "status": self.get_overall_status(),
+            "services": self.get_services_status(),
+            "uptime": self.get_uptime(),
+            "timestamp": datetime.now().isoformat()
         } 

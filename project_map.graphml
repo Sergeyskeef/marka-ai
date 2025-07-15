@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <graph id="G" edgedefault="directed">
+    <node id="memory/multi_layer_memory.py"/>
+    <node id="memory/memory_manager.py"/>
+    <node id="utils/task_analyzer_new.py"/>
+    <node id="utils/metrics.py"/>
+    <node id="utils/proxy.py"/>
+    <node id="utils/logger.py"/>
+    <node id="utils/openai_proxy_client.py"/>
+    <node id="utils/task_analyzer.py"/>
+    <node id="utils/task_manager.py"/>
+    <node id="rag/__init__.py"/>
+    <node id="rag/enhanced_rag_chain.py"/>
+    <node id="rag/enhanced_rag_chain_tools.py"/>
+    <node id="weaviate_tools/bootstrap_persona.py"/>
+    <node id="weaviate_tools/add_core_docs.py"/>
+    <node id="weaviate_tools/init_schema.py"/>
+    <node id="telegram_bot/bot.py"/>
+    <node id="telegram_bot/tests/test_task_commands.py"/>
+    <node id="telegram_bot/tests/test_sandbox_commands.py"/>
+    <node id="telegram_bot/handlers/task_commands.py"/>
+    <node id="telegram_bot/handlers/test_sandbox_handlers.py"/>
+    <node id="telegram_bot/handlers/sandbox_handlers.py"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+    <edge source="from" target="to"/>
+  </graph>
+</graphml>

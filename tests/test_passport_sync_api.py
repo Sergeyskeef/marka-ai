@@ -22,7 +22,7 @@ def mock_sync_service():
     """Создает мок PassportSyncService"""
     mock_service = MagicMock()
     mock_service.is_enabled.return_value = True
-    mock_service.get_last_sync_time.return_value = "2024-03-20T12:00:00"
+    mock_service.get_last_sync_time.return_value = "2025-03-20T12:00:00"
     mock_service.get_pending_changes_count.return_value = 3
     
     # Создаем ChangeReport правильно
@@ -44,7 +44,7 @@ def test_get_sync_status(client, mock_sync_service):
     assert response.status_code == 200
     data = response.json()
     assert data["enabled"] == True
-    assert data["last_sync"] == "2024-03-20T12:00:00"
+    assert data["last_sync"] == "2025-03-20T12:00:00"
     assert data["pending_changes"] == 3
 
 def test_get_sync_status_not_initialized(client):
@@ -58,14 +58,14 @@ def test_apply_changes(client, mock_sync_service):
     """Тест применения изменений"""
     mock_sync_service.apply_changes.return_value = {
         "changes_applied": 3,
-        "timestamp": "2024-03-20T12:00:00"
+        "timestamp": "2025-03-20T12:00:00"
     }
     response = client.post("/passport/sync/apply")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] == True
     assert data["changes_applied"] == 3
-    assert data["timestamp"] == "2024-03-20T12:00:00"
+    assert data["timestamp"] == "2025-03-20T12:00:00"
 
 def test_apply_changes_not_initialized(client):
     """Тест применения изменений при неинициализированном сервисе"""

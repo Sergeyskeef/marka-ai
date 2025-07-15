@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Dict
-from services.log_parser_service import LogParserService
+from langchain_api.services.log_parser_service import LogParserService
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 log_parser = LogParserService()

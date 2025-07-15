@@ -10,7 +10,7 @@ def test_chatgptmemory_retrieval():
     # Вставляем чанк
     obj_id = wrapper.insert({
         "text": test_text,
-        "timestamp": "2024-05-30T12:00:00Z",
+        "timestamp": "2025-05-30T12:00:00Z",
         "session_id": "test_session"
     })
     assert obj_id, "Не удалось вставить тестовый чанк в ChatGPTMemory!"

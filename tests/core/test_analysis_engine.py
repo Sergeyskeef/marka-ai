@@ -26,11 +26,11 @@ class TestAnalysisEngineIntegration(unittest.TestCase):
         
         # Создаем тестовые данные
         self.test_data = [
-            {'timestamp': '2024-01-01T10:00:00', 'value': 10.5, 'category': 'A'},
-            {'timestamp': '2024-01-02T10:00:00', 'value': 12.3, 'category': 'B'},
-            {'timestamp': '2024-01-03T10:00:00', 'value': 11.8, 'category': 'A'},
-            {'timestamp': '2024-01-04T10:00:00', 'value': 13.1, 'category': 'B'},
-            {'timestamp': '2024-01-05T10:00:00', 'value': 12.9, 'category': 'A'}
+            {'timestamp': '2025-01-01T10:00:00', 'value': 10.5, 'category': 'A'},
+            {'timestamp': '2025-01-02T10:00:00', 'value': 12.3, 'category': 'B'},
+            {'timestamp': '2025-01-03T10:00:00', 'value': 11.8, 'category': 'A'},
+            {'timestamp': '2025-01-04T10:00:00', 'value': 13.1, 'category': 'B'},
+            {'timestamp': '2025-01-05T10:00:00', 'value': 12.9, 'category': 'A'}
         ]
         
         self.test_text = """

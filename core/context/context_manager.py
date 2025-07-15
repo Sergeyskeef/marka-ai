@@ -5,7 +5,7 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
-from ..memory.memory_manager import MemoryManager
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,12 @@ class ContextManager:
     - Анализ ответов LLM
     """
     
-    def __init__(self, memory_manager: MemoryManager):
+    def __init__(self, memory_manager=None):
         """
         Инициализация менеджера контекста.
         
         Args:
-            memory_manager: Менеджер памяти для интеграции с системой памяти
+            memory_manager: Менеджер памяти для интеграции с системой памяти (опционально)
         """
         self.memory_manager = memory_manager
         self.current_context: Dict[str, Any] = {
@@ -63,8 +63,9 @@ class ContextManager:
         # Сохраняем обновленный контекст в историю
         self.context_history.append(self.current_context.copy())
         
-        # Сохраняем важные изменения в памяти
-        self._save_context_to_memory()
+        # Сохраняем важные изменения в памяти (если доступен)
+        if self.memory_manager:
+            self._save_context_to_memory()
         
     def get_context(self) -> Dict[str, Any]:
         """
@@ -92,13 +93,14 @@ class ContextManager:
         Сохранение важных изменений контекста в память.
         """
         # Создаем опыт из важных изменений
-        if self.current_context.get('recent_actions'):
+        if self.current_context.get('recent_actions') and self.memory_manager:
             experience = {
                 'summary': f"Контекстное изменение: {json.dumps(self.current_context['recent_actions'][-1])}",
                 'timestamp': datetime.utcnow().isoformat() + 'Z',
                 'session_id': self.current_context['session_id']
             }
-            self.memory_manager.memory_registry.get('Experience').insert(experience)
+            if hasattr(self.memory_manager, 'memory_registry'):
+                self.memory_manager.memory_registry.get('Experience').insert(experience)
             
     def analyze_context(self) -> Dict[str, Any]:
         """
@@ -164,8 +166,9 @@ class ContextManager:
             self.current_context['llm_interactions'] = []
         self.current_context['llm_interactions'].append(interaction)
         
-        # Сохраняем в память
-        self._save_llm_interaction(interaction)
+        # Сохраняем в память (если доступен)
+        if self.memory_manager:
+            self._save_llm_interaction(interaction)
         
         return analysis
         
@@ -593,6 +596,9 @@ class ContextManager:
         Args:
             interaction: Данные взаимодействия
         """
+        if not self.memory_manager or not hasattr(self.memory_manager, 'memory_registry'):
+            return
+            
         experience = {
             'summary': f"Взаимодействие с LLM: {interaction['query'][:100]}...",
             'content': json.dumps(interaction),

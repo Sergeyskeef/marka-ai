@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Копируем только requirements.txt сначала для кэширования слоя с зависимостями
-COPY langchain_api/requirements.txt .
+COPY requirements.txt .
 
 # Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
@@ -24,7 +24,7 @@ COPY --from=builder /usr/local/lib/python3.10/site-packages/ /usr/local/lib/pyth
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
 # Копируем код приложения
-COPY langchain_api/ .
+COPY . .
 
 # Создаем необходимые директории
 RUN mkdir -p /app/logs
@@ -39,4 +39,4 @@ ENV PYTHONPATH=/app
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "langchain_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -2,12 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
-from langchain_api.services.task_executor import TaskExecutor, TaskPriority, TaskStatus, Task
+from langchain_api.services.task_executor import task_executor, TaskPriority, TaskStatus, Task
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-# Создаем глобальный экземпляр TaskExecutor
-task_executor = TaskExecutor()
+# Используем глобальный экземпляр TaskExecutor (импортированный выше)
 
 class TaskCreate(BaseModel):
     name: str

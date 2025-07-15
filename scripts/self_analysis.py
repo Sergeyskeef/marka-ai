@@ -7,8 +7,13 @@ from pathlib import Path
 from core.code_analysis import CodeAnalyzer
 
 class SelfAnalyzer:
-    def __init__(self, project_root: str = "/app/langchain_api"):
-        self.project_root = Path(project_root)
+    def __init__(self, project_root: str = None):
+        if project_root is None:
+            # Автоматическое определение пути к проекту
+            current_dir = Path(__file__).parent.parent  # langchain_api/
+            self.project_root = current_dir
+        else:
+            self.project_root = Path(project_root)
         self.logger = logging.getLogger(__name__)
         
         # Инициализация CodeAnalyzer

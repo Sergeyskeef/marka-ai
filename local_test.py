@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Тест для проверки работы LLM без Weaviate."""
+"""Тест для проверки работы LLM."""
 
 import os
 import sys

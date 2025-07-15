@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Any, Type
 from datetime import datetime
 import uuid
 from abc import ABC, abstractmethod
-from ..memory.memory_manager import MemoryManager
+
 from .action_types import ActionPriority, ActionStatus, ActionType
 from .retry_config import RetryConfig, RetryStrategy
 
@@ -24,8 +24,8 @@ class Action(ABC):
     
     def __init__(self, 
                  action_type: str,
-                 memory_manager: MemoryManager,
-                 session_id: str,
+                 memory_manager=None,
+                 session_id: str = "default",
                  priority: ActionPriority = ActionPriority.NORMAL,
                  details: Optional[Dict[str, Any]] = None,
                  retry_config: Optional[RetryConfig] = None):
@@ -176,6 +176,9 @@ class Action(ABC):
         """
         Сохранение действия в память.
         """
+        if not self.memory_manager or not hasattr(self.memory_manager, 'memory_registry'):
+            return
+            
         self.memory_manager.memory_registry.get('Experience').insert({
             'summary': f"Действие {self.type}: {self.details}",
             'timestamp': self.timestamp,
@@ -244,7 +247,7 @@ class Action(ABC):
         return self.retry_config.get_delay(self.retry_count)
         
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], memory_manager: MemoryManager) -> 'Action':
+    def from_dict(cls, data: Dict[str, Any], memory_manager=None) -> 'Action':
         """
         Создание действия из словаря.
         

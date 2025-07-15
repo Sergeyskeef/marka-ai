@@ -19,7 +19,7 @@ PROJECT_ROOTS = [
     "memory",
     "utils",
     "rag",
-    "weaviate_tools",
+    
     "telegram_bot",
     "core_docs",
     "extras",

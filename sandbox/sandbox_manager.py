@@ -1,264 +1,169 @@
-import os
-import uuid
-import subprocess
-import time
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
-from pathlib import Path
+"""
+SandboxManager - менеджер песочницы для безопасного выполнения команд
+"""
 
-@dataclass
-class Sandbox:
-    id: str
-    path: Path
-    is_active: bool = True
+import logging
+import subprocess
+import asyncio
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class CommandResult:
-    status: str
+    """Результат выполнения команды"""
+    success: bool
     output: str
     error: Optional[str] = None
+    return_code: Optional[int] = None
     execution_time: float = 0.0
-    success_rate: float = 0.0
-    performance_metrics: Dict[str, float] = None
-    error_messages: List[str] = None
-    task_id: str = None
-    insights: Dict[str, Any] = None
+    command: str = ""
 
-    def __post_init__(self):
-        """Рассчитывает success_rate и performance_metrics"""
-        if self.status == "completed":
-            self.success_rate = 1.0
-        elif self.status == "failed":
-            self.success_rate = 0.0
-        else:
-            self.success_rate = 0.5
 
-        # Инициализируем метрики производительности
-        if self.performance_metrics is None:
-            self.performance_metrics = {
-                "cpu_usage": 0.0,
-                "memory_usage": 0.0,
-                "execution_time": self.execution_time
-            }
+@dataclass
+class Sandbox:
+    """Конфигурация песочницы"""
+    id: str
+    working_dir: str
+    timeout: int = 30
+    max_output_size: int = 1024 * 1024  # 1MB
+    allowed_commands: Optional[List[str]] = None
 
-        # Инициализируем сообщения об ошибках
-        if self.error_messages is None:
-            self.error_messages = []
-            if self.error:
-                self.error_messages.append(self.error)
-
-        # Генерируем task_id если он не задан
-        if self.task_id is None:
-            self.task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
-        # Инициализируем insights
-        if self.insights is None:
-            self.insights = {
-                "performance": {
-                    "efficiency_score": self.success_rate,
-                    "resource_usage": self.performance_metrics
-                },
-                "error_patterns": {
-                    "error_types": [],
-                    "frequency": 0
-                },
-                "recommendations": []
-            }
 
 class SandboxManager:
-    def __init__(self, base_path: Optional[str] = None):
-        self.base_path = Path(base_path or "/tmp/sandboxes")
-        self.active_sandboxes: Dict[str, Sandbox] = {}
-        self._ensure_base_path()
-
-    def _ensure_base_path(self):
-        """Создает базовую директорию для песочниц"""
-        self.base_path.mkdir(parents=True, exist_ok=True)
-
-    def create_sandbox(self) -> Sandbox:
-        """Создает новую изолированную песочницу"""
-        sandbox_id = str(uuid.uuid4())
-        sandbox_path = self.base_path / sandbox_id
-        sandbox_path.mkdir(parents=True, exist_ok=True)
+    """Менеджер песочницы"""
+    
+    def __init__(self):
+        self.sandboxes: Dict[str, Sandbox] = {}
+        self.command_history: List[CommandResult] = []
+        self.default_timeout = 30
+        self.default_max_output = 1024 * 1024  # 1MB
         
-        sandbox = Sandbox(id=sandbox_id, path=sandbox_path)
-        self.active_sandboxes[sandbox_id] = sandbox
+        # Создаем песочницу по умолчанию
+        self.create_sandbox("default", "/sandbox")
+        
+        logger.info("✅ SandboxManager инициализирован")
+    
+    def create_sandbox(self, sandbox_id: str, working_dir: str, **kwargs) -> Sandbox:
+        """Создает новую песочницу"""
+        sandbox = Sandbox(
+            id=sandbox_id,
+            working_dir=working_dir,
+            **kwargs
+        )
+        self.sandboxes[sandbox_id] = sandbox
+        logger.info(f"🏖️ Создана песочница: {sandbox_id} в {working_dir}")
         return sandbox
-
-    def is_sandbox_active(self, sandbox_id: str) -> bool:
-        """Проверяет, активна ли песочница"""
-        return sandbox_id in self.active_sandboxes and self.active_sandboxes[sandbox_id].is_active
-
-    def execute_command(self, sandbox_id: str, command: str) -> CommandResult:
+    
+    def get_sandbox(self, sandbox_id: str = "default") -> Optional[Sandbox]:
+        """Возвращает песочницу по ID"""
+        return self.sandboxes.get(sandbox_id)
+    
+    async def execute_command(self, 
+                            command: str, 
+                            sandbox_id: str = "default",
+                            timeout: Optional[int] = None) -> CommandResult:
         """Выполняет команду в песочнице"""
-        if not self.is_sandbox_active(sandbox_id):
-            raise ValueError(f"Sandbox {sandbox_id} is not active")
-
-        sandbox = self.active_sandboxes[sandbox_id]
-        start_time = time.time()
-        task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        sandbox = self.get_sandbox(sandbox_id)
+        if not sandbox:
+            return CommandResult(
+                success=False,
+                output="",
+                error=f"Песочница {sandbox_id} не найдена",
+                command=command
+            )
+        
+        start_time = datetime.now()
         
         try:
-            process = subprocess.run(
-                command,
-                shell=True,
-                cwd=str(sandbox.path),
-                capture_output=True,
-                text=True,
-                timeout=30  # Ограничение времени выполнения
+            # Проверяем разрешенные команды
+            if sandbox.allowed_commands and command.split()[0] not in sandbox.allowed_commands:
+                return CommandResult(
+                    success=False,
+                    output="",
+                    error=f"Команда {command.split()[0]} не разрешена в песочнице {sandbox_id}",
+                    command=command
+                )
+            
+            # Выполняем команду
+            process = await asyncio.create_subprocess_exec(
+                *command.split(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=sandbox.working_dir
             )
             
-            execution_time = time.time() - start_time
-            error_messages = []
-            if process.stderr:
-                error_messages.append(process.stderr)
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout or sandbox.timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                return CommandResult(
+                    success=False,
+                    output="",
+                    error=f"Команда превысила лимит времени ({timeout or sandbox.timeout}с)",
+                    command=command,
+                    execution_time=(datetime.now() - start_time).total_seconds()
+                )
             
-            return CommandResult(
-                status="completed" if process.returncode == 0 else "failed",
-                output=process.stdout,
-                error=process.stderr,
+            execution_time = (datetime.now() - start_time).total_seconds()
+            
+            # Ограничиваем размер вывода
+            output = stdout.decode('utf-8', errors='ignore')
+            if len(output) > sandbox.max_output_size:
+                output = output[:sandbox.max_output_size] + "\n... (вывод обрезан)"
+            
+            error_output = stderr.decode('utf-8', errors='ignore')
+            
+            result = CommandResult(
+                success=process.returncode == 0,
+                output=output,
+                error=error_output if error_output else None,
+                return_code=process.returncode,
                 execution_time=execution_time,
-                performance_metrics={
-                    "cpu_usage": 0.0,  # TODO: Добавить реальное измерение CPU
-                    "memory_usage": 0.0,  # TODO: Добавить реальное измерение памяти
-                    "execution_time": execution_time
-                },
-                error_messages=error_messages,
-                task_id=task_id,
-                insights={
-                    "performance": {
-                        "efficiency_score": 1.0 if process.returncode == 0 else 0.0,
-                        "resource_usage": {
-                            "cpu_usage": 0.0,
-                            "memory_usage": 0.0,
-                            "execution_time": execution_time
-                        }
-                    },
-                    "error_patterns": {
-                        "error_types": [],
-                        "frequency": 0
-                    },
-                    "recommendations": []
-                }
+                command=command
             )
-        except subprocess.TimeoutExpired:
-            return CommandResult(
-                status="failed",
-                output="",
-                error="Command execution timed out",
-                execution_time=30.0,
-                performance_metrics={
-                    "cpu_usage": 0.0,
-                    "memory_usage": 0.0,
-                    "execution_time": 30.0
-                },
-                error_messages=["Command execution timed out"],
-                task_id=task_id,
-                insights={
-                    "performance": {
-                        "efficiency_score": 0.0,
-                        "resource_usage": {
-                            "cpu_usage": 0.0,
-                            "memory_usage": 0.0,
-                            "execution_time": 30.0
-                        }
-                    },
-                    "error_patterns": {
-                        "error_types": ["timeout"],
-                        "frequency": 1
-                    },
-                    "recommendations": ["Увеличить таймаут выполнения команды"]
-                }
-            )
+            
+            # Сохраняем в историю
+            self.command_history.append(result)
+            
+            logger.info(f"🔧 Команда выполнена: {command} (код: {process.returncode}, время: {execution_time:.2f}с)")
+            
+            return result
+            
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = (datetime.now() - start_time).total_seconds()
+            logger.error(f"❌ Ошибка выполнения команды {command}: {e}")
+            
             return CommandResult(
-                status="failed",
+                success=False,
                 output="",
                 error=str(e),
-                execution_time=execution_time,
-                performance_metrics={
-                    "cpu_usage": 0.0,
-                    "memory_usage": 0.0,
-                    "execution_time": execution_time
-                },
-                error_messages=[str(e)],
-                task_id=task_id,
-                insights={
-                    "performance": {
-                        "efficiency_score": 0.0,
-                        "resource_usage": {
-                            "cpu_usage": 0.0,
-                            "memory_usage": 0.0,
-                            "execution_time": execution_time
-                        }
-                    },
-                    "error_patterns": {
-                        "error_types": ["exception"],
-                        "frequency": 1
-                    },
-                    "recommendations": ["Проверить корректность команды и параметров"]
-                }
+                command=command,
+                execution_time=execution_time
             )
-
-    def create_diff(self, sandbox_id: str) -> str:
-        """Создает дифф изменений в песочнице"""
-        if not self.is_sandbox_active(sandbox_id):
-            raise ValueError(f"Sandbox {sandbox_id} is not active")
-
-        sandbox = self.active_sandboxes[sandbox_id]
-        try:
-            process = subprocess.run(
-                ["git", "diff"],
-                cwd=str(sandbox.path),
-                capture_output=True,
-                text=True
-            )
-            return process.stdout
-        except Exception as e:
-            return f"Error creating diff: {str(e)}"
-
-    def validate_changes(self, sandbox_id: str) -> bool:
-        """Валидирует изменения в песочнице"""
-        if not self.is_sandbox_active(sandbox_id):
-            raise ValueError(f"Sandbox {sandbox_id} is not active")
-
-        # TODO: Реализовать валидацию изменений
-        return True
-
-    def create_snapshot(self, sandbox_id: str) -> str:
-        """Создает снапшот песочницы"""
-        if not self.is_sandbox_active(sandbox_id):
-            raise ValueError(f"Sandbox {sandbox_id} is not active")
-
-        snapshot_id = str(uuid.uuid4())
-        sandbox = self.active_sandboxes[sandbox_id]
-        snapshot_path = self.base_path / f"{sandbox_id}_snapshot_{snapshot_id}"
-        
-        # Копируем содержимое песочницы
-        subprocess.run(["cp", "-r", str(sandbox.path), str(snapshot_path)])
-        
-        return snapshot_id
-
-    def rollback(self, sandbox_id: str, snapshot_id: str):
-        """Откатывает песочницу к снапшоту"""
-        if not self.is_sandbox_active(sandbox_id):
-            raise ValueError(f"Sandbox {sandbox_id} is not active")
-
-        sandbox = self.active_sandboxes[sandbox_id]
-        snapshot_path = self.base_path / f"{sandbox_id}_snapshot_{snapshot_id}"
-        
-        if not snapshot_path.exists():
-            raise ValueError(f"Snapshot {snapshot_id} not found")
-
-        # Очищаем текущую песочницу
-        subprocess.run(["rm", "-rf", str(sandbox.path)])
-        # Восстанавливаем из снапшота
-        subprocess.run(["cp", "-r", str(snapshot_path), str(sandbox.path)])
-
-    def cleanup(self, sandbox_id: str):
-        """Очищает песочницу"""
-        if sandbox_id in self.active_sandboxes:
-            sandbox = self.active_sandboxes[sandbox_id]
-            subprocess.run(["rm", "-rf", str(sandbox.path)])
-            del self.active_sandboxes[sandbox_id] 
+    
+    def get_command_history(self, limit: int = 100) -> List[CommandResult]:
+        """Возвращает историю команд"""
+        return self.command_history[-limit:] if self.command_history else []
+    
+    def clear_history(self):
+        """Очищает историю команд"""
+        cleared_count = len(self.command_history)
+        self.command_history.clear()
+        logger.info(f"🧹 Очищена история команд: {cleared_count} записей")
+    
+    def get_sandbox_stats(self) -> Dict[str, Any]:
+        """Возвращает статистику песочницы"""
+        return {
+            "total_sandboxes": len(self.sandboxes),
+            "total_commands": len(self.command_history),
+            "successful_commands": len([c for c in self.command_history if c.success]),
+            "failed_commands": len([c for c in self.command_history if not c.success]),
+            "sandboxes": [s.id for s in self.sandboxes.values()]
+        } 

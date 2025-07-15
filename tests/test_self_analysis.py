@@ -14,9 +14,9 @@ def analyzer(tmp_path):
     
     # Создаём тестовые логи
     with open(logs_dir / "test.log", "w", encoding="utf-8") as f:
-        f.write("2024-03-20 10:00:00 INFO: Система запущена\n")
-        f.write("2024-03-20 10:01:00 WARNING: Высокая нагрузка на память\n")
-        f.write("2024-03-20 10:02:00 ERROR: Ошибка подключения к базе данных\n")
+        f.write("2025-03-20 10:00:00 INFO: Система запущена\n")
+        f.write("2025-03-20 10:01:00 WARNING: Высокая нагрузка на память\n")
+        f.write("2025-03-20 10:02:00 ERROR: Ошибка подключения к базе данных\n")
     
     # Создаём тестовый паспорт
     passport = {
@@ -33,8 +33,8 @@ def analyzer(tmp_path):
     
     # Создаём тестовый лог песочницы
     with open(tmp_path / "sandbox_experiments.log", "w", encoding="utf-8") as f:
-        f.write("2024-03-20 11:00:00 INFO: Запуск эксперимента\n")
-        f.write("2024-03-20 11:01:00 WARNING: Медленный ответ от API\n")
+        f.write("2025-03-20 11:00:00 INFO: Запуск эксперимента\n")
+        f.write("2025-03-20 11:01:00 WARNING: Медленный ответ от API\n")
     
     return SelfAnalyzer(project_root=str(tmp_path))
 

@@ -8,15 +8,16 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 import asyncio
 import logging
-from langchain_api.services.task_executor import TaskExecutor, Task, TaskStatus, TaskPriority
+from langchain_api.services.task_executor import task_executor, Task, TaskStatus, TaskPriority
+from langchain_api.services.security import TaskCategory, AccessLevel
 from langchain_api.sandbox.self_awareness import MarkSelfAwareness, TaskResult
 from datetime import datetime
+import time
 
 # Инициализация логгера
 logger = logging.getLogger(__name__)
 
-# Инициализация TaskExecutor
-task_executor = TaskExecutor()
+# Используем глобальный экземпляр TaskExecutor (импортированный выше)
 
 # Инициализация MarkSelfAwareness
 self_awareness = MarkSelfAwareness()
@@ -24,25 +25,27 @@ self_awareness = MarkSelfAwareness()
 async def task_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Показать список активных задач"""
     try:
-        tasks = await task_executor.get_active_tasks()
+        # Получаем все задачи и фильтруем активные
+        all_tasks = task_executor.get_task_list()
+        active_tasks = [task for task in all_tasks if task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]]
         
-        if not tasks:
+        if not active_tasks:
             await update.message.reply_text("📋 Нет активных задач")
             return
             
         response = "📋 Активные задачи:\n\n"
-        for task in tasks:
+        for task in active_tasks:
             status_emoji = {
                 TaskStatus.PENDING: "⏳",
-                TaskStatus.IN_PROGRESS: "🔄",
+                TaskStatus.RUNNING: "🔄",
                 TaskStatus.COMPLETED: "✅",
                 TaskStatus.FAILED: "❌"
             }.get(task.status, "❓")
             
-            response += f"{status_emoji} {task.task_id}: {task.description}\n"
+            response += f"{status_emoji} {task.id}: {task.description}\n"
             response += f"   Статус: {task.status.value}\n"
             response += f"   Приоритет: {task.priority.value}\n"
-            response += f"   Начало: {task.start_time.strftime('%H:%M:%S')}\n\n"
+            response += f"   Начало: {task.created_at.strftime('%H:%M:%S')}\n\n"
             
         await update.message.reply_text(response)
         
@@ -58,7 +61,7 @@ async def task_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
             
         task_id = context.args[0]
-        task = await task_executor.get_task(task_id)
+        task = task_executor.get_task(task_id)
         
         if not task:
             await update.message.reply_text(f"❌ Задача {task_id} не найдена")
@@ -68,13 +71,13 @@ async def task_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         response += f"Описание: {task.description}\n"
         response += f"Статус: {task.status.value}\n"
         response += f"Приоритет: {task.priority.value}\n"
-        response += f"Начало: {task.start_time.strftime('%H:%M:%S')}\n"
+        response += f"Начало: {task.created_at.strftime('%H:%M:%S')}\n"
         
-        if task.end_time:
-            response += f"Завершение: {task.end_time.strftime('%H:%M:%S')}\n"
+        if task.updated_at and task.updated_at != task.created_at:
+            response += f"Обновление: {task.updated_at.strftime('%H:%M:%S')}\n"
             
-        if task.error_messages:
-            response += f"\n❌ Ошибка: {task.error_messages[0]}\n"
+        if task.error:
+            response += f"\n❌ Ошибка: {task.error}\n"
             
         await update.message.reply_text(response)
         
@@ -90,7 +93,7 @@ async def task_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
             
         task_id = context.args[0]
-        task = await task_executor.get_task(task_id)
+        task = task_executor.get_task(task_id)
         
         if not task:
             await update.message.reply_text(f"❌ Задача {task_id} не найдена")
@@ -98,17 +101,17 @@ async def task_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             
         # Создаем TaskResult для анализа
         task_result = TaskResult(
-            task_id=task.task_id,
+            task_id=task.id,
             status=task.status,
-            start_time=task.start_time,
-            end_time=task.end_time,
+            start_time=task.created_at,
+            end_time=task.updated_at if task.updated_at != task.created_at else None,
             success_rate=0.9 if task.status == TaskStatus.COMPLETED else 0.0,
             performance_metrics={
                 "cpu_usage": 75.0,
                 "memory_usage": 60.0,
                 "execution_time": 300.0
             },
-            error_messages=task.error_messages,
+            error_messages=[task.error] if task.error else [],
             insights=[]
         )
         
@@ -162,9 +165,17 @@ async def task_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await update.message.reply_text("❌ Неверный приоритет. Используйте: low, medium, high")
                 return
                 
-        task = await task_executor.create_task(description, priority)
+        # Создаем задачу с минимальными параметрами
+        task = task_executor.create_task(
+            name=f"task_{int(time.time())}",
+            description=description,
+            priority=priority,
+            parameters={},
+            category=TaskCategory.CUSTOM,
+            access_level=AccessLevel.EXECUTE
+        )
         
-        response = f"✅ Создана задача {task.task_id}:\n"
+        response = f"✅ Создана задача {task.id}:\n"
         response += f"Описание: {task.description}\n"
         response += f"Приоритет: {task.priority.value}"
         
@@ -182,7 +193,7 @@ async def task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
             
         task_id = context.args[0]
-        success = await task_executor.cancel_task(task_id)
+        success = task_executor.cancel_task(task_id)
         
         if success:
             await update.message.reply_text(f"✅ Задача {task_id} отменена")

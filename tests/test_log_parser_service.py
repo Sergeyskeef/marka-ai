@@ -79,10 +79,10 @@ def test_get_changes_summary(log_parser, sample_log_file):
     assert summary['files_modified'] == 1
 
 def test_parse_log_line(log_parser):
-    line = "2024-03-30 10:00:00 INFO: Test message"
+    line = "2025-03-30 10:00:00 INFO: Test message"
     entry = log_parser._parse_log_line(line, "test.log")
     
-    assert entry['timestamp'] == "2024-03-30 10:00:00"
+    assert entry['timestamp'] == "2025-03-30 10:00:00"
     assert entry['level'] == 'info'
     assert entry['file'] == "test.log"
     assert "Test message" in entry['message']
