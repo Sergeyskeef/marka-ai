@@ -254,16 +254,16 @@ if __name__ == "__main__":
     # Тестирование селектора
     selector = BackendSelector()
 
-    print("=== Backend Selector Test ===")
-    print(f"Default backend: {selector.default_backend.value}")
+    logger.info("=== Backend Selector Test ===")
+    logger.info(f"Default backend: {selector.default_backend.value}")
 
     status = selector.get_backend_status()
-    print(f"Backend status: {status}")
+    logger.info(f"Backend status: {status}")
 
     # Тест создания экземпляров
     try:
         memory = selector.create_memory_instance(backend="graphiti")
-        print(f"✅ GraphitiMemory создан: {type(memory).__name__}")
+        logger.info(f"✅ GraphitiMemory создан: {type(memory).__name__}")
     except Exception as e:
-        print(f"❌ GraphitiMemory ошибка: {e}")
+        logger.error(f"❌ GraphitiMemory ошибка: {e}")
 

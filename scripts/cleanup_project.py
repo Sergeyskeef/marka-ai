@@ -190,8 +190,8 @@ class ProjectCleaner:
         print("\n🧹 Удаление отладочного кода...")
         
         debug_files = [
-            "rag/enhanced_rag_chain.py",
-            "rag/enhanced_rag_chain_tools.py",
+            # "rag/enhanced_rag_chain.py",  # Удалено - упрощена система
+            # "rag/enhanced_rag_chain_tools.py",  # Удалено - упрощена система
             "core/backend_selector.py",
             "core/graphiti_config.py",
             "main.py"

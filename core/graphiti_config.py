@@ -3,9 +3,12 @@
 GraphitiMemory Configuration and Feature Flags
 Настройки для интеграции GraphitiMemory в проект Марк v2
 """
+import logging
 import os
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class GraphitiMode(Enum):
@@ -178,14 +181,14 @@ GRAPHITI_HEALTH_CHECK_ENABLED = os.getenv('GRAPHITI_HEALTH_CHECK_ENABLED', 'true
 if __name__ == "__main__":
     # Для тестирования конфигурации
     config = get_graphiti_config()
-    print("=== GraphitiMemory Configuration ===")
-    print(config)
-    print(f"\nFeature Flags: {get_graphiti_feature_flags()}")
+    logger.info("=== GraphitiMemory Configuration ===")
+    logger.info(config)
+    logger.info(f"\nFeature Flags: {get_graphiti_feature_flags()}")
 
     validation = validate_graphiti_config()
-    print(f"\nValidation: {validation}")
+    logger.info(f"\nValidation: {validation}")
 
     if not validation['valid']:
-        print(f"Issues: {validation['issues']}")
+        logger.warning(f"Issues: {validation['issues']}")
     else:
-        print("✅ Configuration is valid")
+        logger.info("✅ Configuration is valid")
