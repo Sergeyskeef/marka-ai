@@ -31,9 +31,11 @@ from langchain_api.core.backend_selector import get_backend_status
 from langchain_api.simple_chat import simple_chat
 # Удалены импорты неиспользуемых роутеров
 from langchain_api.routers.task_router import router as task_router
+from langchain_api.routes.trace_ui import router as trace_router
 from langchain_api.utils.toolkit import get_tools_for_agent, tool_registry
 from langchain_api.sandbox.sandbox_manager import SandboxManager
 from langchain_api.core.middleware import MetricsMiddleware
+from langchain_api.middlewares.agents_trace import AgentsTraceMiddleware
 from langchain_api.core.metrics import metrics_manager
 from langchain_api.core.prompt_manager import prompt_manager
 # Удален неиспользуемый импорт ChangeReport
@@ -41,6 +43,7 @@ from langchain_api.core.prompt_manager import prompt_manager
 
 # Импортируем дополнительные компоненты системы
 from langchain_api.services.task_executor import TaskExecutor
+from langchain_api.core.guardrails_client import with_guardrails, is_guardrails_enabled
 
 # Настройка логирования
 logging.basicConfig(
@@ -147,6 +150,9 @@ app.add_middleware(
 # Добавляем middleware для метрик
 app.add_middleware(MetricsMiddleware)
 
+# Добавляем middleware для трассировки агентов
+app.add_middleware(AgentsTraceMiddleware)
+
 # Глобальные переменные
 _task_executor = None
 _sandbox_manager = None
@@ -154,6 +160,7 @@ sandbox_manager = None  # Глобальная переменная для healt
 
 # Подключаем роутеры
 app.include_router(task_router)
+app.include_router(trace_router)
 # Удалены неиспользуемые роутеры
 
 # Подключаем метрики
@@ -239,6 +246,15 @@ class SearchResponse(BaseModel):
     items: list[dict[str, Any]] = Field(..., description="Найденные элементы")
     total: int = Field(..., description="Общее количество результатов")
 
+class V1ChatRequest(BaseModel):
+    content: str = Field(..., description="Сообщение для обработки", example="Привет! Как дела?")
+    chat_id: int | None = Field(None, description="ID чата для контекста", example=12345)
+
+class V1ChatResponse(BaseModel):
+    answer: str = Field(..., description="Ответ от системы")
+    chat_id: int | None = Field(None, description="ID чата")
+    error: str | None = Field(None, description="Ошибка, если есть")
+
 # API эндпоинты с улучшенной документацией
 
 @app.get("/", tags=["root"])
@@ -319,6 +335,49 @@ async def chat_ask(request: ChatRequest, backend: str | None = None):
     except Exception as e:
         logger.error(f"Ошибка в unified brain HTTP processing: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке запроса через мозг: {str(e)}")
+
+@app.post("/v1/chat", response_model=V1ChatResponse, tags=["chat"])
+async def v1_chat(request: V1ChatRequest):
+    """
+    🛡️ V1 Chat API с Guardrails защитой
+    
+    Обрабатывает запросы чата с обязательной валидацией через Guardrails.
+    
+    **Guardrails защита:**
+    - Максимальная длина сообщения: 4000 символов
+    - Проверка на PII (персональные данные)
+    - Фильтрация нецензурной лексики
+    - Валидация JSON схемы ответа
+    
+    **Примеры:**
+    - Короткое сообщение: "Привет!" ✅
+    - Длинное сообщение (>4000 символов): ❌ HTTP 422
+    - Сообщение с PII: ❌ HTTP 422
+    """
+    # Валидация через Guardrails
+    if is_guardrails_enabled():
+        from langchain_api.core.guardrails_client import validate_llm_input
+        input_validation = validate_llm_input(request.content)
+        if not input_validation["valid"]:
+            logger.warning(f"❌ Валидация входящих данных не прошла: {input_validation['issues']}")
+            raise HTTPException(status_code=422, detail=f"Валидация не прошла: {input_validation['issues']}")
+    
+    try:
+        # Используем упрощенную логику чата
+        response = await simple_chat(request.content, request.chat_id, "chat")
+        
+        return V1ChatResponse(
+            answer=response["answer"],
+            chat_id=request.chat_id
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка в V1 chat processing: {str(e)}")
+        return V1ChatResponse(
+            answer="",
+            chat_id=request.chat_id,
+            error=f"Ошибка при обработке запроса: {str(e)}"
+        )
 
 @app.post("/sandbox/sync", tags=["sandbox"])
 def sandbox_sync() -> dict:

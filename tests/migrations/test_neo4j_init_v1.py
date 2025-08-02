@@ -13,27 +13,24 @@ class TestNeo4jMigrationV1:
     """Тесты для миграции Neo4j Graph Schema v1"""
 
     @pytest.fixture(scope="class")
-    def neo4j_connection(self):
+    def neo4j_driver(self):
         """Фикстура для подключения к Neo4j"""
         # Создаем драйвер для прямого подключения
         driver = GraphDatabase.driver(
             "bolt://graphiti-neo4j:7687",
             auth=("neo4j", "password")
         )
-        # Ждем, пока Neo4j будет готов
-        max_retries = 30
-        for i in range(max_retries):
-            try:
-                # Проверяем подключение через Graphiti API
-                response = requests.get("http://localhost:7878/health", timeout=5)
-                if response.status_code == 200:
-                    print(f"✅ Neo4j готов через {i+1} попыток")
-                    return True
-            except requests.exceptions.RequestException:
-                pass
-            time.sleep(2)
         
-        pytest.fail("❌ Neo4j не готов после 60 секунд ожидания")
+        # Проверяем подключение
+        try:
+            with driver.session() as session:
+                session.run("RETURN 1")
+            print("✅ Подключение к Neo4j успешно")
+        except Exception as e:
+            pytest.fail(f"❌ Не удалось подключиться к Neo4j: {e}")
+        
+        yield driver
+        driver.close()
 
     def test_migration_script_exists(self):
         """Проверяет, что миграционный скрипт существует"""
@@ -42,7 +39,7 @@ class TestNeo4jMigrationV1:
         assert os.path.exists(script_path), f"Миграционный скрипт не найден: {script_path}"
         print(f"✅ Миграционный скрипт найден: {script_path}")
 
-    def test_constraints_created(self, neo4j_connection):
+    def test_constraints_created(self, neo4j_driver):
         """Проверяет создание всех необходимых constraints"""
         expected_constraints = [
             "user_id",
@@ -53,22 +50,17 @@ class TestNeo4jMigrationV1:
             "concept_id"
         ]
         
-        try:
-            # Получаем список constraints через Graphiti API
-            response = requests.get("http://localhost:7878/health", timeout=5)
-            if response.status_code == 200:
-                # Проверяем, что Neo4j доступен
-                print("✅ Neo4j доступен через Graphiti API")
+        with neo4j_driver.session() as session:
+            result = session.run("SHOW CONSTRAINTS")
+            constraints = [record["name"] for record in result]
+            
+            print(f"✅ Найдено {len(constraints)} constraints в базе данных")
+            
+            for constraint in expected_constraints:
+                assert constraint in constraints, f"Constraint {constraint} не найден"
+                print(f"✅ Constraint {constraint} найден")
                 
-                # Здесь можно добавить проверку constraints через API
-                # Пока просто проверяем, что миграция прошла без ошибок
-                for constraint in expected_constraints:
-                    print(f"✅ Constraint {constraint} должен быть создан")
-                
-        except requests.exceptions.RequestException as e:
-            pytest.fail(f"Ошибка при проверке constraints: {e}")
-
-    def test_indexes_created(self, neo4j_connection):
+    def test_indexes_created(self, neo4j_driver):
         """Проверяет создание всех необходимых индексов"""
         expected_indexes = [
             "user_email",
@@ -89,67 +81,71 @@ class TestNeo4jMigrationV1:
             "concept_description"
         ]
         
-        try:
-            # Проверяем доступность Neo4j
-            response = requests.get("http://localhost:7878/health", timeout=5)
-            if response.status_code == 200:
-                print("✅ Neo4j доступен для проверки индексов")
-                
-                # Здесь можно добавить проверку индексов через API
-                for index in expected_indexes:
-                    print(f"✅ Индекс {index} должен быть создан")
+        with neo4j_driver.session() as session:
+            result = session.run("SHOW INDEXES")
+            indexes = [record["name"] for record in result]
+            
+            print(f"✅ Найдено {len(indexes)} индексов в базе данных")
+            
+            for index in expected_indexes:
+                assert index in indexes, f"Индекс {index} не найден"
+                print(f"✅ Индекс {index} найден")
                     
-        except requests.exceptions.RequestException as e:
-            pytest.fail(f"Ошибка при проверке индексов: {e}")
-
-    def test_test_data_created(self, neo4j_connection):
+    def test_test_data_created(self, neo4j_driver):
         """Проверяет создание тестовых данных"""
-        try:
-            # Проверяем, что тестовые данные созданы через Graphiti API
-            response = requests.get("http://localhost:7878/nodes", timeout=5)
-            if response.status_code == 200:
-                nodes = response.json()
-                print(f"✅ Найдено {len(nodes)} узлов в базе данных")
-                
-                # Проверяем наличие тестовых узлов
-                test_user_found = any(
-                    node.get("properties", {}).get("id") == "test_user_001"
-                    for node in nodes
-                )
-                
-                test_pref_found = any(
-                    node.get("properties", {}).get("id") == "pref_001"
-                    for node in nodes
-                )
-                
-                test_diary_found = any(
-                    node.get("properties", {}).get("id") == "diary_001"
-                    for node in nodes
-                )
-                
-                assert test_user_found, "Тестовый пользователь не найден"
-                assert test_pref_found, "Тестовое предпочтение не найдено"
-                assert test_diary_found, "Тестовая запись дневника не найдена"
-                
-                print("✅ Все тестовые данные созданы успешно")
-                
-        except requests.exceptions.RequestException as e:
-            pytest.fail(f"Ошибка при проверке тестовых данных: {e}")
+        with neo4j_driver.session() as session:
+            # Проверяем тестового пользователя
+            result = session.run(
+                "MATCH (u:User {id: 'test_user_001'}) RETURN u"
+            )
+            user = result.single()
+            assert user is not None, "Тестовый пользователь не найден"
+            print("✅ Тестовый пользователь найден")
+            
+            # Проверяем тестовое предпочтение
+            result = session.run(
+                "MATCH (p:Preference {id: 'pref_001'}) RETURN p"
+            )
+            preference = result.single()
+            assert preference is not None, "Тестовое предпочтение не найдено"
+            print("✅ Тестовое предпочтение найдено")
+            
+            # Проверяем тестовую запись дневника
+            result = session.run(
+                "MATCH (d:DiaryEntry {id: 'diary_001'}) RETURN d"
+            )
+            diary = result.single()
+            assert diary is not None, "Тестовая запись дневника не найдена"
+            print("✅ Тестовая запись дневника найдена")
+            
+            # Проверяем связи
+            result = session.run(
+                "MATCH (u:User {id: 'test_user_001'})-[:PREFERS]->(p:Preference {id: 'pref_001'}) RETURN count(*) as count"
+            )
+            pref_relation = result.single()["count"]
+            assert pref_relation > 0, "Связь User-Preference не найдена"
+            print("✅ Связь User-Preference найдена")
+            
+            result = session.run(
+                "MATCH (u:User {id: 'test_user_001'})-[:WRITES]->(d:DiaryEntry {id: 'diary_001'}) RETURN count(*) as count"
+            )
+            write_relation = result.single()["count"]
+            assert write_relation > 0, "Связь User-DiaryEntry не найдена"
+            print("✅ Связь User-DiaryEntry найдена")
 
-    def test_schema_validation(self, neo4j_connection):
+    def test_schema_validation(self, neo4j_driver):
         """Проверяет общую структуру схемы"""
-        try:
+        with neo4j_driver.session() as session:
             # Проверяем, что все основные типы узлов доступны
-            response = requests.get("http://localhost:7878/health", timeout=5)
-            if response.status_code == 200:
-                print("✅ Схема Graph Schema v1 готова к использованию")
-                
-                # Проверяем, что миграция не создала ошибок
-                # Если мы дошли до этого теста, значит миграция прошла успешно
-                assert True, "Схема валидна"
-                
-        except requests.exceptions.RequestException as e:
-            pytest.fail(f"Ошибка при валидации схемы: {e}")
+            result = session.run(
+                "MATCH (n) RETURN labels(n) as labels, count(n) as count ORDER BY count DESC"
+            )
+            node_types = [record["labels"] for record in result]
+            
+            expected_labels = [["User"], ["Preference"], ["DiaryEntry"], ["Concept"], ["ToolCall"], ["Outcome"]]
+            
+            print(f"✅ Найдено {len(node_types)} типов узлов в базе данных")
+            print("✅ Схема Graph Schema v1 готова к использованию")
 
 
 if __name__ == "__main__":

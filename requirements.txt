@@ -1,9 +1,14 @@
 # Основные зависимости для LangChain API
-openai==1.28.0
+openai>=1.97.1
 langchain_openai==0.1.6
 langchain==0.1.14
 # langchain-weaviate==0.0.4 - УДАЛЕНО
 langchain-community==0.0.34
+
+# OpenAI Agents SDK для Pydantic-schemas и Guardrails
+openai-agents>=0.2.4
+PyYAML>=6.0
+jinja2>=3.0
 
 # HTTP клиенты и серверы
 httpx[http2]==0.27.2

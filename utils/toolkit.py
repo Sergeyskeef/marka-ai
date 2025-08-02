@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
 """
-Tool Registry v1 - система регистрации и управления инструментами
+Tool Registry v2 - система регистрации и управления инструментами с Pydantic-схемами
 """
 
 import json
 import logging
 import inspect
+import subprocess
+import tempfile
+import os
+import time
 from typing import Any, Dict, List, Optional, Callable
 from functools import wraps
 from dataclasses import dataclass
+
+from langchain_api.core.tools.schemas import (
+    CodeExecutionIn, CodeExecutionOut,
+    MemoryRetrieveIn, MemoryRetrieveOut,
+    WebSearchIn, WebSearchOut,
+    GraphSearchIn, GraphSearchOut,
+    SummarizeIn, SummarizeOut,
+    FileReadIn, FileReadOut,
+    FileWriteIn, FileWriteOut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +32,8 @@ class ToolDefinition:
     name: str
     description: str
     function: Callable
-    args_schema: Dict[str, Any]
+    input_schema: Any
+    output_schema: Any
     category: str = "general"
     tags: List[str] = None
     
@@ -31,7 +46,8 @@ class ToolDefinition:
         return {
             "name": self.name,
             "description": self.description,
-            "args_schema": self.args_schema,
+            "input_schema": self.input_schema.__name__ if self.input_schema else None,
+            "output_schema": self.output_schema.__name__ if self.output_schema else None,
             "category": self.category,
             "tags": self.tags,
             "function_name": self.function.__name__,
@@ -44,7 +60,7 @@ class ToolRegistry:
     def __init__(self):
         self.tools: Dict[str, ToolDefinition] = {}
         self.categories: Dict[str, List[str]] = {}
-        logger.info("🔧 ToolRegistry инициализирован")
+        logger.info("🔧 ToolRegistry v2 инициализирован")
     
     def register_tool(self, tool_def: ToolDefinition) -> bool:
         """Регистрирует инструмент"""
@@ -80,62 +96,16 @@ class ToolRegistry:
 # Глобальный экземпляр реестра
 tool_registry = ToolRegistry()
 
-def tool(name: str, description: str, category: str = "general", tags: List[str] = None):
-    """Декоратор для регистрации инструментов"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-        
-        # Анализируем сигнатуру функции
-        sig = inspect.signature(func)
-        args_schema = {}
-        
-        for param_name, param in sig.parameters.items():
-            if param_name == 'self':
-                continue
-                
-            param_info = {
-                "type": str(param.annotation) if param.annotation != inspect.Parameter.empty else "Any",
-                "required": param.default == inspect.Parameter.empty,
-                "default": param.default if param.default != inspect.Parameter.empty else None
-            }
-            args_schema[param_name] = param_info
-        
-        # Создаем определение инструмента
-        tool_def = ToolDefinition(
-            name=name,
-            description=description,
-            function=func,
-            args_schema=args_schema,
-            category=category,
-            tags=tags or []
-        )
-        
-        # Регистрируем инструмент
-        tool_registry.register_tool(tool_def)
-        
-        return wrapper
-    return decorator
+# =====================================================
+# Code Execution Tools
+# =====================================================
 
-# Примеры инструментов
-@tool(
-    name="run_code",
-    description="Выполняет Python код в безопасной песочнице",
-    category="code",
-    tags=["execution", "sandbox"]
-)
-def run_code(code: str, timeout: int = 30) -> Dict[str, Any]:
-    """Выполняет код в песочнице"""
-    import subprocess
-    import tempfile
-    import os
-    import time
-    
+def run_code(args: CodeExecutionIn) -> CodeExecutionOut:
+    """Выполняет код в песочнице с валидацией через Pydantic"""
     start_time = time.time()
     
     # Предварительная обработка кода
-    processed_code = _preprocess_code(code)
+    processed_code = _preprocess_code(args.code)
     
     try:
         # Создаем временный файл для кода
@@ -148,7 +118,7 @@ def run_code(code: str, timeout: int = 30) -> Dict[str, Any]:
             ['python', temp_file],
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=args.timeout,
             cwd='/sandbox'  # Рабочая директория песочницы
         )
         
@@ -174,41 +144,154 @@ def run_code(code: str, timeout: int = 30) -> Dict[str, Any]:
         except:
             pass
         
-        return {
-            "success": result.returncode == 0,
-            "output": output,
-            "execution_time": execution_time,
-            "returncode": result.returncode
-        }
+        return CodeExecutionOut(
+            output=output,
+            error=None if result.returncode == 0 else stderr,
+            execution_time=execution_time,
+            exit_code=result.returncode
+        )
         
     except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "output": f"❌ Превышено время выполнения ({timeout} сек)",
-            "execution_time": timeout,
-            "returncode": -1
-        }
+        execution_time = time.time() - start_time
+        return CodeExecutionOut(
+            output=f"❌ Превышено время выполнения ({args.timeout} сек)",
+            error="Timeout exceeded",
+            execution_time=execution_time,
+            exit_code=-1
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "output": f"❌ Ошибка выполнения: {str(e)}",
-            "execution_time": time.time() - start_time,
-            "returncode": -1
-        }
+        execution_time = time.time() - start_time
+        return CodeExecutionOut(
+            output=f"❌ Ошибка выполнения: {str(e)}",
+            error=str(e),
+            execution_time=execution_time,
+            exit_code=-1
+        )
 
-@tool(
-    name="search_memory",
-    description="Ищет информацию в памяти Graphiti",
-    category="memory",
-    tags=["search", "graphiti"]
-)
-def search_memory(query: str, limit: int = 5) -> Dict[str, Any]:
-    """Поиск в памяти"""
-    return {
-        "query": query,
-        "results": [],
-        "total": 0
-    }
+# =====================================================
+# Memory Tools
+# =====================================================
+
+def search_memory(args: MemoryRetrieveIn) -> MemoryRetrieveOut:
+    """Поиск в памяти с валидацией через Pydantic"""
+    # TODO: Реализовать поиск через Graphiti API
+    search_start = time.time()
+    
+    # Заглушка - в реальности здесь будет поиск через Graphiti
+    memories = [
+        {
+            "id": "mem_001",
+            "content": f"Найдено по запросу: {args.query}",
+            "tags": args.tags or [],
+            "created_at": "2025-08-01T18:00:00Z"
+        }
+    ]
+    
+    search_time = time.time() - search_start
+    
+    return MemoryRetrieveOut(
+        memories=memories,
+        total_found=len(memories),
+        search_time=search_time
+    )
+
+# =====================================================
+# Web Search Tools
+# =====================================================
+
+def web_search(args: WebSearchIn) -> WebSearchOut:
+    """Поиск в интернете с валидацией через Pydantic"""
+    # TODO: Реализовать веб-поиск
+    return WebSearchOut(
+        title="Результат поиска",
+        url="https://example.com",
+        snippet=f"Найдено по запросу: {args.query}",
+        relevance_score=0.8
+    )
+
+# =====================================================
+# Graph Search Tools
+# =====================================================
+
+def graph_search(args: GraphSearchIn) -> GraphSearchOut:
+    """Поиск в графе знаний с валидацией через Pydantic"""
+    # TODO: Реализовать поиск через Neo4j
+    return GraphSearchOut(
+        node_id="node_001",
+        node_type="Concept",
+        content=f"Найдено в графе: {args.query}",
+        similarity_score=0.9,
+        metadata={"source": "neo4j"}
+    )
+
+# =====================================================
+# Summarization Tools
+# =====================================================
+
+def summarize_text(args: SummarizeIn) -> SummarizeOut:
+    """Суммаризация с валидацией через Pydantic"""
+    # TODO: Реализовать суммаризацию через LLM
+    original_length = len(args.text)
+    summary = f"Краткое содержание: {args.text[:args.max_length]}..."
+    summary_length = len(summary)
+    compression_ratio = max(0.0, 1 - (summary_length / original_length))
+    
+    return SummarizeOut(
+        summary=summary,
+        original_length=original_length,
+        summary_length=summary_length,
+        compression_ratio=compression_ratio
+    )
+
+# =====================================================
+# File Operations Tools
+# =====================================================
+
+def read_file(args: FileReadIn) -> FileReadOut:
+    """Чтение файла с валидацией через Pydantic"""
+    try:
+        with open(args.file_path, 'r', encoding=args.encoding) as f:
+            content = f.read()
+        
+        file_size = len(content.encode(args.encoding))
+        
+        return FileReadOut(
+            content=content,
+            file_size=file_size,
+            encoding=args.encoding,
+            success=True
+        )
+    except Exception as e:
+        return FileReadOut(
+            content="",
+            file_size=0,
+            encoding=args.encoding,
+            success=False
+        )
+
+def write_file(args: FileWriteIn) -> FileWriteOut:
+    """Запись в файл с валидацией через Pydantic"""
+    try:
+        with open(args.file_path, args.mode, encoding=args.encoding) as f:
+            f.write(args.content)
+        
+        bytes_written = len(args.content.encode(args.encoding))
+        
+        return FileWriteOut(
+            success=True,
+            bytes_written=bytes_written,
+            file_path=args.file_path
+        )
+    except Exception as e:
+        return FileWriteOut(
+            success=False,
+            bytes_written=0,
+            file_path=args.file_path
+        )
+
+# =====================================================
+# Utility Functions
+# =====================================================
 
 def get_tools_for_agent() -> List[Dict[str, Any]]:
     """Возвращает список инструментов для агента"""
