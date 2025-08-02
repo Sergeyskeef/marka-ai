@@ -131,19 +131,29 @@ def delete_user_pref(user_id: str, key: str) -> bool:
         config = get_graphiti_config()
         driver = GraphDatabase.driver(config.neo4j_uri, auth=(config.neo4j_username, config.neo4j_password))
         with driver.session() as session:
+            # Сначала считаем количество связей для удаления
+            count_result = session.run("""
+                MATCH (u:User {id: $user_id})-[r:PREFERS]->(p:Preference {key: $key})
+                RETURN count(r) as count
+            """, user_id=user_id, key=key)
+            
+            count_record = count_result.single()
+            if not count_record or count_record['count'] == 0:
+                return False
+            
+            # Теперь удаляем
             result = session.run("""
                 MATCH (u:User {id: $user_id})-[r:PREFERS]->(p:Preference {key: $key})
-                WITH count(r) as deleted_count, p, r
                 DELETE r
-                WITH p, deleted_count
+                WITH p
                 OPTIONAL MATCH (p)
                 WHERE NOT (p)<-[:PREFERS]-()
                 DELETE p
-                RETURN deleted_count as deleted
+                RETURN true as deleted
             """, user_id=user_id, key=key)
             
-            deleted_count = result.single()['deleted']
-            if deleted_count > 0:
+            deleted = result.single()['deleted']
+            if deleted:
                 logger.info(f"✅ Предпочтение {key} удалено для пользователя {user_id}")
                 return True
             else:

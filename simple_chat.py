@@ -14,7 +14,7 @@ from langchain_api.core.prompt_adapter import get_prompt_adapter
 
 logger = logging.getLogger(__name__)
 
-async def simple_chat(question: str, chat_id: int | None = None, mode: str = "chat") -> Dict[str, Any]:
+async def simple_chat(question: str, chat_id: int | None = None, mode: str = "chat", user_id: str | None = None) -> Dict[str, Any]:
     """Упрощенная функция чата"""
     try:
         # Ищем информацию в памяти
@@ -71,8 +71,8 @@ async def simple_chat(question: str, chat_id: int | None = None, mode: str = "ch
         
         # Адаптируем промпт на основе предпочтений пользователя
         adapter = get_prompt_adapter()
-        user_id = str(chat_id) if chat_id else "default_user"
-        system_prompt = adapter.adapt_prompt(base_prompt, user_id, mode)
+        effective_user_id = user_id or (str(chat_id) if chat_id else "default_user")
+        system_prompt = adapter.adapt_prompt(base_prompt, effective_user_id, mode)
         
         # Получаем ответ
         messages = [
