@@ -6,6 +6,7 @@ volumes:
   dev_sandbox:
   ollama-data:
   graphiti-neo4j-data:
+  redis_data:
 
 services:
   app:
@@ -131,6 +132,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # --- Redis для сессий и кэша ---
+  redis:
+    image: redis:7-alpine
+    container_name: marka-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - marka_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # --- Rust Core gRPC service --- УДАЛЕНО
 
