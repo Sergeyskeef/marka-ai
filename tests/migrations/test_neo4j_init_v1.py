@@ -56,7 +56,7 @@ class TestNeo4jMigrationV1:
             
             print(f"✅ Найдено {len(constraints)} constraints в базе данных")
             
-            for constraint in expected_constraints:
+                for constraint in expected_constraints:
                 assert constraint in constraints, f"Constraint {constraint} не найден"
                 print(f"✅ Constraint {constraint} найден")
                 
@@ -87,7 +87,7 @@ class TestNeo4jMigrationV1:
             
             print(f"✅ Найдено {len(indexes)} индексов в базе данных")
             
-            for index in expected_indexes:
+                for index in expected_indexes:
                 assert index in indexes, f"Индекс {index} не найден"
                 print(f"✅ Индекс {index} найден")
                     
@@ -145,7 +145,7 @@ class TestNeo4jMigrationV1:
             expected_labels = [["User"], ["Preference"], ["DiaryEntry"], ["Concept"], ["ToolCall"], ["Outcome"]]
             
             print(f"✅ Найдено {len(node_types)} типов узлов в базе данных")
-            print("✅ Схема Graph Schema v1 готова к использованию")
+                print("✅ Схема Graph Schema v1 готова к использованию")
 
 
 if __name__ == "__main__":
