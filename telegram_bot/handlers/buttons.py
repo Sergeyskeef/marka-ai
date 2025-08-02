@@ -2,6 +2,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from langchain_api.core.memory.prefs import upsert_user_pref, get_user_pref
+from langchain_api.core.prompt_adapter import get_prompt_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -114,14 +115,9 @@ async def handle_preference_callback(update: Update, context: ContextTypes.DEFAU
 
 async def handle_feedback(query, user_id: str, feedback_type: str):
     """Обработка обратной связи"""
-    feedback_messages = {
-        "positive": "👍 Спасибо за положительную оценку!",
-        "negative": "👎 Спасибо за обратную связь. Я постараюсь улучшиться.",
-        "retry": "🔄 Попробую ответить по-другому.",
-        "clarify": "📝 Пожалуйста, уточните ваш вопрос."
-    }
-    
-    message = feedback_messages.get(feedback_type, "Спасибо за обратную связь!")
+    # Используем адаптер для генерации умного ответа
+    adapter = get_prompt_adapter()
+    message = adapter.get_feedback_adapted_response(user_id, "", feedback_type)
     
     # Сохраняем обратную связь в предпочтениях
     upsert_user_pref(user_id, "last_feedback", feedback_type)

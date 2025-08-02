@@ -403,6 +403,15 @@ class TelegramBot:
                 response_text = f"🤖 {answer}"
                 if context_used:
                     response_text += "\n\n📚 Использован контекст из памяти"
+                
+                # Добавляем кнопки обратной связи к успешному ответу
+                feedback_keyboard = PreferenceButtons.create_feedback_keyboard()
+                await update.message.reply_text(
+                    response_text, 
+                    parse_mode='Markdown',
+                    reply_markup=feedback_keyboard
+                )
+                return
                     
             else:
                 response_text = f"❌ Ошибка API: {response.status_code}"

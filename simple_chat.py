@@ -10,6 +10,7 @@ from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain_api.core.memory.memory_manager import memory_manager
 from langchain_api.utils.openai_proxy_client import chat_model
 from langchain_api.core.prompt_manager import prompt_manager
+from langchain_api.core.prompt_adapter import get_prompt_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,12 @@ async def simple_chat(question: str, chat_id: int | None = None, mode: str = "ch
                 logger.info("Контекст не найден")
         
         # Формируем промпт с учетом режима
-        system_prompt = prompt_manager.get_prompt(mode, memory_context)
+        base_prompt = prompt_manager.get_prompt(mode, memory_context)
+        
+        # Адаптируем промпт на основе предпочтений пользователя
+        adapter = get_prompt_adapter()
+        user_id = str(chat_id) if chat_id else "default_user"
+        system_prompt = adapter.adapt_prompt(base_prompt, user_id, mode)
         
         # Получаем ответ
         messages = [
