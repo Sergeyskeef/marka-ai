@@ -172,41 +172,7 @@ print_status $? "Адаптация промптов работает"
 
 # 15. Проверка Reflexion Loop α
 echo -e "\n${YELLOW}15. Проверка Reflexion Loop α...${NC}"
-docker compose exec app python -c "
-import asyncio
-import sys
-sys.path.append('/app')
-
-async def test_reflexion():
-    try:
-        from langchain_api.core.agent.runner import AgentRunner
-        
-        runner = AgentRunner()
-        
-        # Тестируем сценарий где первая попытка неуспешна
-        result = await runner.try_answer(
-            question='Как решить проблему недостатка информации?',
-            user_id='smoke_reflexion_user'
-        )
-        
-        print(f'Success: {result["success"]}')
-        print(f'Attempts: {result["final_attempt"]}')
-        print(f'Answer length: {len(result["answer"])}')
-        
-        # Результат считается успешным если получен любой ответ
-        return result["success"] and len(result["answer"]) > 0
-    except Exception as e:
-        print(f'Error: {e}')
-        return False
-
-# Запуск теста
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-test_success = loop.run_until_complete(test_reflexion())
-loop.close()
-
-exit(0 if test_success else 1)
-"
+docker compose exec app python /app/langchain_api/test_reflexion_smoke.py
 print_status $? "Reflexion Loop α работает"
 
 # 16. Очистка тестовых данных

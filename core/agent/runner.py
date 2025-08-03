@@ -13,7 +13,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_api.core.agent.reflexion import ReflexionAgent
 from langchain_api.core.graphiti.backend_neo4j import neo4j_diary_backend
 from langchain_api.core.metrics.outcome_logger import outcome_logger
-from langchain_api.core.metrics import metrics_manager
+from langchain_api.core.prometheus_metrics import metrics_manager
 from langchain_api.utils.openai_proxy_client import chat_model
 
 
@@ -132,7 +132,7 @@ class AgentRunner:
                     details=f"Успех со второй попытки с рефлексией на вопрос: {question[:100]}"
                 )
                 
-                # Логируем метрику успешной рефлексии  
+                # Логируем метрику успешной рефлексии
                 metrics_manager.record_reflexion_attempt("success")
             else:
                 logger.warning("❌ Вторая попытка также неудачна")

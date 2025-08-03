@@ -7,7 +7,7 @@ import time
 import logging
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from .metrics import metrics_manager
+from langchain_api.core.metrics import metrics_manager
 
 logger = logging.getLogger(__name__)
 
