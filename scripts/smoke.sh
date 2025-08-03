@@ -185,16 +185,16 @@ async def test_reflexion():
         
         # Тестируем сценарий где первая попытка неуспешна
         result = await runner.try_answer(
-            user_message='Как решить проблему недостатка информации?',
+            question='Как решить проблему недостатка информации?',
             user_id='smoke_reflexion_user'
         )
         
-        print(f'Success: {result.success}')
-        print(f'Attempts: {result.final_attempt}')
-        print(f'Answer length: {len(result.answer)}')
+        print(f'Success: {result["success"]}')
+        print(f'Attempts: {result["final_attempt"]}')
+        print(f'Answer length: {len(result["answer"])}')
         
         # Результат считается успешным если получен любой ответ
-        return result.success and len(result.answer) > 0
+        return result["success"] and len(result["answer"]) > 0
     except Exception as e:
         print(f'Error: {e}')
         return False
@@ -206,7 +206,7 @@ success = loop.run_until_complete(test_reflexion())
 loop.close()
 
 exit(0 if success else 1)
-" > /dev/null 2>&1
+"
 print_status $? "Reflexion Loop α работает"
 
 # 16. Очистка тестовых данных
