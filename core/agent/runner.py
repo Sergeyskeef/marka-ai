@@ -13,6 +13,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_api.core.agent.reflexion import ReflexionAgent
 from langchain_api.core.graphiti.backend_neo4j import neo4j_diary_backend
 from langchain_api.core.metrics.outcome_logger import outcome_logger
+from langchain_api.core.metrics import metrics_manager
 from langchain_api.utils.openai_proxy_client import chat_model
 
 
@@ -76,6 +77,9 @@ class AgentRunner:
                     details=f"Успех с первой попытки на вопрос: {question[:100]}"
                 )
                 
+                # Логируем метрику успешной рефлексии (без рефлексии)
+                metrics_manager.record_reflexion_attempt("success")
+                
                 return {
                     "success": True,
                     "answer": first_attempt["answer"],
@@ -127,6 +131,9 @@ class AgentRunner:
                     duration_ms=int((time.time() - start_time) * 1000),
                     details=f"Успех со второй попытки с рефлексией на вопрос: {question[:100]}"
                 )
+                
+                # Логируем метрику успешной рефлексии  
+                metrics_manager.record_reflexion_attempt("success")
             else:
                 logger.warning("❌ Вторая попытка также неудачна")
                 
@@ -138,6 +145,9 @@ class AgentRunner:
                     error="Обе попытки ответа завершились неудачей",
                     details=f"Вопрос: {question[:100]}, Попытки: {len(attempts)}"
                 )
+                
+                # Логируем метрику неудачной рефлексии
+                metrics_manager.record_reflexion_attempt("failure")
             
             return {
                 "success": final_success,
@@ -161,6 +171,9 @@ class AgentRunner:
                 error=str(e),
                 details=f"Исключение при обработке вопроса: {question[:100]}"
             )
+            
+            # Логируем метрику неудачной рефлексии при исключении
+            metrics_manager.record_reflexion_attempt("failure")
             
             return {
                 "success": False,

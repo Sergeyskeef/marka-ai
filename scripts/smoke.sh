@@ -170,8 +170,47 @@ else:
 " > /dev/null 2>&1
 print_status $? "Адаптация промптов работает"
 
-# 15. Очистка тестовых данных
-echo -e "\n${YELLOW}15. Очистка тестовых данных...${NC}"
+# 15. Проверка Reflexion Loop α
+echo -e "\n${YELLOW}15. Проверка Reflexion Loop α...${NC}"
+docker compose exec app python -c "
+import asyncio
+import sys
+sys.path.append('/app')
+
+async def test_reflexion():
+    try:
+        from langchain_api.core.agent.runner import AgentRunner
+        
+        runner = AgentRunner()
+        
+        # Тестируем сценарий где первая попытка неуспешна
+        result = await runner.try_answer(
+            user_message='Как решить проблему недостатка информации?',
+            user_id='smoke_reflexion_user'
+        )
+        
+        print(f'Success: {result.success}')
+        print(f'Attempts: {result.final_attempt}')
+        print(f'Answer length: {len(result.answer)}')
+        
+        # Результат считается успешным если получен любой ответ
+        return result.success and len(result.answer) > 0
+    except Exception as e:
+        print(f'Error: {e}')
+        return False
+
+# Запуск теста
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+success = loop.run_until_complete(test_reflexion())
+loop.close()
+
+exit(0 if success else 1)
+" > /dev/null 2>&1
+print_status $? "Reflexion Loop α работает"
+
+# 16. Очистка тестовых данных
+echo -e "\n${YELLOW}16. Очистка тестовых данных...${NC}"
 docker compose exec app python -c "
 import requests
 
@@ -187,6 +226,7 @@ echo -e "${GREEN}✅ Graph Schema v1 готов к использованию${N
 echo -e "${GREEN}✅ Pydantic Tools работают корректно${NC}"
 echo -e "${GREEN}✅ Guardrails + Tracing UI готовы к использованию${NC}"
 echo -e "${GREEN}✅ Preferences API + Prompt Adaptation работают${NC}"
+echo -e "${GREEN}✅ Reflexion Loop α готов к использованию${NC}"
 echo -e "${GREEN}✅ Все тесты проходят${NC}"
 
 exit 0 
