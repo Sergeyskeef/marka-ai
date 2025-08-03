@@ -202,10 +202,10 @@ async def test_reflexion():
 # Запуск теста
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-success = loop.run_until_complete(test_reflexion())
+test_success = loop.run_until_complete(test_reflexion())
 loop.close()
 
-exit(0 if success else 1)
+exit(0 if test_success else 1)
 "
 print_status $? "Reflexion Loop α работает"
 
