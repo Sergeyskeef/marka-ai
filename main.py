@@ -396,29 +396,39 @@ def sandbox_sync() -> dict:
         raise HTTPException(status_code=500, detail=f"Ошибка синхронизации: {str(e)}")
 
 @app.post("/sandbox/exec", response_model=SandboxExecResponse, tags=["sandbox"])
-def sandbox_exec(request: SandboxExecRequest):
+async def sandbox_exec(request: SandboxExecRequest):
     """
     Выполнить команду в песочнице
 
-    Безопасно выполняет команду в изолированной Docker среде.
+    Безопасно выполняет команду в изолированной среде с использованием SandboxManager.
 
     **Безопасность:**
-    - Запрещены опасные команды (rm -rf, dd, mkfs, etc.)
-    - Таймаут выполнения: 15 секунд
-    - Изолированная среда Docker
+    - Блокировка опасных операций (os.system, eval, exec, etc.)
+    - Таймаут выполнения: 30 секунд (настраивается)
+    - Правильная обработка аргументов команд
 
     **Примеры команд:**
     - `ls -la` - список файлов
-    - `python --version` - версия Python
+    - `python3 -c "print(342*100)"` - выполнение Python кода
     - `pwd` - текущая директория
     """
-    result = _exec_in_sandbox(request.command)
+    global sandbox_manager
+    
+    if not sandbox_manager:
+        raise HTTPException(status_code=503, detail="Sandbox manager не инициализирован")
+    
+    # Используем SandboxManager для выполнения
+    result = await sandbox_manager.execute_command(
+        request.command,
+        timeout=request.timeout if hasattr(request, 'timeout') else None
+    )
+    
     return SandboxExecResponse(
-        success=result["success"],
-        output=result["output"],
-        error=result.get("error"),
-        execution_time=result.get("execution_time", 0.0),
-        returncode=result.get("returncode")
+        success=result.success,
+        output=result.output,
+        error=result.error,
+        execution_time=result.execution_time,
+        returncode=result.return_code
     )
 
 @app.get("/ping", tags=["health"])

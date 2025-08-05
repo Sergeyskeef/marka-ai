@@ -381,6 +381,44 @@ async def sync_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def run_code_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /run_code"""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Укажите код для выполнения\n"
+            "Пример: `/run_code print('Hello')`", 
+            parse_mode='Markdown'
+        )
+        return
+
+    code = ' '.join(context.args)
+    
+    try:
+        # Отправляем сообщение о начале выполнения
+        status_message = await update.message.reply_text("🔄 Выполняю код...")
+        
+        # Выполняем код через /sandbox/exec
+        response = await _post(f"{APP_HOST}/sandbox/exec", {"command": f"python3 -c \"{code}\""})
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if data.get("success"):
+                output = data.get("output", "(пусто)")
+                execution_time = data.get("execution_time", 0)
+                result_text = f"✅ **Результат:**\n```\n{output}\n```\n⏱️ Время: {execution_time:.2f}с"
+            else:
+                error = data.get("error", "Неизвестная ошибка")
+                result_text = f"❌ **Ошибка:**\n```\n{error}\n```"
+                
+            await status_message.edit_text(result_text, parse_mode='Markdown')
+        else:
+            await status_message.edit_text(f"❌ Ошибка API: {response.status_code}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка выполнения: {str(e)}")
+
+
 async def status_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     status_text = await _check_status()
     await update.message.reply_markdown_v2(status_text)
@@ -901,6 +939,24 @@ COMMANDS_REGISTRY = [
         "triggers": ["отчёт системы", "/self_analyze"],
         "action": self_analyze_cmd,
     },
+    {
+        "name": "code_mode",
+        "description": "Переключить в режим выполнения кода",
+        "triggers": ["👨‍💻 code", "code mode", "/code"],
+        "action": lambda update, context: update.message.reply_text(
+            "🖥️ Режим Code активирован!\n\n"
+            "Теперь я буду выполнять код:\n"
+            "• Python: `print(342*100)`\n"
+            "• Shell: `!ls -la`\n"
+            "• Или используйте /run_code"
+        ),
+    },
+    {
+        "name": "/run_code",
+        "description": "Выполнить Python код",
+        "triggers": ["/run_code"],
+        "action": run_code_cmd,
+    },
 ]
 
 
@@ -1015,6 +1071,7 @@ def main() -> None:
     # Регистрируем обработчики команд
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("sync", sync_cmd))
+    application.add_handler(CommandHandler("run_code", run_code_cmd))
     application.add_handler(CommandHandler("status", status_cmd))
     application.add_handler(CommandHandler("sandbox_report", sandbox_report_cmd))
     application.add_handler(CommandHandler("approve", approve_cmd))
