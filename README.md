@@ -115,6 +115,7 @@ docker compose up -d
 docker compose ps
 ```
 
+<<<<<<< Updated upstream
 ### Тестирование памяти
 ```bash
 # Создание эпизода
@@ -133,6 +134,50 @@ import requests
 response = requests.get('http://localhost:8000/search?q=test')
 print(response.json())
 "
+=======
+## 🧪 Как проверить
+
+### Code-sandbox
+```bash
+curl -s -X POST http://localhost:8000/v1/code \
+     -H "Content-Type: application/json" \
+     -d '{"code":"print(42)"}' | jq '.stdout'     # → "42\n"
+```
+
+### Оценка ответа (like/dislike)
+```bash
+curl -X POST http://localhost:8000/v1/feedback \
+     -H "Content-Type: application/json" \
+     -d '{"msg_id":123,"vote":"up"}'              # → {"status":"recorded"}
+```
+
+### Рефлексия (специально просим ошибку)
+```bash
+curl -X POST http://localhost:8000/v1/chat \
+     -H "Content-Type: application/json" \
+     -d '{"content":"Сделай ошибку"}' | jq '.content'
+```
+
+### Полный smoke-тест
+```bash
+# Запуск автоматического smoke-теста
+./scripts/smoke.sh
+```
+
+### Переменные окружения
+Скопируйте `.env.example` в `.env` и заполните:
+
+```env
+# OpenAI (обязательно)
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
+
+# Telegram Bot (опционально)
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+
+# Neo4j (настроено автоматически)
+NEO4J_PASSWORD=password
+>>>>>>> Stashed changes
 ```
 
 ## 🧪 Тестирование
@@ -286,6 +331,22 @@ langchain_api/
 - [ ] Связи между эпизодами
 - [ ] Автоматическая очистка старых данных
 - [ ] Репликация Neo4j для отказоустойчивости
+
+## ✅ Таблица фич Phase 0–3
+
+| Функциональность | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Статус |
+|------------------|---------|---------|---------|---------|--------|
+| **Core API** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Graphiti + Neo4j** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Reflexion Loop** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **User Preferences** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Telegram Bot** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Code Sandbox** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Feedback System** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Tool Registry** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Health Checks** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Testing (46% coverage)** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| **Documentation** | ✅ | ✅ | ✅ | ✅ | Завершено |
 
 ## 🤝 Вклад в проект
 
