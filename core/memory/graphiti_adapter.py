@@ -10,6 +10,8 @@ from typing import Any, Optional
 import httpx
 from core.error_middleware import RetryableHTTPClient
 from core.memory.graphiti_cache import get_cache
+import asyncio
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,10 @@ class GraphitiMemoryAdapter:
         self._retry_client = None
         self.use_cache = use_cache
         self._cache = None
-        logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url} (cache: {use_cache})")
+        # Семафор для контроля параллелизма (чтобы не получать 429 от LLM провайдера)
+        self.semaphore_limit = int(os.getenv('GRAPHITI_SEMAPHORE_LIMIT', '20'))
+        self._semaphore = asyncio.Semaphore(self.semaphore_limit)
+        logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url} (cache: {use_cache}, semaphore: {self.semaphore_limit})")
     
     async def _get_client(self) -> httpx.AsyncClient:
         """Получает или создает оптимизированный HTTP клиент"""
