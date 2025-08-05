@@ -1,423 +1,297 @@
-# Марка v2 - LangChain API
-![Build Status](https://github.com/sergey/marka/workflows/CI/badge.svg)
+# 🤖 Марк - AI-компаньон с памятью и саморазвитием
 
-## 🎯 Статус проекта
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
+![Neo4j](https://img.shields.io/badge/Neo4j-5.0+-orange.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+[![Test Coverage](https://img.shields.io/badge/coverage-%E2%89%A550%25-yellow.svg)](.github/workflows/test-coverage.yml)
 
-**🟢 Production Ready** - Интеграция Graphiti ⇆ Neo4j полностью протестирована и готова к использованию.
+## 📖 О проекте
 
-**✅ Последнее тестирование**: 15 июля 2025 - **9/9 интеграционных тестов прошли успешно**
+**Марк** - это интеллектуальный AI-компаньон с долговременной памятью, способностью к саморазвитию и анализу собственных действий. Проект использует современные технологии машинного обучения и графовые базы данных для создания персонализированного опыта взаимодействия.
 
-**✅ Code Quality**: 15 июля 2025 - **Все ошибки Ruff исправлены (0 ошибок)**
+### 🎯 Ключевые особенности
 
-**✅ Project Cleanup**: 15 июля 2025 - **Очистка проекта завершена успешно**
+- 🧠 **Долговременная память** на базе Neo4j и Graphiti
+- 💬 **Telegram-бот** с удобным интерфейсом и inline-кнопками
+- 🛡️ **Безопасная песочница** для выполнения кода с AST-проверками
+- 🔍 **Система рефлексии** для анализа и улучшения собственных действий
+- 📊 **Мониторинг и метрики** с визуализацией в реальном времени
+- 🔧 **Расширяемая архитектура** с поддержкой пользовательских инструментов
 
-## Описание проекта
+## 🚀 Быстрый старт
 
-Марка v2 - это интеллектуальный ассистент с интеграцией Graphiti и Neo4j для долговременной памяти. Проект использует современные технологии для создания эффективной системы памяти и обработки запросов.
+### Требования
 
-## 🧠 Система памяти Graphiti ⇆ Neo4j
+- Docker и Docker Compose
+- Python 3.11+
+- 8GB RAM минимум
+- 20GB свободного места на диске
 
-## 🔍 Tracing UI
+### Установка и запуск
 
-Для мониторинга и отладки агентов доступен веб-интерфейс трассировки:
+1. **Клонируйте репозиторий:**
+```bash
+git clone https://github.com/Sergeyskeef/marka-ai.git
+cd marka-ai
+```
 
-- **URL**: http://localhost:8000/trace/ui
-- **API**: http://localhost:8000/trace/api/spans
-- **Health Check**: http://localhost:8000/trace/api/health
+2. **Создайте файл `.env` с настройками:**
+```bash
+cp .env.example .env
+```
 
-Tracing UI позволяет:
-- Просматривать все вызовы инструментов в реальном времени
-- Анализировать производительность и латентность
-- Отслеживать ошибки и исключения
-- Маскировать чувствительные данные (токены, пароли)
+Обязательные переменные:
+```env
+# LLM настройки
+OPENAI_API_KEY=your_openai_api_key
 
-### Реализованная функциональность
+# Telegram бот (опционально)
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 
-#### ✅ Интеграция Graphiti с Neo4j
-- **Надёжный запуск**: Neo4j стартует раньше Graphiti с healthcheck и depends_on
-- **Сохранение метаданных**: Все примитивные типы (str, int, float, bool) сохраняются как отдельные свойства в Neo4j
-- **Сериализация сложных типов**: Списки и словари автоматически сериализуются в JSON строки
-- **Чтение из Neo4j**: Graphiti читает узлы из Neo4j и предоставляет их через API
+# Neo4j
+NEO4J_URL=bolt://neo4j:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_secure_password
+```
 
-#### ✅ API эндпоинты
-- `POST /memory` - создание эпизодов с метаданными
-- `GET /search?q=<query>` - поиск эпизодов по тексту
-- `GET /health` - проверка состояния системы
+3. **Запустите проект:**
+```bash
+docker-compose up -d
+```
 
-#### ✅ Поддерживаемые типы метаданных
-```python
+4. **Проверьте статус:**
+```bash
+# Проверка здоровья системы
+curl http://localhost:8000/health
+
+# Проверка доступных инструментов
+curl http://localhost:8000/tools
+```
+
+## 📁 Структура проекта
+
+```
+marka-ai/
+├── core/                    # Ядро системы
+│   ├── llm_service.py      # Сервис работы с LLM
+│   ├── memory/             # Система памяти
+│   ├── reflection/         # Анализ и рефлексия
+│   └── tools_registry.py   # Реестр инструментов
+├── telegram_bot/           # Telegram интерфейс
+│   ├── bot.py             # Основная логика бота
+│   └── handlers/          # Обработчики команд
+├── sandbox/               # Безопасное выполнение кода
+│   └── sandbox_manager.py # Менеджер песочницы с AST
+├── services/              # Внешние сервисы
+│   └── task_executor.py   # Выполнение задач
+├── tests/                 # Тесты
+├── main.py               # FastAPI приложение
+└── docker-compose.yml    # Конфигурация контейнеров
+```
+
+## 🔌 API Endpoints
+
+### Основные endpoints
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| POST | `/chat/ask` | Отправить сообщение Марку |
+| POST | `/memory` | Сохранить информацию в память |
+| GET | `/search` | Поиск в памяти |
+| GET | `/tools` | Список доступных инструментов |
+| POST | `/sandbox/exec` | Выполнить код в песочнице |
+| GET | `/reflection/insights` | Получить инсайты из анализа |
+| GET | `/health` | Проверка здоровья системы |
+
+### Примеры использования
+
+**Чат с Марком:**
+```bash
+curl -X POST http://localhost:8000/chat/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Привет, Марк! Расскажи о себе",
+    "chat_id": 12345
+  }'
+```
+
+**Выполнение кода в песочнице:**
+```bash
+curl -X POST http://localhost:8000/sandbox/exec \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "python3 -c \"print(42 * 10)\"",
+    "language": "python"
+  }'
+```
+
+**Поиск в памяти:**
+```bash
+curl "http://localhost:8000/search?q=важная+информация"
+```
+
+## 🤖 Telegram бот
+
+Марк доступен через Telegram бота с удобным интерфейсом.
+
+### Основные команды
+
+- `/start` - Начать общение с Марком
+- `/help` - Список всех команд
+- `/task_list` - Список текущих задач
+- `/run_code` - Выполнить код в песочнице
+- `/memory_stats` - Статистика памяти
+- `/tools` - Доступные инструменты
+
+### Особенности
+
+- 🎯 **Inline кнопки** для быстрой обратной связи
+- 🛡️ **Rate limiting** для защиты от спама
+- 📝 **Markdown** форматирование ответов
+- 🔄 **Асинхронная обработка** длинных запросов
+
+## 🧠 Система памяти
+
+Марк использует двухуровневую систему памяти:
+
+### 1. Краткосрочная память
+- Хранит последние диалоги и контекст
+- Быстрый доступ для релевантных ответов
+- Автоматическая очистка старых данных
+
+### 2. Долговременная память (Neo4j + Graphiti)
+- Графовая структура для связей между концепциями
+- Семантический поиск по всей истории
+- Метаданные и контекст для каждого воспоминания
+
+### Пример структуры памяти
+```json
 {
-    "text": "Текст эпизода",
-    "metadata": {
-        "source": "string",           # ✅ Сохраняется как строка
-        "priority": 1,                # ✅ Сохраняется как число
-        "score": 3.14,                # ✅ Сохраняется как float
-        "is_important": True,         # ✅ Сохраняется как boolean
-        "tags": ["tag1", "tag2"],     # ✅ Сериализуется в JSON
-        "config": {"key": "value"}    # ✅ Сериализуется в JSON
-    }
+  "text": "Пользователь попросил помощь с Python",
+  "metadata": {
+    "user_id": "12345",
+    "timestamp": 1703001234,
+    "tags": ["python", "помощь", "программирование"],
+    "importance": 0.8
+  }
 }
 ```
 
-### Архитектура
+## 🛡️ Безопасность
 
-```
-┌─────────────────┐    HTTP    ┌─────────────────┐    Bolt    ┌─────────────────┐
-│   Main API      │ ────────── │    Graphiti     │ ───────── │      Neo4j      │
-│   (FastAPI)     │            │   (FastAPI)     │           │   (Database)    │
-└─────────────────┘            └─────────────────┘           └─────────────────┘
-        │                               │                           │
-        │ POST /memory                   │ CREATE (e:Episode $props)│
-        │ GET /search                    │ MATCH (e:Episode)        │
-        └───────────────────────────────┴───────────────────────────┘
-```
+### Песочница для выполнения кода
 
-### Технические детали
+- ✅ **AST проверка** Python кода перед выполнением
+- ✅ **Блокировка опасных операций**: `os.system`, `eval`, `exec`, `open`
+- ✅ **Таймауты** для предотвращения зависаний
+- ✅ **Ограничение вывода** для защиты от переполнения
 
-#### Docker Compose конфигурация
-```yaml
-graphiti-neo4j:
-  image: neo4j:5.11
-  healthcheck:
-    test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1'"]
-    interval: 10s
-    retries: 15
+### Защита API
 
-graphiti:
-  build: ./graphiti_service
-  depends_on:
-    graphiti-neo4j:
-      condition: service_healthy
-```
+- 🔐 **Rate limiting** на всех endpoints
+- 🛡️ **Централизованная обработка ошибок** через `@handle_errors`
+- 📝 **Валидация входных данных** через Pydantic
+- 🔄 **Retry логика** для внешних сервисов
 
-#### Модель данных Graphiti
-```python
-class NodeProperties(BaseModel):
-    msg: Optional[str] = None
-    timestamp: Optional[float] = None
-    test_run: Optional[bool] = None
-    pytest_test: Optional[bool] = None
+## 📊 Мониторинг и метрики
 
-    class Config:
-        extra = "allow"  # Разрешает любые дополнительные ключи
-```
+### Trace UI
+Визуальный интерфейс для отслеживания работы системы:
+- URL: http://localhost:8000/trace/ui
+- Отслеживание всех вызовов инструментов
+- Анализ производительности
+- История ошибок
 
-#### Cypher запросы
-```cypher
--- Создание узла с метаданными
-CREATE (e:Episode $props)
-
--- Поиск узлов
-MATCH (e:Episode {msg: 'test'}) RETURN e.source, e.priority
-
--- Получение всех узлов
-MATCH (n) RETURN n ORDER BY n.timestamp DESC
-```
-
-## 🚀 Запуск проекта
-
-### Предварительные требования
-- Docker и Docker Compose
-- Python 3.10+
-
-### Запуск всех сервисов
+### Prometheus метрики
 ```bash
-cd langchain_api
-docker compose up -d
-```
+# Получить метрики
+curl http://localhost:8000/metrics/prometheus
 
-### Проверка статуса
-```bash
-docker compose ps
-```
-
-<<<<<<< Updated upstream
-### Тестирование памяти
-```bash
-# Создание эпизода
-docker compose exec app python -c "
-import requests
-response = requests.post('http://localhost:8000/memory', json={
-    'text': 'Test episode',
-    'metadata': {'source': 'test', 'priority': 1}
-})
-print(response.json())
-"
-
-# Поиск эпизодов
-docker compose exec app python -c "
-import requests
-response = requests.get('http://localhost:8000/search?q=test')
-print(response.json())
-"
-=======
-## 🧪 Как проверить
-
-### Code-sandbox
-```bash
-curl -s -X POST http://localhost:8000/v1/code \
-     -H "Content-Type: application/json" \
-     -d '{"code":"print(42)"}' | jq '.stdout'     # → "42\n"
-```
-
-### Оценка ответа (like/dislike)
-```bash
-curl -X POST http://localhost:8000/v1/feedback \
-     -H "Content-Type: application/json" \
-     -d '{"msg_id":123,"vote":"up"}'              # → {"status":"recorded"}
-```
-
-### Рефлексия (специально просим ошибку)
-```bash
-curl -X POST http://localhost:8000/v1/chat \
-     -H "Content-Type: application/json" \
-     -d '{"content":"Сделай ошибку"}' | jq '.content'
-```
-
-### Полный smoke-тест
-```bash
-# Запуск автоматического smoke-теста
-./scripts/smoke.sh
-```
-
-### Переменные окружения
-Скопируйте `.env.example` в `.env` и заполните:
-
-```env
-# OpenAI (обязательно)
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4.1-mini
-
-# Telegram Bot (опционально)
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-
-# Neo4j (настроено автоматически)
-NEO4J_PASSWORD=password
->>>>>>> Stashed changes
+# Сводка по системе
+curl http://localhost:8000/metrics/summary
 ```
 
 ## 🧪 Тестирование
 
-### Интеграционные тесты ✅ **ПРОХОДЯТ 100%**
+### Запуск тестов
 ```bash
-# Запуск всех интеграционных тестов
-docker compose exec app python -m pytest /app/langchain_api/tests/integration/test_graphiti_integration.py -v
+# Все тесты
+pytest tests/ -v
 
-# Запуск отдельных тестов
-docker compose exec app python -m pytest /app/langchain_api/tests/integration/test_graphiti_integration.py::TestGraphitiIntegration::test_create_episode_with_metadata -v
+# С покрытием
+pytest --cov=. --cov-report=html
+
+# Проверка покрытия (минимум 50%)
+./scripts/check_coverage.sh
 ```
 
-**Результаты тестирования (15 июля 2025):**
-- ✅ **9/9 тестов прошли успешно**
-- ✅ **Health checks**: API, Graphiti, Neo4j
-- ✅ **Создание эпизодов**: с метаданными
-- ✅ **Поиск**: полнотекстовый поиск работает
-- ✅ **API узлов**: Graphiti API доступен
-- ✅ **Сохранение метаданных**: все типы данных
-- ✅ **Сложные типы**: списки и словари
-- ✅ **Индексы и constraints**: Neo4j оптимизация
-
-**Статус**: 🟢 **Production Ready**
-
-### Проверка в Neo4j
-```bash
-# Подключение к Neo4j
-docker compose exec graphiti-neo4j cypher-shell -u neo4j -p password
-
-# Просмотр всех эпизодов
-MATCH (e:Episode) RETURN e.msg, e.source, e.priority LIMIT 10;
-
-# Поиск по метаданным
-MATCH (e:Episode {source: 'test'}) RETURN e;
-```
-
-## 📊 Мониторинг
-
-### Health checks
-- **Основной API**: `http://localhost:8000/health`
-- **Graphiti**: `http://localhost:7878/health`
-- **Neo4j**: `http://localhost:7474` (браузер)
-
-### Логи
-```bash
-# Логи основного приложения
-docker logs app
-
-# Логи Graphiti
-docker logs graphiti
-
-# Логи Neo4j
-docker logs graphiti-neo4j
-```
+### CI/CD
+- Автоматическая проверка покрытия через GitHub Actions
+- Минимальное требование: 50% покрытия кода
+- Отчеты в PR с результатами
 
 ## 🔧 Разработка
 
-### 📊 Анализ проекта ✅ **ВЫПОЛНЕН**
+### Добавление нового инструмента
 
-**Статус**: Полный анализ проекта завершен (16 июля 2025)
+1. Создайте функцию с декоратором `@register_tool`:
+```python
+from core.tools_registry import register_tool
 
-**Созданные файлы:**
-- `PROJECT_ANALYSIS_REPORT.md` - детальный отчет о качестве кода
-- `scripts/cleanup_project.py` - автоматический скрипт очистки
-- `CLEANUP_COMMANDS.md` - команды для ручной очистки
-
-**Ключевые находки:**
-- **140 Python файлов** в проекте
-- **13% покрытие тестами** (критично низкое)
-- **35+ файлов с 0% покрытием** (неиспользуемые модули)
-- **10 файлов с print()** в продакшн коде
-- **26 временных файлов** (.log, .tmp, .cache)
-
-**Рекомендации:**
-1. Удалить неиспользуемые gRPC/Protobuf файлы
-2. Очистить отладочный код из продакшн файлов
-3. Удалить временные файлы и заглушки
-4. Улучшить покрытие тестами до 70%
-5. Реализовать или удалить неиспользуемые модули
-
-### Code Quality & Linting ✅ **ИСПРАВЛЕНО**
-
-**Статус**: Все критические ошибки Ruff исправлены (0 ошибок)
-
-**Исправленные типы ошибок:**
-- ✅ **F821** (undefined-name) - 18 ошибок исправлены
-- ✅ **F811** (unused imports) - 6 ошибок исправлены  
-- ✅ **F401** (unused imports) - 2 ошибки исправлены
-- ✅ **E722** (bare except) - 4 ошибки исправлены
-- ✅ **W293** (blank line contains whitespace) - исправлены автоматически
-- ✅ **UP007** (use-x-return-type) - 2 ошибки исправлены
-- ✅ **B007** (unused-loop-control-variable) - 2 ошибки исправлены
-- ✅ **F601** (dict-key-missing) - 2 ошибки исправлены
-- ✅ **I001** (unsorted-imports) - 6 ошибок исправлены
-
-**Исправленные файлы:**
-- `core/backend_selector.py` - исправлены аннотации типов
-- `utils/task_manager.py` - исправлены неопределенные переменные
-- `main.py` - удален неиспользуемый импорт
-- `services/task_executor.py` - удален дублирующий метод
-- `utils/openai_proxy_client.py` - исправлено дублирование переменной
-- `core/monitoring.py` - исправлен bare except
-- `core/brain_processor.py` - исправлены bare except
-- `rag/enhanced_rag_chain_tools.py` - исправлен bare except
-- `core/event_reflection_integration.py` - исправлен дублирующий ключ
-- `core/reflection/reflection_analyzer.py` - исправлена неиспользуемая переменная
-
-**Конфигурация:**
-- `pyproject.toml` - добавлен `B904` в ignore для временного отключения рекомендаций
-
-### Структура проекта
-```
-langchain_api/
-├── core/memory/
-│   ├── graphiti_adapter.py    # HTTP-клиент для Graphiti
-│   └── memory_manager.py      # Менеджер памяти
-├── graphiti_service/
-│   └── main.py               # Graphiti API сервер
-├── tests/integration/
-│   └── test_graphiti_integration.py  # Интеграционные тесты
-└── docker-compose.yml        # Конфигурация контейнеров
+@register_tool(
+    name="my_tool",
+    description="Описание инструмента",
+    tags=["utility"],
+    priority=0.8
+)
+def my_tool(param1: str, param2: int) -> dict:
+    """Делает что-то полезное"""
+    return {"result": "success"}
 ```
 
-### Добавление новых типов метаданных
-1. Метаданные автоматически сохраняются в Neo4j
-2. Примитивные типы (str, int, float, bool) сохраняются как есть
-3. Сложные типы (list, dict) сериализуются в JSON строки
-4. None значения пропускаются
+2. Инструмент автоматически появится в:
+- `/tools` - список всех инструментов
+- `/tools/openai-functions` - формат для LLM
+- Telegram боте через команду `/tools`
 
-### Расширение функциональности
-- Добавление новых эндпоинтов в `main.py`
-- Расширение модели данных в `graphiti_service/main.py`
-- Создание новых тестов в `tests/integration/`
+### Режимы работы Марка
 
-## 📈 Производительность
+- 🎨 **CREATIVE** - Творческий режим для генерации идей
+- 🔧 **IMPLEMENT** - Режим реализации и кодирования
+- 🧪 **QA** - Режим тестирования и проверки качества
+- 📋 **PLAN** - Режим планирования и организации
+- 🚐 **VAN** - Универсальный режим
 
-### Оптимизации
-- **Healthcheck**: Neo4j запускается до Graphiti
-- **Сериализация**: Сложные типы сериализуются в JSON
-- **Фильтрация**: В поиске исключаются служебные поля
-- **Пагинация**: Поддержка limit/offset в API
+## 📦 Сервисы и порты
 
-### Мониторинг
-- Метрики через `/metrics/prometheus`
-- Статистика через `/stats`
-- Логирование всех операций
-
-## 🔒 Безопасность
-
-### Текущие меры
-- Изоляция контейнеров
-- Переменные окружения для паролей
-- Валидация входных данных через Pydantic
-
-### Рекомендации для production
-- Использование секретов Docker
-- Настройка SSL/TLS
-- Ограничение доступа к Neo4j
-- Регулярное резервное копирование
-
-## 📝 История изменений
-
-### Последние обновления (16 июля 2025)
-- ✅ **ОЧИСТКА ПРОЕКТА ЗАВЕРШЕНА** - удалены все неиспользуемые модули и файлы
-- ✅ **Исправлены все тесты** - все критические тесты проходят успешно
-- ✅ **Улучшено логирование** - заменены все print() на logger
-- ✅ **Упрощена архитектура** - убраны лишние слои абстракции
-- ✅ **Стабилизированы зависимости** - нет конфликтов импортов
-- ✅ **Полный анализ проекта** - выявлены все проблемы и неиспользуемые модули
-- ✅ **Отчет о качестве кода** - создан детальный анализ в `PROJECT_ANALYSIS_REPORT.md`
-- ✅ **Скрипт автоматической очистки** - `scripts/cleanup_project.py` для удаления неиспользуемых файлов
-- ✅ **Команды для ручной очистки** - `CLEANUP_COMMANDS.md` с пошаговыми инструкциями
-- ✅ Интеграция Graphiti с Neo4j
-- ✅ Поддержка любых примитивных метаданных
-- ✅ Сериализация сложных типов в JSON
-- ✅ Интеграционные тесты
-- ✅ Health checks и мониторинг
-- ✅ Документация и README
-
-### Результаты очистки
-- ✅ **Удалено 17+ файлов** - неиспользуемые модули и заглушки
-- ✅ **Освобождено ~800KB+** - удалены временные и кэш файлы
-- ✅ **Покрытие тестами 40%** - стабильное покрытие после очистки
-- ✅ **Архитектура упрощена** - убраны лишние слои абстракции
-- ✅ **Все тесты проходят** - исправлены все критические ошибки
-
-### Планы развития
-- [ ] **Улучшение покрытия тестами** - цель 70% покрытия
-- [ ] **Рефакторинг RAG модуля** - упростить enhanced_rag_chain.py
-- [ ] **Оптимизация производительности** - профилирование кода
-- [ ] **Векторный поиск с embedding**
-- [ ] **Связи между эпизодами**
-- [ ] **Автоматическая очистка старых данных**
-- [ ] **Репликация Neo4j для отказоустойчивости**
-
-## ✅ Таблица фич Phase 0–3
-
-| Функциональность | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Статус |
-|------------------|---------|---------|---------|---------|--------|
-| **Core API** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Graphiti + Neo4j** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Reflexion Loop** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **User Preferences** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Telegram Bot** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Code Sandbox** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Feedback System** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Tool Registry** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Health Checks** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Testing (46% coverage)** | ✅ | ✅ | ✅ | ✅ | Завершено |
-| **Documentation** | ✅ | ✅ | ✅ | ✅ | Завершено |
+| Сервис | Порт | Описание |
+|--------|------|----------|
+| FastAPI | 8000 | Основное API |
+| Telegram Bot | 8001 | Telegram интерфейс |
+| Neo4j | 7474/7687 | База знаний (HTTP/Bolt) |
+| Graphiti | 7878 | Сервис памяти |
+| Redis | 6379 | Кеширование |
 
 ## 🤝 Вклад в проект
 
-1. Форкните репозиторий
-2. Создайте ветку для новой функции
-3. Добавьте тесты
-4. Убедитесь, что все тесты проходят
-5. Создайте Pull Request
+1. Fork репозитория
+2. Создайте branch для фичи (`git checkout -b feature/amazing-feature`)
+3. Commit изменения (`git commit -m 'Add amazing feature'`)
+4. Push в branch (`git push origin feature/amazing-feature`)
+5. Откройте Pull Request
 
-## 📄 Лицензия
+## 📝 Лицензия
 
-Проект разрабатывается в рамках внутренней разработки.
+Этот проект лицензирован под MIT License - см. файл [LICENSE](LICENSE) для деталей.
+
+## 🙏 Благодарности
+
+- OpenAI за GPT модели
+- Neo4j за графовую базу данных
+- FastAPI за отличный веб-фреймворк
+- Сообществу открытого ПО за вдохновение
 
 ---
 
-**Статус**: ✅ Graphiti ⇆ Neo4j интеграция полностью реализована и протестирована 
+**Марк** - ваш персональный AI-компаньон, готовый помочь, учиться и развиваться вместе с вами! 🚀 
