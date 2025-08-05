@@ -88,7 +88,8 @@ class LLMIntegrationHub:
         # self.learning_system = LearningSystem(self.enhanced_memory, self.context_manager)
         self.enhanced_memory = EnhancedMemory()
         self.tools_registry = get_tools_registry()
-        self.command_monitoring = CommandMonitoringSystem()
+        from langchain_api.core.command_monitoring import get_monitoring_system
+        self.command_monitoring = get_monitoring_system()
         self.task_executor = task_executor
 
         # Состояние системы

@@ -5,9 +5,10 @@ GraphitiMemoryAdapter - HTTP-клиент для работы с Graphiti Memory
 import json
 import logging
 import time
-import urllib.parse
-import urllib.request
 from typing import Any
+import uuid
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -22,26 +23,39 @@ def _from_neo_value(v):
 
 def parse_node(raw: dict) -> dict:
     props = {k: _from_neo_value(v) for k, v in raw.items()}
-    return {"text": props.pop("msg"), "metadata": props}
+    return {"text": props.pop("msg", ""), "metadata": props}
 
 class GraphitiMemoryAdapter:
     """Адаптер для работы с Graphiti Memory через HTTP API"""
 
     def __init__(self, base_url: str = "http://graphiti:7878"):
         self.base_url = base_url.rstrip('/')
+        self.client = None
         logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url}")
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Получить или создать HTTP клиент"""
+        if self.client is None:
+            self.client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                follow_redirects=True
+            )
+        return self.client
 
     async def health_check(self) -> dict[str, Any]:
         """Проверяет здоровье Graphiti"""
         try:
-            response = urllib.request.urlopen(f"{self.base_url}/health")
-            if response.status == 200:
-                data = json.loads(response.read().decode())
+            client = await self._get_client()
+            response = await client.get(f"{self.base_url}/health")
+            
+            if response.status_code == 200:
+                data = response.json()
                 logger.info(f"✅ Graphiti health: {data.get('status')}")
                 return data
             else:
-                logger.error(f"❌ Graphiti health check failed: {response.status}")
-                return {"status": "error", "error": f"HTTP {response.status}"}
+                logger.error(f"❌ Graphiti health check failed: {response.status_code}")
+                return {"status": "error", "error": f"HTTP {response.status_code}"}
         except Exception as e:
             logger.error(f"❌ Graphiti health check error: {str(e)}")
             return {"status": "error", "error": str(e)}
@@ -50,7 +64,6 @@ class GraphitiMemoryAdapter:
         """Создает новый эпизод в Graphiti"""
         try:
             # Создаем уникальный ID для узла
-            import uuid
             node_id = str(uuid.uuid4())
 
             # Формируем payload согласно схеме Graphiti
@@ -88,23 +101,22 @@ class GraphitiMemoryAdapter:
 
             logger.info(f"Отправляем payload: {json.dumps(payload, indent=2)}")
 
-            # Создаем запрос
-            data = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(
+            # Отправляем запрос
+            client = await self._get_client()
+            response = await client.post(
                 f"{self.base_url}/nodes",
-                data=data,
+                json=payload,
                 headers={'Content-Type': 'application/json'}
             )
 
-            response = urllib.request.urlopen(req)
-            if response.status == 201:  # Graphiti возвращает 201 для создания
-                response_data = json.loads(response.read().decode())
+            if response.status_code == 201:  # Graphiti возвращает 201 для создания
+                response_data = response.json()
                 logger.info(f"✅ Эпизод создан в Graphiti: {text[:50]}...")
                 return {"success": True, "id": node_id, "data": response_data}
             else:
-                error_text = response.read().decode()
-                logger.error(f"❌ Ошибка создания эпизода: {response.status} - {error_text}")
-                return {"success": False, "error": f"HTTP {response.status}: {error_text}"}
+                error_text = response.text
+                logger.error(f"❌ Ошибка создания эпизода: {response.status_code} - {error_text}")
+                return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
         except Exception as e:
             logger.error(f"❌ Ошибка создания эпизода: {str(e)}")
             return {"success": False, "error": str(e)}
@@ -112,12 +124,15 @@ class GraphitiMemoryAdapter:
     async def search_episodes(self, query: str, limit: int = 10) -> dict[str, Any]:
         """Ищет эпизоды в Graphiti с использованием полнотекстового поиска"""
         try:
-            # URL-кодируем параметр поиска для безопасной передачи
-            encoded_query = urllib.parse.quote(query)
             # Используем полнотекстовый поиск через Graphiti API
-            response = urllib.request.urlopen(f"{self.base_url}/nodes?search={encoded_query}&limit={limit}")
-            if response.status == 200:
-                data = json.loads(response.read().decode())
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/nodes",
+                params={"search": query, "limit": limit}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
                 episodes = []
 
                 for node in data.get("nodes", []):
@@ -134,9 +149,9 @@ class GraphitiMemoryAdapter:
                 logger.info(f"🔍 Полнотекстовый поиск в Graphiti: '{query}' -> {len(episodes)} результатов")
                 return {"items": episodes, "total": len(episodes)}
             else:
-                error_text = response.read().decode()
-                logger.error(f"❌ Ошибка поиска: {response.status} - {error_text}")
-                return {"items": [], "total": 0, "error": f"HTTP {response.status}: {error_text}"}
+                error_text = response.text
+                logger.error(f"❌ Ошибка поиска: {response.status_code} - {error_text}")
+                return {"items": [], "total": 0, "error": f"HTTP {response.status_code}: {error_text}"}
         except Exception as e:
             logger.error(f"❌ Ошибка поиска: {str(e)}")
             return {"items": [], "total": 0, "error": str(e)}
@@ -144,14 +159,16 @@ class GraphitiMemoryAdapter:
     async def get_episode(self, episode_id: str) -> dict[str, Any]:
         """Получает эпизод по ID"""
         try:
-            response = urllib.request.urlopen(f"{self.base_url}/nodes/{episode_id}")
-            if response.status == 200:
-                data = json.loads(response.read().decode())
+            client = await self._get_client()
+            response = await client.get(f"{self.base_url}/nodes/{episode_id}")
+            
+            if response.status_code == 200:
+                data = response.json()
                 return data
             else:
-                error_text = response.read().decode()
-                logger.error(f"❌ Ошибка получения эпизода {episode_id}: {response.status} - {error_text}")
-                return {"error": f"HTTP {response.status}: {error_text}"}
+                error_text = response.text
+                logger.error(f"❌ Ошибка получения эпизода {episode_id}: {response.status_code} - {error_text}")
+                return {"error": f"HTTP {response.status_code}: {error_text}"}
         except Exception as e:
             logger.error(f"❌ Ошибка получения эпизода {episode_id}: {str(e)}")
             return {"error": str(e)}
@@ -159,20 +176,28 @@ class GraphitiMemoryAdapter:
     async def list_episodes(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         """Получает список эпизодов"""
         try:
-            response = urllib.request.urlopen(f"{self.base_url}/nodes?limit={limit}&offset={offset}")
-            if response.status == 200:
-                data = json.loads(response.read().decode())
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/nodes",
+                params={"limit": limit, "offset": offset}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
                 return data
             else:
-                error_text = response.read().decode()
-                logger.error(f"❌ Ошибка получения списка эпизодов: {response.status} - {error_text}")
-                return {"items": [], "total": 0, "error": f"HTTP {response.status}: {error_text}"}
+                error_text = response.text
+                logger.error(f"❌ Ошибка получения списка эпизодов: {response.status_code} - {error_text}")
+                return {"items": [], "total": 0, "error": f"HTTP {response.status_code}: {error_text}"}
         except Exception as e:
             logger.error(f"❌ Ошибка получения списка эпизодов: {str(e)}")
             return {"items": [], "total": 0, "error": str(e)}
 
     async def close(self):
-        """Закрывает HTTP сессию (не нужно для urllib)"""
+        """Закрывает HTTP сессию"""
+        if self.client:
+            await self.client.aclose()
+            self.client = None
         logger.info("🔒 GraphitiMemoryAdapter закрыт")
 
     async def __aenter__(self):

@@ -80,7 +80,8 @@ class SecurityModeManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.security_manager = SecurityManager()
-        self.command_monitoring = CommandMonitoringSystem()
+        from langchain_api.core.command_monitoring import get_monitoring_system
+        self.command_monitoring = get_monitoring_system()
 
         # Состояние системы
         self.current_mode = WorkMode.PRODUCTION

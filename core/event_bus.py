@@ -158,7 +158,8 @@ class EventBus:
             event_type: [] for event_type in EventType
         }
         self._event_history: list[Event] = []
-        self._command_monitoring = CommandMonitoringSystem()
+        from langchain_api.core.command_monitoring import get_monitoring_system
+        self._command_monitoring = get_monitoring_system()
         self._log_file = Path("sandbox/event_bus.log")
         self._log_file.parent.mkdir(exist_ok=True)
 

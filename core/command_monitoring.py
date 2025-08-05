@@ -63,18 +63,20 @@ class CommandMonitoringSystem:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
 
-        # Создаем обработчик для файла
+        # Создаем обработчик для файла только если еще не создан
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
 
-        handler = logging.FileHandler(log_dir / "command_monitoring.log")
-        handler.setLevel(logging.INFO)
+        # Проверяем, есть ли уже обработчики
+        if not self.logger.handlers:
+            handler = logging.FileHandler(log_dir / "command_monitoring.log")
+            handler.setLevel(logging.INFO)
 
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
 
     def register_hook(self, event_type: str, callback: Callable) -> None:
         """
@@ -360,3 +362,24 @@ class CommandMonitoringSystem:
             'analysis': self.analyze_command_patterns(),
             'last_update': datetime.utcnow().isoformat()
         }
+
+
+# Глобальный экземпляр системы мониторинга команд
+_monitoring_system = None
+
+def get_monitoring_system() -> CommandMonitoringSystem:
+    """Получить глобальный экземпляр системы мониторинга."""
+    global _monitoring_system
+    if _monitoring_system is None:
+        _monitoring_system = CommandMonitoringSystem()
+    return _monitoring_system
+
+def log_command(command: str, source: str, user_id: str | None = None,
+               parameters: dict[str, Any] = None, metadata: dict[str, Any] = None) -> CommandEvent:
+    """Логировать команду через глобальную систему мониторинга."""
+    return get_monitoring_system().log_command(command, source, user_id, parameters, metadata)
+
+def complete_command(event: CommandEvent, result: str, success: bool = True,
+                    execution_time: float = 0.0, error_message: str | None = None) -> None:
+    """Логировать результат команды через глобальную систему мониторинга."""
+    get_monitoring_system().log_result(event, result, success, execution_time, error_message)
