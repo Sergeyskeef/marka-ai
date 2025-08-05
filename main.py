@@ -18,6 +18,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from langchain_api.core.backend_selector import get_backend_status
+from langchain_api.core.memory.prefs import get_user_pref, upsert_user_pref, get_all_user_prefs, delete_user_pref
 # Удалены импорты неиспользуемых event интеграций
 
 # Импортируем LLM Integration Hub
@@ -249,6 +250,7 @@ class SearchResponse(BaseModel):
 class V1ChatRequest(BaseModel):
     content: str = Field(..., description="Сообщение для обработки", example="Привет! Как дела?")
     chat_id: int | None = Field(None, description="ID чата для контекста", example=12345)
+    user_id: str | None = Field(None, description="ID пользователя для адаптации промптов", example="user_123")
 
 class V1ChatResponse(BaseModel):
     answer: str = Field(..., description="Ответ от системы")
@@ -363,8 +365,8 @@ async def v1_chat(request: V1ChatRequest):
             raise HTTPException(status_code=422, detail=f"Валидация не прошла: {input_validation['issues']}")
     
     try:
-        # Используем упрощенную логику чата
-        response = await simple_chat(request.content, request.chat_id, "chat")
+        # Используем упрощенную логику чата с адаптацией промптов
+        response = await simple_chat(request.content, request.chat_id, "chat", request.user_id)
         
         return V1ChatResponse(
             answer=response["answer"],
@@ -1105,6 +1107,78 @@ def _exec_in_sandbox(cmd: str, timeout: int = 15) -> dict:
             "execution_time": execution_time,
             "returncode": None
         }
+
+# Перемещаем импорты в начало файла (уже есть)
+
+class PreferenceRequest(BaseModel):
+    user_id: str
+    key: str
+    value: str
+
+class PreferenceResponse(BaseModel):
+    status: str
+    message: str = ""
+
+@app.post("/v1/prefs", response_model=PreferenceResponse, tags=["preferences"])
+async def set_preference(request: PreferenceRequest):
+    """
+    Установка пользовательского предпочтения
+    
+    Устанавливает или обновляет предпочтение пользователя в Neo4j.
+    """
+    try:
+        success = upsert_user_pref(request.user_id, request.key, request.value)
+        if success:
+            return PreferenceResponse(status="ok", message="Предпочтение сохранено")
+        else:
+            raise HTTPException(status_code=500, detail="Не удалось сохранить предпочтение")
+    except Exception as e:
+        logger.error(f"Ошибка при установке предпочтения: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
+
+@app.get("/v1/prefs", tags=["preferences"])
+async def get_preference(user_id: str, key: str = None):
+    """
+    Получение пользовательских предпочтений
+    
+    Если указан key - возвращает конкретное предпочтение.
+    Если key не указан - возвращает все предпочтения пользователя.
+    """
+    try:
+        if key:
+            value = get_user_pref(user_id, key)
+            if value is None:
+                raise HTTPException(status_code=404, detail="Предпочтение не найдено")
+            return {"user_id": user_id, "key": key, "value": value}
+        else:
+            prefs = get_all_user_prefs(user_id)
+            return {"user_id": user_id, "preferences": prefs}
+    except HTTPException:
+        # Пропускаем HTTPException (404, 422 и т.д.)
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при получении предпочтений: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
+
+@app.delete("/v1/prefs", response_model=PreferenceResponse, tags=["preferences"])
+async def delete_preference(user_id: str, key: str):
+    """
+    Удаление пользовательского предпочтения
+    
+    Удаляет указанное предпочтение пользователя из Neo4j.
+    """
+    try:
+        success = delete_user_pref(user_id, key)
+        if success:
+            return PreferenceResponse(status="ok", message="Предпочтение удалено")
+        else:
+            raise HTTPException(status_code=404, detail="Предпочтение не найдено")
+    except HTTPException:
+        # Пропускаем HTTPException (404, 422 и т.д.)
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при удалении предпочтения: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

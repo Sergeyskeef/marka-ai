@@ -63,3 +63,6 @@ numpy>=1.21.0
 # Graphiti и Neo4j
 neo4j==5.11.0
 graphiti==0.1.0
+
+# Redis для сессий
+redis>=4.5.0

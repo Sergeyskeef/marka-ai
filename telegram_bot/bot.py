@@ -8,6 +8,13 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 
+# Импортируем обработчики предпочтений
+from langchain_api.telegram_bot.handlers.buttons import (
+    add_preference_buttons_to_bot, 
+    create_preferences_command,
+    PreferenceButtons
+)
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -41,6 +48,10 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("tools", self.tools))
         self.application.add_handler(CommandHandler("ask", self.ask))
         self.application.add_handler(CommandHandler("mode", self.mode))
+        self.application.add_handler(CommandHandler("preferences", create_preferences_command()))
+        
+        # Добавляем обработчики предпочтений
+        add_preference_buttons_to_bot(self.application)
         
         # Обработчик для обычных текстовых сообщений
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
@@ -81,7 +92,7 @@ class TelegramBot:
         """Создает главную клавиатуру"""
         keyboard = [
             [KeyboardButton("💬 Chat"), KeyboardButton("👨‍💻 Code"), KeyboardButton("📝 Plan")],
-            [KeyboardButton("🛠️ Tools")]
+            [KeyboardButton("🛠️ Tools"), KeyboardButton("⚙️ Настройки")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -362,6 +373,11 @@ class TelegramBot:
                 await self.tools(update, context)
                 return
             
+            # Проверяем, не является ли сообщение командой настроек
+            if question.lower() == "⚙️ настройки":
+                await create_preferences_command()(update, context)
+                return
+            
             # Если режим code - выполняем код
             if mode == "code":
                 await self._execute_code_message(update, question)
@@ -387,6 +403,15 @@ class TelegramBot:
                 response_text = f"🤖 {answer}"
                 if context_used:
                     response_text += "\n\n📚 Использован контекст из памяти"
+                
+                # Добавляем кнопки обратной связи к успешному ответу
+                feedback_keyboard = PreferenceButtons.create_feedback_keyboard()
+                await update.message.reply_text(
+                    response_text, 
+                    parse_mode='Markdown',
+                    reply_markup=feedback_keyboard
+                )
+                return
                     
             else:
                 response_text = f"❌ Ошибка API: {response.status_code}"
