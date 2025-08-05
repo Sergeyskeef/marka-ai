@@ -124,6 +124,16 @@ services:
       - NEO4J_apoc_import_file_enabled=true
       - NEO4J_apoc_import_file_use__neo4j__config=true
       - NEO4J_PLUGINS=["apoc"]
+      # Оптимизация памяти
+      - NEO4J_server_memory_heap_initial__size=2g
+      - NEO4J_server_memory_heap_max__size=2g
+      - NEO4J_server_memory_pagecache_size=2g
+      # Оптимизация производительности
+      - NEO4J_db_transaction_logs_rotation_retention__policy=2 days
+      - NEO4J_db_query__cache__size=1000
+      - NEO4J_dbms_memory_transaction_total_max=2g
+      # Включаем векторный поиск
+      - NEO4J_db_index_vector_enabled=true
     volumes:
       - graphiti-neo4j-data:/data
     healthcheck:

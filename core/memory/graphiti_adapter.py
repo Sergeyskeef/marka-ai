@@ -5,10 +5,11 @@ GraphitiMemoryAdapter - HTTP-клиент для работы с Graphiti Memory
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from core.error_middleware import RetryableHTTPClient
+from core.memory.graphiti_cache import get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +29,33 @@ def parse_node(raw: dict) -> dict:
 class GraphitiMemoryAdapter:
     """Адаптер для работы с Graphiti Memory через HTTP API"""
 
-    def __init__(self, base_url: str = "http://graphiti:7878"):
+    def __init__(self, base_url: str = "http://graphiti:7878", use_cache: bool = True):
         self.base_url = base_url.rstrip('/')
         self.client = None
         self._retry_client = None
-        logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url}")
+        self.use_cache = use_cache
+        self._cache = None
+        logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url} (cache: {use_cache})")
     
     async def _get_client(self) -> httpx.AsyncClient:
-        """Получает или создает HTTP клиент"""
+        """Получает или создает оптимизированный HTTP клиент"""
         if self.client is None:
             self.client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-                http2=True
+                base_url=self.base_url,
+                timeout=httpx.Timeout(
+                    total=30.0,
+                    connect=5.0,
+                    pool=30.0,
+                    read=10.0,
+                    write=10.0
+                ),
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=30.0
+                ),
+                http2=True,  # HTTP/2 для мультиплексирования
+                follow_redirects=True
             )
         return self.client
     
@@ -131,9 +146,20 @@ class GraphitiMemoryAdapter:
             logger.error(f"❌ Ошибка создания эпизода: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def search_episodes(self, query: str, limit: int = 10) -> dict[str, Any]:
+    async def search_episodes(self, query: str, limit: int = 10, user_id: Optional[str] = None) -> dict[str, Any]:
         """Ищет эпизоды в Graphiti с использованием полнотекстового поиска"""
         try:
+            # Проверяем кеш
+            if self.use_cache and self._cache is None:
+                self._cache = await get_cache()
+                
+            cache_params = {"query": query, "limit": limit}
+            
+            if self.use_cache and self._cache:
+                cached = await self._cache.get("search_episodes", cache_params, user_id)
+                if cached:
+                    return cached["result"]
+            
             # Используем полнотекстовый поиск через Graphiti API
             client = await self._get_retry_client()
             response = await client.get(
@@ -157,7 +183,13 @@ class GraphitiMemoryAdapter:
                         })
 
                 logger.info(f"🔍 Полнотекстовый поиск в Graphiti: '{query}' -> {len(episodes)} результатов")
-                return {"items": episodes, "total": len(episodes)}
+                result = {"items": episodes, "total": len(episodes)}
+                
+                # Сохраняем в кеш
+                if self.use_cache and self._cache:
+                    await self._cache.set("search_episodes", cache_params, result, user_id=user_id)
+                    
+                return result
             else:
                 error_text = response.text
                 logger.error(f"❌ Ошибка поиска: {response.status_code} - {error_text}")

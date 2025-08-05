@@ -72,6 +72,68 @@ def create_memory_indexes():
                     FOR (e:Episode) ON (e.importance)
                 """)
                 
+                # === НОВЫЕ ОПТИМИЗИРОВАННЫЕ ИНДЕКСЫ ===
+                
+                # Композитный индекс для Entity
+                logger.info("Создание композитного индекса для Entity...")
+                try:
+                    session.run("""
+                        CREATE INDEX entity_name_type IF NOT EXISTS
+                        FOR (n:Entity) ON (n.name, n.type)
+                    """)
+                except Exception as e:
+                    logger.warning(f"Индекс entity_name_type: {e}")
+                
+                # Индекс для отношений MENTIONS
+                logger.info("Создание индекса для отношений MENTIONS...")
+                try:
+                    session.run("""
+                        CREATE INDEX rel_mentions IF NOT EXISTS
+                        FOR ()-[r:MENTIONS]-() ON (r.confidence)
+                    """)
+                except Exception as e:
+                    logger.warning(f"Индекс rel_mentions: {e}")
+                
+                # Полнотекстовый индекс с расширенными настройками
+                logger.info("Создание оптимизированного полнотекстового индекса...")
+                try:
+                    session.run("""
+                        CALL db.index.fulltext.createNodeIndex(
+                            'episode_search_optimized',
+                            ['Episode'],
+                            ['msg', 'source', 'tags', 'summary'],
+                            {
+                                analyzer: 'russian',
+                                eventually_consistent: true
+                            }
+                        )
+                    """)
+                except Exception as e:
+                    logger.warning(f"Полнотекстовый оптимизированный индекс: {e}")
+                
+                # Индекс для временных запросов
+                logger.info("Создание индекса для временных запросов...")
+                session.run("""
+                    CREATE INDEX episode_timestamp IF NOT EXISTS
+                    FOR (e:Episode) ON (e.created_at)
+                """)
+                
+                # Векторный индекс для эмбеддингов (если поддерживается)
+                logger.info("Попытка создания векторного индекса...")
+                try:
+                    session.run("""
+                        CALL db.index.vector.createNodeIndex(
+                            'episode_embeddings',
+                            'Episode',
+                            'embedding',
+                            1536,
+                            'cosine'
+                        )
+                    """)
+                    logger.info("✅ Векторный индекс создан")
+                except Exception as e:
+                    logger.warning(f"⚠️ Векторный индекс не создан (возможно, не поддерживается): {e}")
+                
                 logger.info("✅ Все индексы успешно созданы")
                 driver.close()
                 return True
