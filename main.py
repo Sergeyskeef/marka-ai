@@ -556,25 +556,56 @@ async def search_memory(q: str = Query(..., description="Поисковый за
 async def get_tools():
     """Получение списка доступных инструментов"""
     try:
-        tools = get_tools_for_agent()
+        # Используем tools_registry
+        from core.tools_registry import get_tools_registry
+        registry = get_tools_registry()
         
-        # Группируем по категориям
-        tools_by_category = {}
+        # Обновляем реестр
+        registry.scan_project()
+        
+        # Получаем инструменты
+        tools = registry.get_tools_for_llm()
+        
+        # Группируем по типам
+        tools_by_type = {}
         for tool in tools:
-            category = tool.get("category", "general")
-            if category not in tools_by_category:
-                tools_by_category[category] = []
-            tools_by_category[category].append(tool)
+            tool_type = tool.get("type", "general")
+            if tool_type not in tools_by_type:
+                tools_by_type[tool_type] = []
+            tools_by_type[tool_type].append(tool)
         
         return {
             "tools": tools,
-            "tools_by_category": tools_by_category,
+            "tools_by_type": tools_by_type,
             "total": len(tools),
-            "categories": list(tools_by_category.keys())
+            "types": list(tools_by_type.keys())
         }
     except Exception as e:
         logger.error(f"Ошибка получения инструментов: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения инструментов: {str(e)}")
+
+
+@app.get("/tools/openai-functions", tags=["tools"])
+async def get_tools_openai_format():
+    """Получение инструментов в формате OpenAI Function Calling"""
+    try:
+        from core.tools_registry import get_tools_registry
+        registry = get_tools_registry()
+        
+        # Обновляем реестр
+        registry.scan_project()
+        
+        # Экспортируем в формате OpenAI
+        functions = registry.export_openai_functions()
+        
+        return {
+            "functions": functions,
+            "total": len(functions)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка экспорта инструментов: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/tools/execute/{tool_name}", tags=["tools"])
 async def execute_tool(tool_name: str, params: dict):

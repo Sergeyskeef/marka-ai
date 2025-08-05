@@ -4,6 +4,8 @@ SandboxManager - менеджер песочницы для безопасног
 
 import asyncio
 import logging
+import shlex
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -30,6 +32,7 @@ class Sandbox:
     timeout: int = 30
     max_output_size: int = 1024 * 1024  # 1MB
     allowed_commands: list[str] | None = None
+    blocked_modules: list[str] | None = None
 
 
 class SandboxManager:
@@ -40,18 +43,37 @@ class SandboxManager:
         self.command_history: list[CommandResult] = []
         self.default_timeout = 30
         self.default_max_output = 1024 * 1024  # 1MB
+        
+        # Список заблокированных модулей Python
+        self.default_blocked_modules = [
+            "os.system",
+            "subprocess",
+            "__import__('os').system",
+            "eval",
+            "exec",
+            "compile",
+            "__import__",
+            "open",
+        ]
 
         # Создаем песочницу по умолчанию
-        self.create_sandbox("default", "/sandbox")
+        # Используем текущую директорию если /sandbox не существует
+        sandbox_dir = "/sandbox" if os.path.exists("/sandbox") else "/workspace/sandbox_test"
+        os.makedirs(sandbox_dir, exist_ok=True)
+        self.create_sandbox("default", sandbox_dir)
 
         logger.info("✅ SandboxManager инициализирован")
 
     def create_sandbox(self, sandbox_id: str, working_dir: str, **kwargs) -> Sandbox:
         """Создает новую песочницу"""
+        # Создаем директорию если не существует
+        os.makedirs(working_dir, exist_ok=True)
+        
         sandbox = Sandbox(
             id=sandbox_id,
             working_dir=working_dir,
-            **kwargs
+            blocked_modules=kwargs.get('blocked_modules', self.default_blocked_modules),
+            **{k: v for k, v in kwargs.items() if k != 'blocked_modules'}
         )
         self.sandboxes[sandbox_id] = sandbox
         logger.info(f"🏖️ Создана песочница: {sandbox_id} в {working_dir}")
@@ -60,6 +82,26 @@ class SandboxManager:
     def get_sandbox(self, sandbox_id: str = "default") -> Sandbox | None:
         """Возвращает песочницу по ID"""
         return self.sandboxes.get(sandbox_id)
+    
+    def _check_dangerous_code(self, command: str, sandbox: Sandbox) -> str | None:
+        """Проверяет код на опасные операции"""
+        if "python" in command and "-c" in command:
+            # Извлекаем Python код из команды
+            try:
+                parts = shlex.split(command)
+                if "-c" in parts:
+                    code_idx = parts.index("-c") + 1
+                    if code_idx < len(parts):
+                        code = parts[code_idx]
+                        
+                        # Проверяем на заблокированные модули
+                        for blocked in sandbox.blocked_modules or []:
+                            if blocked in code:
+                                return f"Заблокированная операция: {blocked}"
+            except Exception:
+                pass
+        
+        return None
 
     async def execute_command(self,
                             command: str,
@@ -78,18 +120,34 @@ class SandboxManager:
         start_time = datetime.now()
 
         try:
-            # Проверяем разрешенные команды
-            if sandbox.allowed_commands and command.split()[0] not in sandbox.allowed_commands:
+            # Проверяем на опасные операции
+            danger_check = self._check_dangerous_code(command, sandbox)
+            if danger_check:
                 return CommandResult(
                     success=False,
                     output="",
-                    error=f"Команда {command.split()[0]} не разрешена в песочнице {sandbox_id}",
-                    command=command
+                    error=danger_check,
+                    command=command,
+                    execution_time=(datetime.now() - start_time).total_seconds()
                 )
+            
+            # Проверяем разрешенные команды
+            if sandbox.allowed_commands:
+                cmd_parts = shlex.split(command)
+                if cmd_parts and cmd_parts[0] not in sandbox.allowed_commands:
+                    return CommandResult(
+                        success=False,
+                        output="",
+                        error=f"Команда {cmd_parts[0]} не разрешена в песочнице {sandbox_id}",
+                        command=command
+                    )
 
+            # Правильно парсим команду с помощью shlex
+            cmd_parts = shlex.split(command)
+            
             # Выполняем команду
             process = await asyncio.create_subprocess_exec(
-                *command.split(),
+                *cmd_parts,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=sandbox.working_dir
@@ -175,7 +233,6 @@ class SandboxManager:
                 return False
             
             # Проверяем, что директория песочницы существует и доступна
-            import os
             default_sandbox = self.get_sandbox("default")
             if default_sandbox and os.path.exists(default_sandbox.working_dir):
                 return True

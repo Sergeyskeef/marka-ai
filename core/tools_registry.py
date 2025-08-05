@@ -9,13 +9,62 @@ Tools Registry - система автоматического обнаруже�
 """
 
 import ast
+import json
 import logging
 import os
+import re
+from functools import wraps
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+
+def escape_markdown(text: str) -> str:
+    """Экранирует специальные символы для Markdown"""
+    # Символы, которые нужно экранировать в Markdown V2
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    pattern = '[' + re.escape(escape_chars) + ']'
+    return re.sub(pattern, r'\\\g<0>', text)
+
+
+# Глобальный реестр для декоратора
+_global_registry = None
+
+
+def register_tool(name: str = None, description: str = "", tags: list[str] = None, priority: float = 0.5):
+    """
+    Декоратор для регистрации функции как инструмента.
+    
+    Args:
+        name: Имя инструмента (по умолчанию имя функции)
+        description: Описание инструмента
+        tags: Теги для категоризации
+        priority: Приоритет инструмента (0-1)
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        
+        # Добавляем метаданные к функции
+        tool_name = name or func.__name__
+        wrapper._tool_metadata = {
+            'name': tool_name,
+            'description': description or func.__doc__ or "",
+            'tags': tags or [],
+            'priority': priority,
+            'function': func
+        }
+        
+        # Регистрируем в глобальном реестре, если он инициализирован
+        global _global_registry
+        if _global_registry:
+            _global_registry.register_function_tool(wrapper)
+        
+        return wrapper
+    return decorator
 
 
 @dataclass
@@ -55,6 +104,10 @@ class ToolsRegistry:
             '*.pyc',
             '*.pyo'
         ]
+        
+        # Устанавливаем глобальный реестр
+        global _global_registry
+        _global_registry = self
 
     def scan_project(self) -> dict[str, ToolMetadata]:
         """Сканирует проект и обнаруживает все инструменты"""
@@ -281,6 +334,23 @@ class ToolsRegistry:
             'last_scan': datetime.now().isoformat()
         }
 
+    def register_function_tool(self, func: Callable) -> None:
+        """Регистрирует функцию как инструмент"""
+        if hasattr(func, '_tool_metadata'):
+            metadata = func._tool_metadata
+            tool = ToolMetadata(
+                name=metadata['name'],
+                type='function',
+                description=metadata['description'],
+                file_path=func.__module__,
+                tags=metadata['tags'],
+                priority=metadata['priority'],
+                is_available=True,
+                last_updated=datetime.now()
+            )
+            self.tools[tool.name] = tool
+            logger.info(f"Зарегистрирована функция-инструмент: {tool.name}")
+
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         """Возвращает инструменты в формате для LLM"""
         llm_tools = []
@@ -304,6 +374,76 @@ class ToolsRegistry:
             llm_tools.append(llm_tool)
 
         return sorted(llm_tools, key=lambda x: x['priority'], reverse=True)
+    
+    def export_openai_functions(self) -> list[dict[str, Any]]:
+        """
+        Экспортирует инструменты в формате OpenAI Function Calling.
+        
+        Returns:
+            Список функций в формате OpenAI
+        """
+        functions = []
+        
+        for tool in self.tools.values():
+            if not tool.is_available or tool.type not in ['function', 'script']:
+                continue
+            
+            # Экранируем описание для Markdown
+            description = escape_markdown(tool.description)
+            
+            function_spec = {
+                "name": tool.name.replace('-', '_').replace(' ', '_'),
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+            
+            # Добавляем параметры если есть
+            if tool.parameters:
+                for param_name, param_info in tool.parameters.items():
+                    # Параметр может быть строкой или словарем
+                    if isinstance(param_info, str):
+                        # Простой тип без дополнительной информации
+                        json_type = self._python_to_json_type(param_info)
+                        function_spec["parameters"]["properties"][param_name] = {
+                            "type": json_type,
+                            "description": ""
+                        }
+                    else:
+                        # Словарь с полной информацией
+                        param_type = param_info.get('type', 'string')
+                        param_desc = param_info.get('description', '')
+                        
+                        # Конвертируем Python типы в JSON Schema типы
+                        json_type = self._python_to_json_type(param_type)
+                        
+                        function_spec["parameters"]["properties"][param_name] = {
+                            "type": json_type,
+                            "description": escape_markdown(param_desc)
+                        }
+                        
+                        if param_info.get('required', False):
+                            function_spec["parameters"]["required"].append(param_name)
+            
+            functions.append(function_spec)
+        
+        return functions
+    
+    def _python_to_json_type(self, python_type: str) -> str:
+        """Конвертирует Python тип в JSON Schema тип"""
+        type_mapping = {
+            'str': 'string',
+            'int': 'integer',
+            'float': 'number',
+            'bool': 'boolean',
+            'list': 'array',
+            'dict': 'object',
+            'Any': 'string'
+        }
+        return type_mapping.get(python_type, 'string')
 
     def refresh(self) -> dict[str, ToolMetadata]:
         """Обновляет реестр инструментов"""

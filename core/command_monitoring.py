@@ -63,18 +63,26 @@ class CommandMonitoringSystem:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
 
-        # Создаем обработчик для файла
+        # Создаем обработчик для файла только если его еще нет
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
-
-        handler = logging.FileHandler(log_dir / "command_monitoring.log")
-        handler.setLevel(logging.INFO)
-
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        
+        # Проверяем, есть ли уже файловый обработчик для этого файла
+        log_file = log_dir / "command_monitoring.log"
+        has_file_handler = any(
+            isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file.absolute())
+            for h in self.logger.handlers
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        
+        if not has_file_handler:
+            handler = logging.FileHandler(log_file)
+            handler.setLevel(logging.INFO)
+
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
 
     def register_hook(self, event_type: str, callback: Callable) -> None:
         """
@@ -360,3 +368,27 @@ class CommandMonitoringSystem:
             'analysis': self.analyze_command_patterns(),
             'last_update': datetime.utcnow().isoformat()
         }
+
+
+# Глобальный экземпляр системы мониторинга
+_monitoring_system: CommandMonitoringSystem | None = None
+
+
+def get_monitoring_system() -> CommandMonitoringSystem:
+    """Получает или создает глобальный экземпляр системы мониторинга."""
+    global _monitoring_system
+    if _monitoring_system is None:
+        _monitoring_system = CommandMonitoringSystem()
+    return _monitoring_system
+
+
+def log_command(command: str, source: str, user_id: str | None = None,
+               parameters: dict[str, Any] = None, metadata: dict[str, Any] = None) -> CommandEvent:
+    """Логирует команду через глобальную систему мониторинга."""
+    return get_monitoring_system().log_command(command, source, user_id, parameters, metadata)
+
+
+def complete_command(event: CommandEvent, result: str, success: bool = True,
+                    execution_time: float = 0.0, error_message: str | None = None) -> None:
+    """Логирует результат выполнения команды через глобальную систему мониторинга."""
+    get_monitoring_system().log_result(event, result, success, execution_time, error_message)
