@@ -3,9 +3,12 @@
 GraphitiMemory Configuration and Feature Flags
 Настройки для интеграции GraphitiMemory в проект Марк v2
 """
+import logging
 import os
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class GraphitiMode(Enum):
@@ -43,6 +46,9 @@ class GraphitiConfig:
 
         # Настройки для Q1 миграции
 
+        # Настройки Guardrails
+        self.guardrails_enabled = os.getenv('ENABLE_GUARDRAILS', 'true').lower() == 'true'
+        self.guardrails_config_path = os.getenv('GUARDRAILS_CONFIG_PATH', 'configs/rails/default.yml')
 
         # Настройки валидации
         self.validation_enabled = os.getenv('GRAPHITI_VALIDATION_ENABLED', 'true').lower() == 'true'
@@ -96,6 +102,10 @@ class GraphitiConfig:
             'GRAPHITI_VALIDATION_ENABLED': self.validation_enabled,
             'GRAPHITI_BENCHMARK_ENABLED': self.benchmark_enabled,
             'GRAPHITI_LOG_REQUESTS': self.log_requests,
+            
+            # Guardrails settings
+            'ENABLE_GUARDRAILS': self.guardrails_enabled,
+            'GUARDRAILS_CONFIG_PATH': self.guardrails_config_path,
         }
 
     def validate_config(self) -> dict[str, Any]:
@@ -162,6 +172,14 @@ def get_graphiti_feature_flags() -> dict[str, Any]:
     """Получить все feature flags GraphitiMemory"""
     return graphiti_config.get_feature_flags()
 
+def is_guardrails_enabled() -> bool:
+    """Проверить, включены ли Guardrails"""
+    return graphiti_config.guardrails_enabled
+
+def get_guardrails_config_path() -> str:
+    """Получить путь к конфигурации Guardrails"""
+    return graphiti_config.guardrails_config_path
+
 def validate_graphiti_config() -> dict[str, Any]:
     """Валидировать конфигурацию GraphitiMemory"""
     return graphiti_config.validate_config()
@@ -178,14 +196,14 @@ GRAPHITI_HEALTH_CHECK_ENABLED = os.getenv('GRAPHITI_HEALTH_CHECK_ENABLED', 'true
 if __name__ == "__main__":
     # Для тестирования конфигурации
     config = get_graphiti_config()
-    print("=== GraphitiMemory Configuration ===")
-    print(config)
-    print(f"\nFeature Flags: {get_graphiti_feature_flags()}")
+    logger.info("=== GraphitiMemory Configuration ===")
+    logger.info(config)
+    logger.info(f"\nFeature Flags: {get_graphiti_feature_flags()}")
 
     validation = validate_graphiti_config()
-    print(f"\nValidation: {validation}")
+    logger.info(f"\nValidation: {validation}")
 
     if not validation['valid']:
-        print(f"Issues: {validation['issues']}")
+        logger.warning(f"Issues: {validation['issues']}")
     else:
-        print("✅ Configuration is valid")
+        logger.info("✅ Configuration is valid")

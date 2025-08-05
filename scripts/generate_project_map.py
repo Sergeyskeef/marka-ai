@@ -18,7 +18,7 @@ PROJECT_ROOTS = [
     "langchain_api",
     "memory",
     "utils",
-    "rag",
+    # "rag",  # Удалено - упрощена система
 
     "telegram_bot",
     "core_docs",

@@ -18,33 +18,32 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from langchain_api.core.backend_selector import get_backend_status
-from langchain_api.core.event_reflection_integration import (
-    get_event_reflection_integration,
-)
-from langchain_api.core.event_sandbox_integration import get_event_sandbox_integration
-from langchain_api.core.event_task_integration import get_event_task_integration
+# Удалены импорты неиспользуемых event интеграций
 
 # Импортируем LLM Integration Hub
-from langchain_api.core.llm_integration_hub import LLMIntegrationHub
-from langchain_api.core.monitoring import metrics
+
+# from langchain_api.core.monitoring import metrics  # Убираем конфликтующий импорт
 
 # from langchain_api.globals import passport_sync_service  # Удаляем неиспользуемый импорт
-# Импортируем улучшенную RAG-цепочку вместо стандартной
+# Импортируем упрощенную функцию чата вместо RAG
 # from rag.rag_chain import generate_response
-from langchain_api.rag.enhanced_rag_chain import generate_response
-from langchain_api.routers import passport_sync
-from langchain_api.routers.log_router import router as log_router
+# from langchain_api.rag.enhanced_rag_chain import generate_response
+from langchain_api.simple_chat import simple_chat
+# Удалены импорты неиспользуемых роутеров
 from langchain_api.routers.task_router import router as task_router
+from langchain_api.routes.trace_ui import router as trace_router
+from langchain_api.utils.toolkit import get_tools_for_agent, tool_registry
 from langchain_api.sandbox.sandbox_manager import SandboxManager
-from langchain_api.scripts.auto_sync_passport import ChangeReport
-from langchain_api.services.external_integration_service import (
-    ExternalIntegrationService,
-)
-from langchain_api.services.health_service import HealthService
-from langchain_api.services.passport_sync_service import PassportSyncService
+from langchain_api.core.middleware import MetricsMiddleware
+from langchain_api.middlewares.agents_trace import AgentsTraceMiddleware
+from langchain_api.core.metrics import metrics_manager
+from langchain_api.core.prompt_manager import prompt_manager
+# Удален неиспользуемый импорт ChangeReport
+# Удалены импорты неиспользуемых сервисов
 
 # Импортируем дополнительные компоненты системы
 from langchain_api.services.task_executor import TaskExecutor
+from langchain_api.core.guardrails_client import with_guardrails, is_guardrails_enabled
 
 # Настройка логирования
 logging.basicConfig(
@@ -62,7 +61,6 @@ logger = logging.getLogger(__name__)
 SANDBOX_DIR = Path("/sandbox")
 COPY_ITEMS: list[str] = [
     "core_docs",
-    "rag",
     "utils",
     "requirements.txt",
     "Dockerfile",
@@ -86,7 +84,7 @@ app = FastAPI(
 
     ## Архитектура:
 
-    * **RAG система** - генерация ответов с использованием долговременной памяти
+    * **Система памяти** - генерация ответов с использованием долговременной памяти
     * **OpenAI Tools API** - современный подход к выполнению команд
     * **Vector Database** - векторная база данных для семантического поиска
     * **Docker** - изолированная песочница для безопасности
@@ -149,53 +147,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Добавляем middleware для метрик
+app.add_middleware(MetricsMiddleware)
+
+# Добавляем middleware для трассировки агентов
+app.add_middleware(AgentsTraceMiddleware)
+
 # Глобальные переменные
-passport_sync_service = None
-health_service = None
-external_integration_service = None
-llm_hub = None  # Добавляем глобальный экземпляр LLMIntegrationHub
-# Новые глобальные сервисы
 _task_executor = None
 _sandbox_manager = None
-_event_task_integration = None
-_event_sandbox_integration = None
-_event_reflection_integration = None
+sandbox_manager = None  # Глобальная переменная для health check
 
 # Подключаем роутеры
-app.include_router(passport_sync.router)
 app.include_router(task_router)
-app.include_router(log_router)
+app.include_router(trace_router)
+# Удалены неиспользуемые роутеры
 
 # Подключаем метрики
-metrics.setup_metrics(app)
+# metrics.setup_metrics(app)  # Убираем конфликтующий вызов
 
 @app.on_event("startup")
 async def startup_event():
     """Инициализация сервисов при запуске приложения"""
-    global passport_sync_service, health_service, external_integration_service, llm_hub
-    global _task_executor, _sandbox_manager, _event_task_integration, _event_sandbox_integration, _event_reflection_integration
+    global _task_executor, _sandbox_manager, app_start_time, sandbox_manager
     try:
-        # Инициализация PassportSyncService
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        passport_sync_service = PassportSyncService(project_root)
-        logger.info("PassportSyncService успешно инициализирован")
-
-        # Инициализация HealthService
-        health_service = HealthService()
-        logger.info("HealthService успешно инициализирован")
-
-        # Инициализация ExternalIntegrationService
-        external_integration_service = ExternalIntegrationService()
-        logger.info("ExternalIntegrationService успешно инициализирован")
-
-        # Инициализация LLMIntegrationHub
-        llm_hub = LLMIntegrationHub()
-        await llm_hub.initialize()
-        logger.info("LLMIntegrationHub успешно инициализирован")
-
+        # Записываем время запуска приложения
+        app_start_time = time.time()
+        
         # Инициализация TaskExecutor и SandboxManager
         _task_executor = TaskExecutor()
         _sandbox_manager = SandboxManager()
+        sandbox_manager = _sandbox_manager  # Устанавливаем глобальную переменную
 
         # 🔧 ИСПРАВЛЕНИЕ: Заменяем глобальный экземпляр task_executor на наш
         import langchain_api.services.task_executor as task_executor_module
@@ -203,58 +185,26 @@ async def startup_event():
 
         logger.info("TaskExecutor и SandboxManager успешно инициализированы")
 
-        # Интеграция Event Bus с TaskExecutor и SandboxManager
-        _event_task_integration = get_event_task_integration(_task_executor)
-        _event_sandbox_integration = get_event_sandbox_integration(_sandbox_manager)
-        logger.info("EventTaskIntegration и EventSandboxIntegration успешно инициализированы")
-
-        # Интеграция Event Bus с ReflectionManager
-        _event_reflection_integration = get_event_reflection_integration()
-        logger.info("EventReflectionIntegration успешно инициализирована")
-
     except Exception as e:
         logger.error(f"Ошибка при инициализации сервисов: {str(e)}")
-        passport_sync_service = None
-        health_service = None
-        external_integration_service = None
-        llm_hub = None
         _task_executor = None
         _sandbox_manager = None
-        _event_task_integration = None
-        _event_sandbox_integration = None
-        _event_reflection_integration = None
+        sandbox_manager = None
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Очистка ресурсов при остановке приложения"""
-    global passport_sync_service, llm_hub
+    logger.info("Приложение остановлено")
 
-    if passport_sync_service:
-        try:
-            await passport_sync_service.cleanup()
-            logger.info("PassportSyncService успешно остановлен")
-        except Exception as e:
-            logger.error(f"Ошибка при остановке PassportSyncService: {str(e)}")
-    passport_sync_service = None
 
-    if llm_hub:
-        try:
-            await llm_hub.shutdown()
-            logger.info("LLMIntegrationHub успешно остановлен")
-        except Exception as e:
-            logger.error(f"Ошибка при остановке LLMIntegrationHub: {str(e)}")
-    llm_hub = None
 
-async def handle_passport_changes(changes: ChangeReport):
-    """Обработчик изменений в паспорте"""
-    # Здесь можно добавить логику обработки изменений
-    # Например, отправку уведомлений в Telegram или другие системы
-    print(f"Обнаружены изменения в паспорте:\n{changes.to_markdown()}")
+# Удалена неиспользуемая функция handle_passport_changes
 
 # Pydantic модели для API
 class ChatRequest(BaseModel):
     question: str = Field(..., description="Вопрос или сообщение для Марка", example="Привет! Как дела?")
     chat_id: int | None = Field(None, description="ID чата для контекста", example=12345)
+    mode: str = Field("chat", description="Режим работы: chat, code, plan", example="chat")
 
 class ChatResponse(BaseModel):
     answer: str = Field(..., description="Ответ от Марка")
@@ -295,6 +245,15 @@ class MemoryRequest(BaseModel):
 class SearchResponse(BaseModel):
     items: list[dict[str, Any]] = Field(..., description="Найденные элементы")
     total: int = Field(..., description="Общее количество результатов")
+
+class V1ChatRequest(BaseModel):
+    content: str = Field(..., description="Сообщение для обработки", example="Привет! Как дела?")
+    chat_id: int | None = Field(None, description="ID чата для контекста", example=12345)
+
+class V1ChatResponse(BaseModel):
+    answer: str = Field(..., description="Ответ от системы")
+    chat_id: int | None = Field(None, description="ID чата")
+    error: str | None = Field(None, description="Ошибка, если есть")
 
 # API эндпоинты с улучшенной документацией
 
@@ -347,59 +306,78 @@ async def chat_ask(request: ChatRequest, backend: str | None = None):
     - A/B тест: "/chat/ask?backend=graphiti"
     """
     try:
-        # 🧠 ВСЕ ЧЕРЕЗ МОЗГ - используем UnifiedEntryPoint с A/B Backend Selector
-        try:
-            import os
+        # 🔄 Используем упрощенную логику чата с A/B Backend Selector
+        import os
 
-            from langchain_api.core.unified_entry_point import unified_entry
+        # ✅ A/B Backend Selector через переменную окружения
+        if backend:
+            # Временно устанавливаем backend для этого запроса
+            original_backend = os.environ.get("MEMORY_BACKEND")
+            os.environ["MEMORY_BACKEND"] = backend
 
-            # ✅ A/B Backend Selector через переменную окружения
-            if backend:
-                # Временно устанавливаем backend для этого запроса
-                original_backend = os.environ.get("MEMORY_BACKEND")
-                os.environ["MEMORY_BACKEND"] = backend
+        # Используем упрощенную логику чата с режимом
+        response = await simple_chat(request.question, request.chat_id, request.mode)
 
-            # ✅ ЕДИНЫЙ ПУТЬ - все HTTP запросы тоже идут через мозг (асинхронно)
-            brain_response = await unified_entry.process_message_async(
-                message=request.question,
-                chat_id=request.chat_id or 0,
-                user_id=None  # В HTTP API нет user_id
-            )
+        # Восстанавливаем исходное значение backend
+        if backend:
+            if original_backend is not None:
+                os.environ["MEMORY_BACKEND"] = original_backend
+            else:
+                os.environ.pop("MEMORY_BACKEND", None)
 
-            # Восстанавливаем исходное значение backend
-            if backend:
-                if original_backend is not None:
-                    os.environ["MEMORY_BACKEND"] = original_backend
-                else:
-                    os.environ.pop("MEMORY_BACKEND", None)
-
-            # Возвращаем ответ в стандартном формате API - ЧЕСТНЫЕ ФЛАГИ
-            return ChatResponse(
-                answer=brain_response.get("answer", "Мозг не смог сформировать ответ"),
-                chat_id=request.chat_id,
-                context_used=brain_response.get("context_used", False),  # 🔍 Реальное значение!
-                memory_added=brain_response.get("memory_added", False)   # 🔍 Реальное значение!
-            )
-
-        except ImportError:
-            # 🔄 FALLBACK - если новая архитектура недоступна
-            logger.warning("⚠️ Unified Brain недоступен в HTTP API, используем старую логику")
-
-            # Временно используем старую логику с A/B Backend Selector
-            # Примечание: старая логика не поддерживает backend параметр напрямую
-            # но create_memory в backend_selector учтет переменную окружения
-            response = generate_response(request.question, request.chat_id)
-
-            return ChatResponse(
-                answer=response["answer"],
-                chat_id=request.chat_id,
-                context_used=response.get("context_used", False),
-                memory_added=response.get("memory_added", False)
-            )
+        return ChatResponse(
+            answer=response["answer"],
+            chat_id=request.chat_id,
+            context_used=response.get("context_used", False),
+            memory_added=response.get("memory_added", False)
+        )
 
     except Exception as e:
         logger.error(f"Ошибка в unified brain HTTP processing: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке запроса через мозг: {str(e)}")
+
+@app.post("/v1/chat", response_model=V1ChatResponse, tags=["chat"])
+async def v1_chat(request: V1ChatRequest):
+    """
+    🛡️ V1 Chat API с Guardrails защитой
+    
+    Обрабатывает запросы чата с обязательной валидацией через Guardrails.
+    
+    **Guardrails защита:**
+    - Максимальная длина сообщения: 4000 символов
+    - Проверка на PII (персональные данные)
+    - Фильтрация нецензурной лексики
+    - Валидация JSON схемы ответа
+    
+    **Примеры:**
+    - Короткое сообщение: "Привет!" ✅
+    - Длинное сообщение (>4000 символов): ❌ HTTP 422
+    - Сообщение с PII: ❌ HTTP 422
+    """
+    # Валидация через Guardrails
+    if is_guardrails_enabled():
+        from langchain_api.core.guardrails_client import validate_llm_input
+        input_validation = validate_llm_input(request.content)
+        if not input_validation["valid"]:
+            logger.warning(f"❌ Валидация входящих данных не прошла: {input_validation['issues']}")
+            raise HTTPException(status_code=422, detail=f"Валидация не прошла: {input_validation['issues']}")
+    
+    try:
+        # Используем упрощенную логику чата
+        response = await simple_chat(request.content, request.chat_id, "chat")
+        
+        return V1ChatResponse(
+            answer=response["answer"],
+            chat_id=request.chat_id
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка в V1 chat processing: {str(e)}")
+        return V1ChatResponse(
+            answer="",
+            chat_id=request.chat_id,
+            error=f"Ошибка при обработке запроса: {str(e)}"
+        )
 
 @app.post("/sandbox/sync", tags=["sandbox"])
 def sandbox_sync() -> dict:
@@ -462,33 +440,48 @@ async def health_check():
     - Внешние сервисы
     """
     try:
-        # Базовый статус, если HealthService недоступен
-        if not health_service:
-            return HealthResponse(
-                status="degraded",
-                services={
-                    "health_service": "unavailable",
-                    "app": "running",
-                    "memory": "unknown",
-                    "sandbox": "unknown"
-                },
-                timestamp=str(time.time()),
-                uptime=0.0
-            )
-
-        health_status = await health_service.get_health()
-
-        # Извлекаем только status из каждого сервиса для соответствия модели Dict[str, str]
+        # Проверяем состояние основных сервисов
         services_status = {
-            service_name: service_info.get("status", "unknown") if isinstance(service_info, dict) else str(service_info)
-            for service_name, service_info in health_status["services"].items()
+            "app": "running",
+            "memory": "unknown",
+            "sandbox": "unknown"
         }
-
+        
+        # Проверяем память (Graphiti)
+        try:
+            import requests
+            response = requests.get("http://graphiti:7878/health", timeout=5)
+            if response.status_code == 200:
+                services_status["memory"] = "healthy"
+            else:
+                services_status["memory"] = "error"
+        except Exception as e:
+            logger.warning(f"Не удалось проверить память: {str(e)}")
+            services_status["memory"] = "unavailable"
+        
+        # Проверяем песочницу
+        try:
+            if sandbox_manager and sandbox_manager.is_available():
+                services_status["sandbox"] = "healthy"
+            else:
+                services_status["sandbox"] = "unavailable"
+        except Exception as e:
+            logger.warning(f"Не удалось проверить песочницу: {str(e)}")
+            services_status["sandbox"] = "error"
+        
+        # Определяем общий статус
+        if all(status in ["healthy", "running"] for status in services_status.values()):
+            overall_status = "healthy"
+        elif any(status == "error" for status in services_status.values()):
+            overall_status = "degraded"
+        else:
+            overall_status = "degraded"
+        
         return HealthResponse(
-            status=health_status["status"],
-            services=services_status,  # Теперь Dict[str, str]
-            timestamp=str(time.time()),  # Конвертируем в строку
-            uptime=health_status["uptime"]
+            status=overall_status,
+            services=services_status,
+            timestamp=str(time.time()),
+            uptime=time.time() - app_start_time if 'app_start_time' in globals() else 0.0
         )
     except Exception as e:
         logger.error(f"Ошибка при проверке здоровья: {str(e)}")
@@ -496,7 +489,6 @@ async def health_check():
         return HealthResponse(
             status="degraded",
             services={
-                "health_service": "error",
                 "app": "running",
                 "memory": "unknown",
                 "sandbox": "unknown"
@@ -558,6 +550,83 @@ async def search_memory(q: str = Query(..., description="Поисковый за
         logger.error(f"Ошибка при поиске в памяти: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка поиска в памяти: {str(e)}")
 
+@app.get("/tools", tags=["tools"])
+async def get_tools():
+    """Получение списка доступных инструментов"""
+    try:
+        tools = get_tools_for_agent()
+        
+        # Группируем по категориям
+        tools_by_category = {}
+        for tool in tools:
+            category = tool.get("category", "general")
+            if category not in tools_by_category:
+                tools_by_category[category] = []
+            tools_by_category[category].append(tool)
+        
+        return {
+            "tools": tools,
+            "tools_by_category": tools_by_category,
+            "total": len(tools),
+            "categories": list(tools_by_category.keys())
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения инструментов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения инструментов: {str(e)}")
+
+@app.post("/tools/execute/{tool_name}", tags=["tools"])
+async def execute_tool(tool_name: str, params: dict):
+    """Выполнение инструмента"""
+    try:
+        tool = tool_registry.get_tool(tool_name)
+        if not tool:
+            raise HTTPException(status_code=404, detail=f"Инструмент '{tool_name}' не найден")
+        
+        # Выполняем инструмент
+        result = tool.function(**params)
+        
+        return {
+            "tool_name": tool_name,
+            "success": True,
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Ошибка выполнения инструмента {tool_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка выполнения инструмента: {str(e)}")
+
+@app.post("/prompts/reload", tags=["prompts"])
+async def reload_prompts():
+    """Перезагрузка промптов из файла (hot-reload)"""
+    try:
+        success = prompt_manager.reload_prompts()
+        if success:
+            modes = prompt_manager.get_available_modes()
+            return {
+                "success": True,
+                "message": "Промпты успешно перезагружены",
+                "available_modes": modes,
+                "total_modes": len(modes)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Ошибка перезагрузки промптов")
+    except Exception as e:
+        logger.error(f"Ошибка перезагрузки промптов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка перезагрузки промптов: {e}")
+
+@app.get("/prompts/modes", tags=["prompts"])
+async def get_prompt_modes():
+    """Получение списка доступных режимов промптов"""
+    try:
+        modes = prompt_manager.get_available_modes()
+        return {
+            "modes": modes,
+            "total": len(modes),
+            "current_mode": prompt_manager.current_mode
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения режимов промптов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения режимов промптов: {e}")
+
 @app.get("/metrics/prometheus", tags=["metrics"])
 async def get_prometheus_metrics():
     """
@@ -567,10 +636,7 @@ async def get_prometheus_metrics():
     Используется для интеграции с системами мониторинга.
     """
     try:
-        if not external_integration_service:
-            raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-
-        metrics_data = external_integration_service.export_prometheus_metrics()
+        metrics_data = metrics_manager.export_prometheus()
         return Response(content=metrics_data, media_type="text/plain")
     except Exception as e:
         logger.error(f"Ошибка при экспорте метрик: {str(e)}")
@@ -588,10 +654,7 @@ async def get_metrics_summary():
     - Активные пользователи
     """
     try:
-        if not external_integration_service:
-            raise HTTPException(status_code=503, detail="ExternalIntegrationService не инициализирован")
-
-        return external_integration_service.get_metrics_summary()
+        return metrics_manager.get_metrics_summary()
     except Exception as e:
         logger.error(f"Ошибка при получении сводки метрик: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения метрик: {str(e)}")

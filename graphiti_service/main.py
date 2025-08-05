@@ -13,6 +13,9 @@ from fastapi import FastAPI, HTTPException, status
 from neo4j import GraphDatabase
 from pydantic import BaseModel, Field
 
+# Импортируем утилиты для сериализации
+from utils import process_properties, restore_properties
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,6 +108,7 @@ def check_neo4j_connection():
 async def startup_event():
     """Инициализация при запуске"""
     logger.info("Запуск GraphitiMemory Validation Service...")
+    env = os.getenv("ENV", "dev")
     neo4j_connected = init_neo4j()
 
     if neo4j_connected:
@@ -112,16 +116,20 @@ async def startup_event():
 
         # Инициализация индексов и constraints
         try:
-            import os
             import sys
             sys.path.append(os.path.dirname(__file__))
-            from init_neo4j import init_neo4j_constraints_and_indexes
-            init_neo4j_constraints_and_indexes()
+            from neo4j_init import init_neo4j as init_neo4j_indexes
+            init_neo4j_indexes()
             logger.info("✅ Индексы и constraints инициализированы")
         except Exception as e:
             logger.warning(f"⚠️ Ошибка инициализации индексов: {e}")
     else:
-        logger.warning("⚠️ Neo4j недоступен, используется in-memory режим")
+        if env == "prod":
+            logger.error("🚨 Neo4j недоступен в prod режиме - завершаем работу")
+            import sys
+            sys.exit(1)
+        else:
+            logger.warning("⚠️ Neo4j недоступен в dev режиме, используется in-memory режим")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -135,6 +143,15 @@ async def shutdown_event():
 async def health_check():
     """Health check endpoint"""
     neo4j_connected = check_neo4j_connection()
+    env = os.getenv("ENV", "dev")
+    
+    # В prod режиме проверяем, что backend = neo4j
+    if env == "prod" and not neo4j_connected:
+        logger.error("🚨 Health check failed: Neo4j недоступен в prod режиме")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Neo4j backend недоступен в prod режиме"
+        )
 
     return HealthResponse(
         status="healthy",
@@ -180,10 +197,9 @@ async def create_node(node: Node):
     base_props = node.properties.dict(exclude_none=True)
     extra_props = getattr(node.properties, "__dict__", {}).get("_pydantic_extra", {})
     props = {**base_props, **extra_props}
-    import json
-    for k, v in list(props.items()):
-        if isinstance(v, list | dict):
-            props[k] = json.dumps(v, ensure_ascii=False)
+    
+    # Используем утилиты для сериализации
+    props = process_properties(props)
     logger.info(f"PROPS to Neo4j → {props}")
 
     # Проверка на существование
@@ -235,10 +251,14 @@ async def get_node(node_id: str):
                 record = result.single()
                 if record:
                     node = record["n"]
+                    # Десериализуем свойства
+                    node_props = dict(node)
+                    restored_props = restore_properties(node_props)
+                    
                     return NodeResponse(
                         id=node.get("id", node_id),
                         type=list(node.labels)[0] if node.labels else "Unknown",
-                        properties=dict(node),
+                        properties=restored_props,
                         created_at=datetime.now(),
                         updated_at=datetime.now()
                     )

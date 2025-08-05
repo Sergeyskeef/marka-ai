@@ -26,6 +26,7 @@ class ChangeReport:
             'removed_dirs': []
         }
         self.timestamp = time.time()
+        self.formatted_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.timestamp))
 
     def to_dict(self) -> dict:
         return {
@@ -95,8 +96,23 @@ class PassportSyncHandler(FileSystemEventHandler):
 
     def should_ignore(self, path):
         """Проверяет, нужно ли игнорировать файл"""
-        path = Path(path)
-        return any(path.match(pattern) for pattern in self.ignored_patterns)
+        path_str = str(path)
+        path_obj = Path(path)
+        
+        # Проверяем точные совпадения паттернов
+        for pattern in self.ignored_patterns:
+            if pattern == '__pycache__':
+                # Для __pycache__ проверяем, содержит ли путь эту директорию
+                if '__pycache__' in path_str:
+                    return True
+            elif path_obj.match(pattern):
+                return True
+            elif pattern.startswith('*') and path_str.endswith(pattern[1:]):
+                return True
+            elif pattern in path_str:
+                return True
+        
+        return False
 
     def on_any_event(self, event):
         """Обрабатывает любое событие файловой системы"""

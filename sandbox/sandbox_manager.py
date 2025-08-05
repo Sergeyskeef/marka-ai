@@ -166,3 +166,21 @@ class SandboxManager:
             "failed_commands": len([c for c in self.command_history if not c.success]),
             "sandboxes": [s.id for s in self.sandboxes.values()]
         }
+    
+    def is_available(self) -> bool:
+        """Проверяет доступность песочницы"""
+        try:
+            # Проверяем, что есть хотя бы одна песочница
+            if not self.sandboxes:
+                return False
+            
+            # Проверяем, что директория песочницы существует и доступна
+            import os
+            default_sandbox = self.get_sandbox("default")
+            if default_sandbox and os.path.exists(default_sandbox.working_dir):
+                return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка при проверке доступности песочницы: {e}")
+            return False
