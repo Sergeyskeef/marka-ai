@@ -3,11 +3,13 @@ MemoryManager - менеджер памяти для управления раз
 """
 
 import logging
-from typing import Any
+from typing import Any, Optional
+from datetime import timedelta
 
 # Импортируем GraphitiMemoryAdapter
 from .graphiti_adapter import graphiti_adapter
 from .models import MemoryEntry, MemoryMetadata, MemoryResponse
+from .hybrid_search import HybridSearchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ class MemoryManager:
 
     def __init__(self):
         self.memory_instances = {}
+        self.hybrid_search = None  # Ленивая инициализация
         self.memory_stats = {
             "total_entries": 0,
             "memory_types": []
@@ -134,6 +137,64 @@ class MemoryManager:
             Результат операции с полями success, id, error
         """
         return await self.add_episode(text, metadata)
+    
+    async def hybrid_search(
+        self,
+        query: str,
+        user_id: str,
+        k: int = 10,
+        filters: Optional[dict[str, Any]] = None,
+        time_window: Optional[timedelta] = None,
+        use_hybrid: bool = True
+    ) -> list[dict[str, Any]]:
+        """
+        Выполняет гибридный поиск в памяти.
+        
+        Args:
+            query: Поисковый запрос
+            user_id: ID пользователя
+            k: Количество результатов
+            filters: Дополнительные фильтры
+            time_window: Временное окно для поиска (например, последние 7 дней)
+            use_hybrid: Использовать ли гибридный поиск (если False, то только векторный)
+            
+        Returns:
+            Список результатов поиска с расширенными метаданными
+        """
+        try:
+            if use_hybrid:
+                # Инициализируем гибридный поиск если еще не создан
+                if self.hybrid_search is None:
+                    self.hybrid_search = HybridSearchEngine(graphiti_adapter)
+                
+                # Выполняем гибридный поиск
+                results = await self.hybrid_search.search(
+                    query=query,
+                    user_id=user_id,
+                    k=k,
+                    filters=filters,
+                    time_window=time_window
+                )
+                
+                # Преобразуем результаты в словари
+                return [r.to_dict() for r in results]
+            else:
+                # Используем обычный векторный поиск
+                response = await self.search_episodes(query, limit=k)
+                results = []
+                for item in response.get("items", []):
+                    results.append({
+                        "id": item["id"],
+                        "text": item["text"],
+                        "score": item.get("similarity", 0.8),
+                        "source": "vector",
+                        "metadata": item.get("metadata", {})
+                    })
+                return results
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка гибридного поиска: {str(e)}")
+            return []
 
 
 # Глобальный экземпляр MemoryManager
