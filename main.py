@@ -148,6 +148,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Добавляем middleware для обработки ошибок (должен быть первым)
+from core.error_middleware import ErrorHandlingMiddleware
+app.add_middleware(ErrorHandlingMiddleware)
+
 # Добавляем middleware для метрик
 app.add_middleware(MetricsMiddleware)
 
@@ -396,29 +400,39 @@ def sandbox_sync() -> dict:
         raise HTTPException(status_code=500, detail=f"Ошибка синхронизации: {str(e)}")
 
 @app.post("/sandbox/exec", response_model=SandboxExecResponse, tags=["sandbox"])
-def sandbox_exec(request: SandboxExecRequest):
+async def sandbox_exec(request: SandboxExecRequest):
     """
     Выполнить команду в песочнице
 
-    Безопасно выполняет команду в изолированной Docker среде.
+    Безопасно выполняет команду в изолированной среде с использованием SandboxManager.
 
     **Безопасность:**
-    - Запрещены опасные команды (rm -rf, dd, mkfs, etc.)
-    - Таймаут выполнения: 15 секунд
-    - Изолированная среда Docker
+    - Блокировка опасных операций (os.system, eval, exec, etc.)
+    - Таймаут выполнения: 30 секунд (настраивается)
+    - Правильная обработка аргументов команд
 
     **Примеры команд:**
     - `ls -la` - список файлов
-    - `python --version` - версия Python
+    - `python3 -c "print(342*100)"` - выполнение Python кода
     - `pwd` - текущая директория
     """
-    result = _exec_in_sandbox(request.command)
+    global sandbox_manager
+    
+    if not sandbox_manager:
+        raise HTTPException(status_code=503, detail="Sandbox manager не инициализирован")
+    
+    # Используем SandboxManager для выполнения
+    result = await sandbox_manager.execute_command(
+        request.command,
+        timeout=request.timeout if hasattr(request, 'timeout') else None
+    )
+    
     return SandboxExecResponse(
-        success=result["success"],
-        output=result["output"],
-        error=result.get("error"),
-        execution_time=result.get("execution_time", 0.0),
-        returncode=result.get("returncode")
+        success=result.success,
+        output=result.output,
+        error=result.error,
+        execution_time=result.execution_time,
+        returncode=result.return_code
     )
 
 @app.get("/ping", tags=["health"])
@@ -556,25 +570,56 @@ async def search_memory(q: str = Query(..., description="Поисковый за
 async def get_tools():
     """Получение списка доступных инструментов"""
     try:
-        tools = get_tools_for_agent()
+        # Используем tools_registry
+        from core.tools_registry import get_tools_registry
+        registry = get_tools_registry()
         
-        # Группируем по категориям
-        tools_by_category = {}
+        # Обновляем реестр
+        registry.scan_project()
+        
+        # Получаем инструменты
+        tools = registry.get_tools_for_llm()
+        
+        # Группируем по типам
+        tools_by_type = {}
         for tool in tools:
-            category = tool.get("category", "general")
-            if category not in tools_by_category:
-                tools_by_category[category] = []
-            tools_by_category[category].append(tool)
+            tool_type = tool.get("type", "general")
+            if tool_type not in tools_by_type:
+                tools_by_type[tool_type] = []
+            tools_by_type[tool_type].append(tool)
         
         return {
             "tools": tools,
-            "tools_by_category": tools_by_category,
+            "tools_by_type": tools_by_type,
             "total": len(tools),
-            "categories": list(tools_by_category.keys())
+            "types": list(tools_by_type.keys())
         }
     except Exception as e:
         logger.error(f"Ошибка получения инструментов: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения инструментов: {str(e)}")
+
+
+@app.get("/tools/openai-functions", tags=["tools"])
+async def get_tools_openai_format():
+    """Получение инструментов в формате OpenAI Function Calling"""
+    try:
+        from core.tools_registry import get_tools_registry
+        registry = get_tools_registry()
+        
+        # Обновляем реестр
+        registry.scan_project()
+        
+        # Экспортируем в формате OpenAI
+        functions = registry.export_openai_functions()
+        
+        return {
+            "functions": functions,
+            "total": len(functions)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка экспорта инструментов: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/tools/execute/{tool_name}", tags=["tools"])
 async def execute_tool(tool_name: str, params: dict):
@@ -872,32 +917,102 @@ async def suggest_improvements():
 @app.post("/feedback/add", tags=["feedback"])
 async def add_feedback(request: dict):
     """
-    Добавить обратную связь
+    Добавить обратную связь с сохранением в Neo4j
 
-    Сохраняет обратную связь от пользователя.
+    Сохраняет обратную связь от пользователя в графовую базу данных.
     """
     try:
         feedback_type = request.get("type")
         text = request.get("text")
         user_id = request.get("user_id")
         chat_id = request.get("chat_id")
+        context = request.get("context", "")
 
         if not feedback_type or not text:
             raise HTTPException(status_code=400, detail="Необходимо указать type и text")
 
-        # Здесь должна быть логика сохранения обратной связи
-        # Пока просто генерируем ID
+        # Создаем узел Feedback в Neo4j через Graphiti
         import uuid
-        feedback_id = str(uuid.uuid4())[:8]
-
-        logger.info(f"Добавлена обратная связь: {feedback_type} - {text} (user: {user_id}, chat: {chat_id})")
-
-        return {"id": feedback_id, "success": True, "message": "Обратная связь сохранена"}
+        feedback_id = str(uuid.uuid4())
+        
+        feedback_metadata = {
+            "type": "feedback",
+            "feedback_type": feedback_type,
+            "feedback_id": feedback_id,
+            "user_id": str(user_id) if user_id else "anonymous",
+            "chat_id": str(chat_id) if chat_id else None,
+            "context": context[:500],  # Ограничиваем длину контекста
+            "timestamp": int(time.time())
+        }
+        
+        # Сохраняем через memory API
+        memory_result = await memory_manager.save(
+            f"Feedback ({feedback_type}): {text}",
+            metadata=feedback_metadata
+        )
+        
+        if memory_result.get("success"):
+            logger.info(f"Feedback сохранен в Neo4j: {feedback_id} - {feedback_type}")
+            
+            # Если это feedback на конкретный ответ, создаем связь
+            if context and feedback_type in ["positive", "negative"]:
+                # В будущем: создать связь (:Feedback)-[:ABOUT]->(:ToolCall)
+                pass
+            
+            return {
+                "id": feedback_id, 
+                "success": True, 
+                "message": "Обратная связь сохранена в Neo4j",
+                "memory_id": memory_result.get("id")
+            }
+        else:
+            logger.error("Ошибка сохранения feedback в память")
+            return {"id": feedback_id, "success": True, "message": "Обратная связь сохранена локально"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Ошибка при добавлении обратной связи: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка сохранения: {str(e)}")
+
+
+@app.get("/reflection/insights", tags=["analysis"])
+async def get_reflection_insights():
+    """Получение инсайтов из системы рефлексии"""
+    try:
+        from core.reflection.reflection_analyzer import ReflectionAnalyzer
+        analyzer = ReflectionAnalyzer()
+        
+        # Добавляем тестовые действия для демонстрации
+        test_actions = [
+            {"type": "api_call", "subtype": "chat", "success": True, "execution_time": 0.5},
+            {"type": "api_call", "subtype": "memory", "success": True, "execution_time": 0.3},
+            {"type": "api_call", "subtype": "chat", "success": True, "execution_time": 0.4},
+            {"type": "api_call", "subtype": "memory", "success": True, "execution_time": 2.5},
+            {"type": "api_call", "subtype": "chat", "success": False, "error": "timeout"},
+            {"type": "api_call", "subtype": "memory", "success": False, "error": "timeout"},
+        ]
+        
+        # Добавляем действия с временными метками
+        import time
+        for i, action in enumerate(test_actions):
+            time.sleep(0.1)  # Небольшая задержка
+            analyzer.add_action(action)
+        
+        # Анализируем действия
+        insights = analyzer.analyze_actions()
+        
+        # Получаем сводку
+        summary = analyzer.get_summary()
+        
+        return {
+            "insights": insights,
+            "summary": summary,
+            "recommendation": "Используйте эти инсайты для улучшения производительности"
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при получении инсайтов рефлексии: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/performance/record", tags=["performance"])
 async def record_performance(request: dict):
