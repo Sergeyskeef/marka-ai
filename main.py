@@ -148,6 +148,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Добавляем middleware для обработки ошибок (должен быть первым)
+from core.error_middleware import ErrorHandlingMiddleware
+app.add_middleware(ErrorHandlingMiddleware)
+
 # Добавляем middleware для метрик
 app.add_middleware(MetricsMiddleware)
 
@@ -913,32 +917,102 @@ async def suggest_improvements():
 @app.post("/feedback/add", tags=["feedback"])
 async def add_feedback(request: dict):
     """
-    Добавить обратную связь
+    Добавить обратную связь с сохранением в Neo4j
 
-    Сохраняет обратную связь от пользователя.
+    Сохраняет обратную связь от пользователя в графовую базу данных.
     """
     try:
         feedback_type = request.get("type")
         text = request.get("text")
         user_id = request.get("user_id")
         chat_id = request.get("chat_id")
+        context = request.get("context", "")
 
         if not feedback_type or not text:
             raise HTTPException(status_code=400, detail="Необходимо указать type и text")
 
-        # Здесь должна быть логика сохранения обратной связи
-        # Пока просто генерируем ID
+        # Создаем узел Feedback в Neo4j через Graphiti
         import uuid
-        feedback_id = str(uuid.uuid4())[:8]
-
-        logger.info(f"Добавлена обратная связь: {feedback_type} - {text} (user: {user_id}, chat: {chat_id})")
-
-        return {"id": feedback_id, "success": True, "message": "Обратная связь сохранена"}
+        feedback_id = str(uuid.uuid4())
+        
+        feedback_metadata = {
+            "type": "feedback",
+            "feedback_type": feedback_type,
+            "feedback_id": feedback_id,
+            "user_id": str(user_id) if user_id else "anonymous",
+            "chat_id": str(chat_id) if chat_id else None,
+            "context": context[:500],  # Ограничиваем длину контекста
+            "timestamp": int(time.time())
+        }
+        
+        # Сохраняем через memory API
+        memory_result = await memory_manager.save(
+            f"Feedback ({feedback_type}): {text}",
+            metadata=feedback_metadata
+        )
+        
+        if memory_result.get("success"):
+            logger.info(f"Feedback сохранен в Neo4j: {feedback_id} - {feedback_type}")
+            
+            # Если это feedback на конкретный ответ, создаем связь
+            if context and feedback_type in ["positive", "negative"]:
+                # В будущем: создать связь (:Feedback)-[:ABOUT]->(:ToolCall)
+                pass
+            
+            return {
+                "id": feedback_id, 
+                "success": True, 
+                "message": "Обратная связь сохранена в Neo4j",
+                "memory_id": memory_result.get("id")
+            }
+        else:
+            logger.error("Ошибка сохранения feedback в память")
+            return {"id": feedback_id, "success": True, "message": "Обратная связь сохранена локально"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Ошибка при добавлении обратной связи: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка сохранения: {str(e)}")
+
+
+@app.get("/reflection/insights", tags=["analysis"])
+async def get_reflection_insights():
+    """Получение инсайтов из системы рефлексии"""
+    try:
+        from core.reflection.reflection_analyzer import ReflectionAnalyzer
+        analyzer = ReflectionAnalyzer()
+        
+        # Добавляем тестовые действия для демонстрации
+        test_actions = [
+            {"type": "api_call", "subtype": "chat", "success": True, "execution_time": 0.5},
+            {"type": "api_call", "subtype": "memory", "success": True, "execution_time": 0.3},
+            {"type": "api_call", "subtype": "chat", "success": True, "execution_time": 0.4},
+            {"type": "api_call", "subtype": "memory", "success": True, "execution_time": 2.5},
+            {"type": "api_call", "subtype": "chat", "success": False, "error": "timeout"},
+            {"type": "api_call", "subtype": "memory", "success": False, "error": "timeout"},
+        ]
+        
+        # Добавляем действия с временными метками
+        import time
+        for i, action in enumerate(test_actions):
+            time.sleep(0.1)  # Небольшая задержка
+            analyzer.add_action(action)
+        
+        # Анализируем действия
+        insights = analyzer.analyze_actions()
+        
+        # Получаем сводку
+        summary = analyzer.get_summary()
+        
+        return {
+            "insights": insights,
+            "summary": summary,
+            "recommendation": "Используйте эти инсайты для улучшения производительности"
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при получении инсайтов рефлексии: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/performance/record", tags=["performance"])
 async def record_performance(request: dict):

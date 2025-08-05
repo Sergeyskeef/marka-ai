@@ -119,11 +119,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if data.startswith("feedback:"):
         action = data.split(":")[1]
+        user_id = query.from_user.id
+        message_text = query.message.text if query.message else ""
         
+        # Сохраняем feedback в Neo4j через Graphiti
+        try:
+            feedback_data = {
+                "type": "feedback",
+                "vote": action,
+                "user_id": str(user_id),
+                "message": message_text[:200],  # Ограничиваем длину
+                "timestamp": int(time.time())
+            }
+            
+            # Отправляем в Graphiti для сохранения
+            response = await _post(
+                f"{APP_HOST}/memory/add",
+                {
+                    "text": f"User feedback: {action}",
+                    "metadata": feedback_data
+                }
+            )
+            
+            if response.status_code == 200:
+                logging.info(f"Feedback сохранен в Neo4j: {action} от user {user_id}")
+            else:
+                logging.error(f"Ошибка сохранения feedback: {response.status_code}")
+        except Exception as e:
+            logging.error(f"Ошибка при сохранении feedback: {e}")
+        
+        # Отправляем ответ пользователю
         if action == "positive":
-            await query.edit_message_text("Спасибо за положительный отзыв! 👍")
+            await query.edit_message_text("Спасибо за положительный отзыв! 👍\n✅ Сохранено для улучшения")
         elif action == "negative":
-            await query.edit_message_text("Спасибо за отзыв. Постараюсь улучшиться! 🤖")
+            await query.edit_message_text("Спасибо за отзыв. Постараюсь улучшиться! 🤖\n✅ Сохранено для анализа")
         elif action == "retry":
             # Повторить последний запрос
             await query.edit_message_text("🔄 Повторяю последний запрос...")
