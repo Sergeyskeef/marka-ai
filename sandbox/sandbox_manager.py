@@ -6,6 +6,7 @@ import asyncio
 import logging
 import shlex
 import os
+import ast
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -55,6 +56,13 @@ class SandboxManager:
             "__import__",
             "open",
         ]
+        
+        # Список опасных AST узлов
+        self.dangerous_ast_nodes = {
+            'Import': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__'],
+            'ImportFrom': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__'],
+            'Call': ['eval', 'exec', 'compile', '__import__', 'open', 'file', 'input', 'raw_input']
+        }
 
         # Создаем песочницу по умолчанию
         # Используем текущую директорию если /sandbox не существует
@@ -94,14 +102,71 @@ class SandboxManager:
                     if code_idx < len(parts):
                         code = parts[code_idx]
                         
-                        # Проверяем на заблокированные модули
+                        # Проверяем через AST
+                        ast_error = self._check_python_ast(code)
+                        if ast_error:
+                            return ast_error
+                        
+                        # Проверяем на заблокированные модули (дополнительная проверка)
                         for blocked in sandbox.blocked_modules or []:
                             if blocked in code:
                                 return f"Заблокированная операция: {blocked}"
-            except Exception:
-                pass
+            except Exception as e:
+                return f"Ошибка парсинга команды: {str(e)}"
         
         return None
+    
+    def _check_python_ast(self, code: str) -> str | None:
+        """Проверяет Python код через AST на наличие опасных операций"""
+        try:
+            tree = ast.parse(code)
+            
+            for node in ast.walk(tree):
+                # Проверяем импорты
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in self.dangerous_ast_nodes.get('Import', []):
+                            return f"Заблокирован импорт модуля: {alias.name}"
+                
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module and node.module in self.dangerous_ast_nodes.get('ImportFrom', []):
+                        return f"Заблокирован импорт из модуля: {node.module}"
+                
+                # Проверяем вызовы функций
+                elif isinstance(node, ast.Call):
+                    # Проверяем прямые вызовы
+                    if isinstance(node.func, ast.Name):
+                        if node.func.id in self.dangerous_ast_nodes.get('Call', []):
+                            return f"Заблокирован вызов функции: {node.func.id}"
+                    
+                    # Проверяем вызовы атрибутов (например, os.system)
+                    elif isinstance(node.func, ast.Attribute):
+                        # Получаем полное имя (например, os.system)
+                        full_name = []
+                        current = node.func
+                        while isinstance(current, ast.Attribute):
+                            full_name.insert(0, current.attr)
+                            current = current.value
+                        if isinstance(current, ast.Name):
+                            full_name.insert(0, current.id)
+                            full_path = '.'.join(full_name)
+                            
+                            # Проверяем опасные вызовы
+                            if full_path in ['os.system', 'os.popen', 'subprocess.call', 
+                                           'subprocess.run', 'subprocess.Popen']:
+                                return f"Заблокирован системный вызов: {full_path}"
+                
+                # Проверяем использование eval/exec в виде строк
+                elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                    if isinstance(node.value.func, ast.Name) and node.value.func.id in ['eval', 'exec']:
+                        return f"Заблокировано использование: {node.value.func.id}"
+            
+            return None  # Код безопасен
+            
+        except SyntaxError as e:
+            return f"Синтаксическая ошибка в Python коде: {str(e)}"
+        except Exception as e:
+            return f"Ошибка при анализе AST: {str(e)}"
 
     async def execute_command(self,
                             command: str,

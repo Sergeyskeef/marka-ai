@@ -12,10 +12,14 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict
 
 from langchain_api.core.backend_selector import get_backend_status
 from langchain_api.core.memory.prefs import get_user_pref, upsert_user_pref, get_all_user_prefs, delete_user_pref
@@ -45,6 +49,7 @@ from langchain_api.core.prompt_manager import prompt_manager
 # Импортируем дополнительные компоненты системы
 from langchain_api.services.task_executor import TaskExecutor
 from langchain_api.core.guardrails_client import with_guardrails, is_guardrails_enabled
+from core.error_middleware import ErrorHandlingMiddleware, handle_errors
 
 # Настройка логирования
 logging.basicConfig(
@@ -149,7 +154,6 @@ app.add_middleware(
 )
 
 # Добавляем middleware для обработки ошибок (должен быть первым)
-from core.error_middleware import ErrorHandlingMiddleware
 app.add_middleware(ErrorHandlingMiddleware)
 
 # Добавляем middleware для метрик
@@ -287,6 +291,7 @@ async def root():
     }
 
 @app.post("/chat/ask", response_model=ChatResponse, tags=["chat"])
+@handle_errors
 async def chat_ask(request: ChatRequest, backend: str | None = None):
     """
     🧠 НОВАЯ АРХИТЕКТУРА "ВСЕ ЧЕРЕЗ МОЗГ" - HTTP ENDPOINT
@@ -343,6 +348,7 @@ async def chat_ask(request: ChatRequest, backend: str | None = None):
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке запроса через мозг: {str(e)}")
 
 @app.post("/v1/chat", response_model=V1ChatResponse, tags=["chat"])
+@handle_errors
 async def v1_chat(request: V1ChatRequest):
     """
     🛡️ V1 Chat API с Guardrails защитой
@@ -400,6 +406,7 @@ def sandbox_sync() -> dict:
         raise HTTPException(status_code=500, detail=f"Ошибка синхронизации: {str(e)}")
 
 @app.post("/sandbox/exec", response_model=SandboxExecResponse, tags=["sandbox"])
+@handle_errors
 async def sandbox_exec(request: SandboxExecRequest):
     """
     Выполнить команду в песочнице
@@ -514,6 +521,7 @@ async def health_check():
         )
 
 @app.post("/memory", tags=["memory"])
+@handle_errors
 async def add_memory(request: MemoryRequest):
     """
     Добавить информацию в память
@@ -542,6 +550,7 @@ async def add_memory(request: MemoryRequest):
         raise HTTPException(status_code=500, detail=f"Ошибка добавления в память: {str(e)}")
 
 @app.get("/search", response_model=SearchResponse, tags=["memory"])
+@handle_errors
 async def search_memory(q: str = Query(..., description="Поисковый запрос")):
     """
     Поиск в памяти
@@ -622,6 +631,7 @@ async def get_tools_openai_format():
 
 
 @app.post("/tools/execute/{tool_name}", tags=["tools"])
+@handle_errors
 async def execute_tool(tool_name: str, params: dict):
     """Выполнение инструмента"""
     try:
@@ -915,6 +925,7 @@ async def suggest_improvements():
         raise HTTPException(status_code=500, detail=f"Ошибка получения предложений: {str(e)}")
 
 @app.post("/feedback/add", tags=["feedback"])
+@handle_errors
 async def add_feedback(request: dict):
     """
     Добавить обратную связь с сохранением в Neo4j
@@ -976,6 +987,7 @@ async def add_feedback(request: dict):
 
 
 @app.get("/reflection/insights", tags=["analysis"])
+@handle_errors
 async def get_reflection_insights():
     """Получение инсайтов из системы рефлексии"""
     try:

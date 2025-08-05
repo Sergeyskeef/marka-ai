@@ -111,6 +111,41 @@ def retry_on_failure(
     return decorator
 
 
+def handle_errors(func: Callable) -> Callable:
+    """
+    Декоратор для централизованной обработки ошибок в endpoints
+    
+    Обрабатывает:
+    - HTTPException - пробрасывает как есть
+    - asyncio.TimeoutError - возвращает 504
+    - Другие исключения - возвращает 500 с деталями
+    """
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+            
+        except HTTPException:
+            # HTTP исключения пробрасываем как есть
+            raise
+            
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout in {func.__name__}")
+            raise HTTPException(
+                status_code=504,
+                detail="Request timeout"
+            )
+            
+        except Exception as e:
+            logger.error(f"Unhandled error in {func.__name__}: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Internal server error: {str(e)}"
+            )
+    
+    return wrapper
+
+
 class RetryableHTTPClient:
     """HTTP клиент с встроенной retry логикой"""
     
@@ -156,42 +191,3 @@ class RetryableHTTPClient:
     async def delete(self, url: str, **kwargs):
         """DELETE запрос с retry"""
         return await self.client.delete(url, **kwargs)
-
-
-def handle_errors(func: Callable) -> Callable:
-    """
-    Декоратор для обработки ошибок в endpoint'ах
-    
-    Преобразует различные типы исключений в HTTPException
-    """
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-            
-        except HTTPException:
-            # HTTPException пробрасываем как есть
-            raise
-            
-        except ValueError as e:
-            # Ошибки валидации
-            raise HTTPException(status_code=400, detail=str(e))
-            
-        except PermissionError as e:
-            # Ошибки доступа
-            raise HTTPException(status_code=403, detail=str(e))
-            
-        except FileNotFoundError as e:
-            # Ресурс не найден
-            raise HTTPException(status_code=404, detail=str(e))
-            
-        except asyncio.TimeoutError:
-            # Таймауты
-            raise HTTPException(status_code=504, detail="Request timeout")
-            
-        except Exception as e:
-            # Все остальные ошибки
-            logger.error(f"Unhandled error in {func.__name__}: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error")
-    
-    return wrapper
