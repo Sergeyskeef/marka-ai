@@ -170,8 +170,13 @@ else:
 " > /dev/null 2>&1
 print_status $? "Адаптация промптов работает"
 
-# 15. Очистка тестовых данных
-echo -e "\n${YELLOW}15. Очистка тестовых данных...${NC}"
+# 15. Проверка Reflexion Loop α
+echo -e "\n${YELLOW}15. Проверка Reflexion Loop α...${NC}"
+docker compose exec app python /app/langchain_api/test_reflexion_smoke.py
+print_status $? "Reflexion Loop α работает"
+
+# 16. Очистка тестовых данных
+echo -e "\n${YELLOW}16. Очистка тестовых данных...${NC}"
 docker compose exec app python -c "
 import requests
 
@@ -187,6 +192,7 @@ echo -e "${GREEN}✅ Graph Schema v1 готов к использованию${N
 echo -e "${GREEN}✅ Pydantic Tools работают корректно${NC}"
 echo -e "${GREEN}✅ Guardrails + Tracing UI готовы к использованию${NC}"
 echo -e "${GREEN}✅ Preferences API + Prompt Adaptation работают${NC}"
+echo -e "${GREEN}✅ Reflexion Loop α готов к использованию${NC}"
 echo -e "${GREEN}✅ Все тесты проходят${NC}"
 
 exit 0 

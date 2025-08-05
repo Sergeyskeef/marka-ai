@@ -52,6 +52,17 @@ ACTIVE_USERS = Gauge(
     'Number of active users'
 )
 
+REFLEXION_ATTEMPTS = Counter(
+    'mark_reflexion_attempts_total',
+    'Total number of reflexion attempts',
+    ['result']  # 'success', 'failure'
+)
+
+REFLEXION_SUCCESS_RATE = Gauge(
+    'mark_reflexion_success_rate',
+    'Reflexion success rate (0.0 to 1.0)'
+)
+
 class MetricsManager:
     """Менеджер метрик"""
     
@@ -84,6 +95,30 @@ class MetricsManager:
         """Установка количества активных пользователей"""
         ACTIVE_USERS.set(count)
     
+    def record_reflexion_attempt(self, result: str):
+        """Запись метрики попытки рефлексии"""
+        REFLEXION_ATTEMPTS.labels(result=result).inc()
+        
+        # Обновляем success rate
+        self._update_reflexion_success_rate()
+    
+    def _update_reflexion_success_rate(self):
+        """Обновление метрики success rate рефлексии"""
+        try:
+            # Получаем значения счетчиков
+            success_count = REFLEXION_ATTEMPTS.labels(result='success')._value._value
+            failure_count = REFLEXION_ATTEMPTS.labels(result='failure')._value._value
+            
+            total = success_count + failure_count
+            if total > 0:
+                success_rate = success_count / total
+                REFLEXION_SUCCESS_RATE.set(success_rate)
+            else:
+                REFLEXION_SUCCESS_RATE.set(0.0)
+        except Exception as e:
+            logger.warning(f"Ошибка обновления reflexion success rate: {e}")
+            REFLEXION_SUCCESS_RATE.set(0.0)
+    
     def get_uptime(self) -> float:
         """Получение времени работы"""
         return time.time() - self.start_time
@@ -99,7 +134,9 @@ class MetricsManager:
                 "memory": "MEMORY_OPERATIONS",
                 "tools": "TOOL_EXECUTIONS",
                 "bot": "BOT_MESSAGES",
-                "users": "ACTIVE_USERS"
+                "users": "ACTIVE_USERS",
+                "reflexion_attempts": "REFLEXION_ATTEMPTS",
+                "reflexion_success_rate": "REFLEXION_SUCCESS_RATE"
             }
         }
     
