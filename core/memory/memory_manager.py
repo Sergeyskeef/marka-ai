@@ -7,6 +7,7 @@ from typing import Any
 
 # Импортируем GraphitiMemoryAdapter
 from .graphiti_adapter import graphiti_adapter
+from .models import MemoryEntry, MemoryMetadata, MemoryResponse
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,22 @@ class MemoryManager:
     async def add_episode(self, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Добавляет эпизод в Graphiti память"""
         try:
-            result = await graphiti_adapter.create_episode(text, metadata)
+            # Валидируем входные данные
+            if metadata:
+                validated_metadata = MemoryMetadata(**metadata).dict(exclude_none=True)
+            else:
+                validated_metadata = None
+            
+            entry = MemoryEntry(text=text, metadata=validated_metadata)
+            
+            result = await graphiti_adapter.create_episode(entry.text, entry.metadata)
             if result.get("success", True):  # Graphiti может не возвращать success поле
                 self.memory_stats["total_entries"] += 1
-                logger.info(f"✅ Эпизод добавлен в память: {text[:50]}...")
+                logger.info(f"✅ Эпизод добавлен в память: {entry.text[:50]}...")
             return result
+        except ValueError as e:
+            logger.error(f"❌ Ошибка валидации данных: {str(e)}")
+            return {"success": False, "error": f"Validation error: {str(e)}"}
         except Exception as e:
             logger.error(f"❌ Ошибка добавления эпизода: {str(e)}")
             return {"success": False, "error": str(e)}
@@ -109,6 +121,19 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"❌ Ошибка проверки здоровья Graphiti: {str(e)}")
             return {"status": "error", "error": str(e)}
+
+    async def save(self, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        """
+        Сохраняет информацию в память (алиас для add_episode).
+        
+        Args:
+            text: Текст для сохранения
+            metadata: Дополнительные метаданные
+            
+        Returns:
+            Результат операции с полями success, id, error
+        """
+        return await self.add_episode(text, metadata)
 
 
 # Глобальный экземпляр MemoryManager

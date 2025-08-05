@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 import httpx
+from core.error_middleware import RetryableHTTPClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class GraphitiMemoryAdapter:
     def __init__(self, base_url: str = "http://graphiti:7878"):
         self.base_url = base_url.rstrip('/')
         self.client = None
+        self._retry_client = None
         logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url}")
     
     async def _get_client(self) -> httpx.AsyncClient:
@@ -41,12 +43,22 @@ class GraphitiMemoryAdapter:
                 http2=True
             )
         return self.client
+    
+    async def _get_retry_client(self) -> RetryableHTTPClient:
+        """Получает клиент с retry логикой"""
+        if self._retry_client is None:
+            self._retry_client = RetryableHTTPClient(
+                base_url=self.base_url,
+                timeout=30.0,
+                max_retries=3
+            )
+        return self._retry_client
 
     async def health_check(self) -> dict[str, Any]:
         """Проверяет здоровье Graphiti"""
         try:
-            client = await self._get_client()
-            response = await client.get(f"{self.base_url}/health")
+            client = await self._get_retry_client()
+            response = await client.get("/health")
             if response.status_code == 200:
                 data = response.json()
                 logger.info(f"✅ Graphiti health: {data.get('status')}")
@@ -101,9 +113,9 @@ class GraphitiMemoryAdapter:
             logger.info(f"Отправляем payload: {json.dumps(payload, indent=2)}")
 
             # Отправляем запрос
-            client = await self._get_client()
+            client = await self._get_retry_client()
             response = await client.post(
-                f"{self.base_url}/nodes",
+                "/nodes",
                 json=payload
             )
 
@@ -123,9 +135,9 @@ class GraphitiMemoryAdapter:
         """Ищет эпизоды в Graphiti с использованием полнотекстового поиска"""
         try:
             # Используем полнотекстовый поиск через Graphiti API
-            client = await self._get_client()
+            client = await self._get_retry_client()
             response = await client.get(
-                f"{self.base_url}/nodes",
+                "/nodes",
                 params={"search": query, "limit": limit}
             )
             
@@ -157,8 +169,8 @@ class GraphitiMemoryAdapter:
     async def get_episode(self, episode_id: str) -> dict[str, Any]:
         """Получает эпизод по ID"""
         try:
-            client = await self._get_client()
-            response = await client.get(f"{self.base_url}/nodes/{episode_id}")
+            client = await self._get_retry_client()
+            response = await client.get(f"/nodes/{episode_id}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -174,9 +186,9 @@ class GraphitiMemoryAdapter:
     async def list_episodes(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         """Получает список эпизодов"""
         try:
-            client = await self._get_client()
+            client = await self._get_retry_client()
             response = await client.get(
-                f"{self.base_url}/nodes",
+                "/nodes",
                 params={"limit": limit, "offset": offset}
             )
             
@@ -196,6 +208,9 @@ class GraphitiMemoryAdapter:
         if self.client:
             await self.client.aclose()
             self.client = None
+        if self._retry_client:
+            await self._retry_client.close()
+            self._retry_client = None
         logger.info("🔒 GraphitiMemoryAdapter закрыт")
 
     async def __aenter__(self):

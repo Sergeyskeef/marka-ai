@@ -530,7 +530,7 @@ async def add_memory(request: MemoryRequest):
     """
     try:
         # Импортируем MemoryManager
-        from langchain_api.core.memory.memory_manager import memory_manager
+        from core.memory.memory_manager import memory_manager
 
         # Добавляем эпизод в Graphiti
         result = await memory_manager.add_episode(request.text, request.metadata)
@@ -559,7 +559,7 @@ async def search_memory(q: str = Query(..., description="Поисковый за
     """
     try:
         # Импортируем MemoryManager
-        from langchain_api.core.memory.memory_manager import memory_manager
+        from core.memory.memory_manager import memory_manager
 
         # Ищем эпизоды в Graphiti
         result = await memory_manager.search_episodes(q, limit=10)
