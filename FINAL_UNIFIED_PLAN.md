@@ -311,3 +311,23 @@ git checkout -b feature/security-and-planning
 cd sandbox
 # Начинаем с критической безопасности...
 ```
+
+## 📁 Неиспользуемые модули (для справки)
+
+По результатам анализа, следующие модули не используются активно, но оставлены для обратной совместимости:
+
+1. **Память (legacy от Weaviate)**:
+   - `/workspace/memory/graphiti_memory.py` - дубликат адаптера
+   - `/workspace/core/memory/base_memory.py` - используется только в enhanced_memory
+   - `/workspace/core/memory/enhanced_memory.py` - может пригодиться в будущем
+   - `/workspace/core/memory/schema.py` - старая схема для Weaviate
+
+2. **Типы памяти из marka_passport.json**:
+   - Memory, Experience, Insight, Persona, UserFacts, ChatGPTMemory
+   - Сейчас используется единый тип "episodes" в GraphitiMemory
+
+3. **Возможные старые файлы**:
+   - weaviate_tools/* (если существует)
+   - Любые файлы с упоминанием weaviate в названии
+
+**Рекомендация**: Не удалять эти файлы, они не мешают работе системы.
