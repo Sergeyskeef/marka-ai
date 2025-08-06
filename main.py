@@ -647,6 +647,83 @@ async def analyze_code(file_path: str):
         return {"error": str(e)}
 
 
+# Webhook endpoints
+webhook_subscribers = []
+
+
+@app.post("/webhooks/subscribe", tags=["webhooks"])
+async def subscribe_webhook(url: str, events: list[str] = None):
+    """
+    Подписаться на события через webhook
+    
+    Параметры:
+    - url: URL для отправки событий
+    - events: список типов событий для подписки (если пусто - все события)
+    """
+    webhook = {
+        "url": url,
+        "events": events or ["*"],
+        "subscribed_at": datetime.now().isoformat()
+    }
+    webhook_subscribers.append(webhook)
+    logger.info(f"Webhook подписан: {url}")
+    return {"success": True, "message": "Webhook subscribed"}
+
+
+@app.delete("/webhooks/unsubscribe", tags=["webhooks"])
+async def unsubscribe_webhook(url: str):
+    """
+    Отписаться от webhook
+    
+    Параметры:
+    - url: URL для отписки
+    """
+    global webhook_subscribers
+    before = len(webhook_subscribers)
+    webhook_subscribers = [w for w in webhook_subscribers if w["url"] != url]
+    removed = before - len(webhook_subscribers)
+    
+    if removed > 0:
+        logger.info(f"Webhook отписан: {url}")
+        return {"success": True, "message": "Webhook unsubscribed"}
+    else:
+        return {"success": False, "message": "Webhook not found"}
+
+
+@app.get("/webhooks/list", tags=["webhooks"])
+async def list_webhooks():
+    """
+    Список активных webhooks
+    """
+    return {
+        "webhooks": webhook_subscribers,
+        "total": len(webhook_subscribers)
+    }
+
+
+async def send_webhook_event(event_type: str, data: dict):
+    """Отправка события всем подписанным webhooks"""
+    import httpx
+    
+    for webhook in webhook_subscribers:
+        # Проверяем, подписан ли webhook на этот тип события
+        if "*" in webhook["events"] or event_type in webhook["events"]:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        webhook["url"],
+                        json={
+                            "event": event_type,
+                            "data": data,
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        timeout=10.0
+                    )
+                logger.debug(f"Webhook отправлен на {webhook['url']}: {event_type}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки webhook на {webhook['url']}: {e}")
+
+
 @app.get("/ping", tags=["health"])
 def ping():
     """
