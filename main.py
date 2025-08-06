@@ -39,6 +39,7 @@ from langchain_api.routers.task_router import router as task_router
 from langchain_api.routes.trace_ui import router as trace_router
 from langchain_api.utils.toolkit import get_tools_for_agent, tool_registry
 from langchain_api.sandbox.sandbox_manager import SandboxManager
+from langchain_api.sandbox.task_planning_system import task_planner
 from langchain_api.core.middleware import MetricsMiddleware
 from langchain_api.middlewares.agents_trace import AgentsTraceMiddleware
 from langchain_api.core.metrics import metrics_manager
@@ -265,6 +266,19 @@ class V1ChatResponse(BaseModel):
     chat_id: int | None = Field(None, description="ID чата")
     error: str | None = Field(None, description="Ошибка, если есть")
 
+
+class PlanRequest(BaseModel):
+    goal: str = Field(..., description="Цель для достижения")
+    user_id: str | None = Field(None, description="ID пользователя")
+    chat_id: str | None = Field(None, description="ID чата")
+    available_tools: list[str] | None = Field(None, description="Доступные инструменты")
+
+
+class PlanResponse(BaseModel):
+    success: bool = Field(..., description="Успешность создания плана")
+    plan: dict[str, Any] | None = Field(None, description="Созданный план")
+    error: str | None = Field(None, description="Сообщение об ошибке")
+
 # API эндпоинты с улучшенной документацией
 
 @app.get("/", tags=["root"])
@@ -441,6 +455,82 @@ async def sandbox_exec(request: SandboxExecRequest):
         execution_time=result.execution_time,
         returncode=result.return_code
     )
+
+
+# Planning endpoints
+@app.post("/plan/create", response_model=PlanResponse, tags=["planning"])
+async def create_plan(request: PlanRequest):
+    """
+    Создать план выполнения задачи
+    
+    План автоматически декомпозируется на подзадачи с помощью LLM.
+    Каждая подзадача содержит описание, оценку времени и зависимости.
+    """
+    try:
+        logger.info(f"Создание плана для цели: {request.goal[:100]}...")
+        
+        plan = await task_planner.create_plan(
+            goal=request.goal,
+            context={
+                "user_id": request.user_id,
+                "chat_id": request.chat_id,
+                "available_tools": request.available_tools or []
+            }
+        )
+        
+        return PlanResponse(
+            success=True,
+            plan=plan.to_dict()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания плана: {e}")
+        return PlanResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.get("/plan/{plan_id}/status", tags=["planning"])
+async def get_plan_status(plan_id: str):
+    """
+    Получить статус выполнения плана
+    
+    Возвращает текущий статус плана, прогресс выполнения и состояние подзадач.
+    """
+    status = task_planner.get_plan_status(plan_id)
+    
+    if "error" in status:
+        raise HTTPException(status_code=404, detail=status["error"])
+        
+    return status
+
+
+@app.post("/plan/{plan_id}/execute", tags=["planning"])
+async def execute_plan(plan_id: str):
+    """
+    Запустить выполнение плана
+    
+    Начинает выполнение всех подзадач плана с учетом их зависимостей.
+    """
+    result = await task_planner.execute_plan(plan_id)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Ошибка выполнения плана"))
+        
+    return result
+
+
+@app.get("/plan/list", tags=["planning"])
+async def list_plans(user_id: str | None = None):
+    """
+    Получить список всех планов
+    
+    Опционально можно фильтровать по user_id.
+    """
+    plans = await task_planner.get_all_plans(user_id)
+    return {"plans": plans, "total": len(plans)}
+
 
 @app.get("/ping", tags=["health"])
 def ping():
