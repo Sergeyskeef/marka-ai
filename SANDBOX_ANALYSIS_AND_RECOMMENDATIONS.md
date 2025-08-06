@@ -392,8 +392,358 @@ async def execute_command(self, command: str, **kwargs):
 3. [OWASP Secure Coding Practices](https://owasp.org/www-project-secure-coding-practices-quick-reference-guide/)
 4. [Linux Capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html)
 
+## 🧠 Система планирования и самосознания
+
+### Текущие проблемы
+
+1. **Система планирования - заглушка**
+   - Функции `create_task_plan`, `execute_task_plan` не реализованы
+   - Планы не сохраняются в памяти
+   - Нет интеграции с выполнением задач
+
+2. **Изолированные компоненты (87 модулей)**
+   - Многие модули не связаны между собой
+   - Отсутствует единая шина событий
+   - Нет централизованного управления возможностями
+
+3. **Ограниченное самосознание**
+   - Марк не может анализировать свой код
+   - Не понимает зависимости между компонентами
+   - Не может трассировать ошибки
+
+### План интеграции системы планирования
+
+#### 1. Реализация TaskPlanner (HIGH priority)
+
+```python
+# sandbox/task_planning_system.py
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+from enum import Enum
+import uuid
+
+class TaskStatus(Enum):
+    DRAFT = "draft"
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class SubTask:
+    id: str
+    description: str
+    dependencies: List[str]
+    estimated_time: int  # минуты
+    status: TaskStatus = TaskStatus.DRAFT
+    result: Optional[Dict[str, Any]] = None
+
+@dataclass
+class Plan:
+    id: str
+    goal: str
+    subtasks: List[SubTask]
+    status: TaskStatus = TaskStatus.DRAFT
+    created_at: datetime
+    updated_at: datetime
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+class TaskPlanner:
+    def __init__(self, memory_manager, llm_client, event_bus):
+        self.memory = memory_manager
+        self.llm = llm_client
+        self.event_bus = event_bus
+        self.plans: Dict[str, Plan] = {}
+        
+    async def create_plan(self, goal: str, context: Dict[str, Any] = None) -> Plan:
+        """Создает план для достижения цели"""
+        # 1. Анализ цели с помощью LLM
+        prompt = f"""
+        Создай детальный план для достижения цели: {goal}
+        
+        Контекст: {context}
+        
+        Разбей задачу на подзадачи, определи зависимости и время.
+        Формат ответа: JSON с полями subtasks, dependencies, time_estimates
+        """
+        
+        response = await self.llm.generate(prompt)
+        plan_data = self._parse_llm_response(response)
+        
+        # 2. Создание структуры плана
+        plan = Plan(
+            id=str(uuid.uuid4()),
+            goal=goal,
+            subtasks=self._create_subtasks(plan_data),
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        
+        # 3. Сохранение в памяти
+        await self._save_to_memory(plan)
+        
+        # 4. Публикация события
+        await self.event_bus.publish("plan_created", {
+            "plan_id": plan.id,
+            "goal": plan.goal,
+            "subtasks_count": len(plan.subtasks)
+        })
+        
+        self.plans[plan.id] = plan
+        return plan
+```
+
+#### 2. Интеграция с ботом
+
+```python
+# telegram_bot/bot.py - добавить команды
+
+async def plan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Создает план для достижения цели"""
+    if not context.args:
+        keyboard = [
+            [InlineKeyboardButton("📝 Написать статью", callback_data="plan:article")],
+            [InlineKeyboardButton("🔧 Исправить баг", callback_data="plan:bugfix")],
+            [InlineKeyboardButton("📚 Изучить тему", callback_data="plan:learn")],
+            [InlineKeyboardButton("🏗️ Создать проект", callback_data="plan:project")]
+        ]
+        await update.message.reply_text(
+            "Что планируем? Опишите цель или выберите шаблон:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    goal = ' '.join(context.args)
+    
+    # Показываем процесс планирования
+    status_msg = await update.message.reply_text("🤔 Анализирую задачу...")
+    
+    # Создаем план через API
+    response = await _post("/plan/create", {
+        "goal": goal,
+        "context": {
+            "user_id": update.effective_user.id,
+            "chat_id": update.effective_chat.id
+        }
+    })
+    
+    if response.status_code == 200:
+        plan = response.json()
+        
+        # Форматируем план
+        text = f"📋 **План: {plan['goal']}**\n\n"
+        text += f"🆔 ID: `{plan['id']}`\n"
+        text += f"📊 Подзадач: {len(plan['subtasks'])}\n\n"
+        
+        for i, task in enumerate(plan['subtasks'], 1):
+            text += f"{i}. {task['description']}\n"
+            text += f"   ⏱️ ~{task['estimated_time']} мин\n"
+            if task['dependencies']:
+                text += f"   🔗 Зависит от: {', '.join(task['dependencies'])}\n"
+            text += "\n"
+        
+        # Кнопки действий
+        keyboard = [
+            [
+                InlineKeyboardButton("▶️ Начать", callback_data=f"plan:start:{plan['id']}"),
+                InlineKeyboardButton("📊 Статус", callback_data=f"plan:status:{plan['id']}")
+            ],
+            [
+                InlineKeyboardButton("✏️ Изменить", callback_data=f"plan:edit:{plan['id']}"),
+                InlineKeyboardButton("❌ Отменить", callback_data=f"plan:cancel:{plan['id']}")
+            ]
+        ]
+        
+        await status_msg.edit_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await status_msg.edit_text("❌ Ошибка при создании плана")
+```
+
+#### 3. Расширение самосознания
+
+```python
+# sandbox/enhanced_self_awareness.py
+import ast
+import inspect
+from pathlib import Path
+
+class EnhancedSelfAwareness(MarkSelfAwareness):
+    def __init__(self):
+        super().__init__()
+        self.code_map = self._build_code_map()
+        self.dependency_graph = self._build_dependency_graph()
+        
+    def _build_code_map(self) -> Dict[str, Dict[str, Any]]:
+        """Строит карту всего кода проекта"""
+        code_map = {}
+        
+        for py_file in Path("/workspace").rglob("*.py"):
+            if any(skip in str(py_file) for skip in ["__pycache__", "venv"]):
+                continue
+                
+            try:
+                with open(py_file, 'r') as f:
+                    content = f.read()
+                
+                tree = ast.parse(content)
+                
+                code_map[str(py_file)] = {
+                    "functions": self._extract_functions(tree),
+                    "classes": self._extract_classes(tree),
+                    "imports": self._extract_imports(tree),
+                    "size": len(content),
+                    "lines": content.count('\n')
+                }
+            except Exception as e:
+                logger.error(f"Error parsing {py_file}: {e}")
+                
+        return code_map
+    
+    def analyze_capability(self, capability: str) -> TaskResult:
+        """Анализирует возможность с учетом кода"""
+        base_result = super().analyze_capability(capability)
+        
+        # Добавляем анализ кода
+        if capability in self.capabilities:
+            # Находим файлы, связанные с возможностью
+            related_files = self._find_related_files(capability)
+            
+            analysis = {
+                "capability": capability,
+                "status": "available",
+                "files": related_files,
+                "entry_points": self._find_entry_points(capability),
+                "dependencies": self._get_capability_dependencies(capability),
+                "health": self._check_capability_health(capability)
+            }
+            
+            return TaskResult(
+                success=True,
+                message=f"Детальный анализ возможности '{capability}'",
+                data=analysis
+            )
+            
+        return base_result
+    
+    def diagnose_error(self, error_message: str) -> Dict[str, Any]:
+        """Диагностирует ошибку и предлагает решения"""
+        diagnosis = {
+            "error": error_message,
+            "possible_causes": [],
+            "affected_components": [],
+            "suggested_fixes": []
+        }
+        
+        # Анализ стека ошибки
+        if "Traceback" in error_message:
+            files = self._extract_files_from_traceback(error_message)
+            diagnosis["affected_components"] = files
+            
+            # Анализ каждого файла
+            for file in files:
+                if file in self.code_map:
+                    # Проверяем импорты
+                    imports = self.code_map[file]["imports"]
+                    diagnosis["possible_causes"].extend(
+                        self._analyze_import_issues(imports)
+                    )
+        
+        # Поиск похожих ошибок в истории
+        similar_errors = self._find_similar_errors(error_message)
+        if similar_errors:
+            diagnosis["suggested_fixes"].extend(
+                [e["fix"] for e in similar_errors if "fix" in e]
+            )
+        
+        return diagnosis
+```
+
+### 4. Event Bus для связи компонентов
+
+```python
+# core/event_bus.py
+from typing import Callable, Dict, List, Any
+from collections import defaultdict
+import asyncio
+import logging
+
+class EventBus:
+    """Центральная шина событий для связи компонентов"""
+    
+    def __init__(self):
+        self.subscribers: Dict[str, List[Callable]] = defaultdict(list)
+        self.event_history: List[Dict[str, Any]] = []
+        self.logger = logging.getLogger(__name__)
+        
+    def subscribe(self, event_type: str, handler: Callable, priority: int = 0):
+        """Подписка на событие"""
+        self.subscribers[event_type].append((priority, handler))
+        # Сортируем по приоритету
+        self.subscribers[event_type].sort(key=lambda x: x[0], reverse=True)
+        self.logger.info(f"Subscribed {handler.__name__} to {event_type}")
+        
+    async def publish(self, event_type: str, data: Dict[str, Any]):
+        """Публикация события"""
+        event = {
+            "type": event_type,
+            "data": data,
+            "timestamp": datetime.now(),
+            "handlers_called": []
+        }
+        
+        # Вызываем обработчики
+        for priority, handler in self.subscribers[event_type]:
+            try:
+                await handler(data)
+                event["handlers_called"].append(handler.__name__)
+            except Exception as e:
+                self.logger.error(f"Error in handler {handler.__name__}: {e}")
+                
+        self.event_history.append(event)
+        
+        # Ограничиваем историю
+        if len(self.event_history) > 1000:
+            self.event_history = self.event_history[-1000:]
+            
+    def get_event_stats(self) -> Dict[str, Any]:
+        """Статистика событий"""
+        stats = defaultdict(int)
+        for event in self.event_history:
+            stats[event["type"]] += 1
+            
+        return {
+            "total_events": len(self.event_history),
+            "event_types": dict(stats),
+            "subscribers": {k: len(v) for k, v in self.subscribers.items()}
+        }
+
+# Глобальная шина событий
+event_bus = EventBus()
+
+# Регистрация обработчиков
+event_bus.subscribe("plan_created", memory_manager.handle_plan_created)
+event_bus.subscribe("task_completed", task_executor.handle_completion)
+event_bus.subscribe("error_occurred", monitoring.handle_error)
+```
+
 ## 🎯 Заключение
 
-Текущая реализация песочницы имеет серьезные проблемы безопасности, которые необходимо устранить в первую очередь. После исправления критических уязвимостей следует сосредоточиться на улучшении архитектуры и пользовательского опыта.
+Для создания полноценного самосознающего бота Марка необходимо:
 
-Предложенный план действий позволит создать безопасную, масштабируемую и удобную систему для выполнения кода в изолированной среде.
+1. **Исправить критические проблемы безопасности песочницы** (2-3 часа)
+2. **Реализовать систему планирования с сохранением в памяти** (4-5 часов)
+3. **Создать Event Bus для связи всех компонентов** (3-4 часа)
+4. **Расширить самосознание для анализа кода и ошибок** (5-6 часов)
+5. **Интегрировать все компоненты через единую архитектуру** (1 неделя)
+
+Предложенный план позволит создать:
+- **Безопасную** систему выполнения кода
+- **Интегрированную** архитектуру без изолированных модулей
+- **Самосознающего** бота, понимающего свою структуру
+- **Планирующего** ассистента с долговременной памятью
+
+Общее время реализации: ~2-3 недели при полной занятости.
