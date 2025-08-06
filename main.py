@@ -593,6 +593,60 @@ async def get_event_history(
         return {"error": "EventBus не инициализирован"}
 
 
+@app.get("/self/architecture", tags=["self-awareness"])
+async def get_architecture():
+    """
+    Получить анализ архитектуры системы
+    
+    Возвращает информацию о компонентах, интеграциях и здоровье системы.
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        return awareness.analyze_architecture()
+    except Exception as e:
+        logger.error(f"Ошибка анализа архитектуры: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/self/improvements", tags=["self-awareness"])
+async def get_improvements():
+    """
+    Получить предложения по улучшению системы
+    
+    Возвращает список предложений с приоритетами.
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        improvements = awareness.suggest_improvements()
+        return {
+            "improvements": improvements,
+            "total": len(improvements)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения улучшений: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/self/analyze-code", tags=["self-awareness"])
+async def analyze_code(file_path: str):
+    """
+    Анализировать код файла
+    
+    Параметры:
+    - file_path: путь к файлу для анализа
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        analysis = awareness.analyze_code(file_path)
+        return analysis
+    except Exception as e:
+        logger.error(f"Ошибка анализа кода: {e}")
+        return {"error": str(e)}
+
+
 @app.get("/ping", tags=["health"])
 def ping():
     """

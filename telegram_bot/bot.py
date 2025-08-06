@@ -963,6 +963,149 @@ async def memory_update_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"⚠️ Ошибка memory_update: {e}")
 
 
+async def diagnose_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /diagnose - диагностика последней ошибки"""
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        # Получаем последнюю ошибку из истории
+        if not awareness.error_history:
+            await update.message.reply_text("✅ Нет ошибок в истории для диагностики")
+            return
+            
+        # Берем последнюю ошибку
+        last_diagnosis = awareness.error_history[-1]
+        
+        # Формируем отчет
+        report = f"🔧 *Диагностика ошибки*\n\n"
+        report += f"*Тип*: `{last_diagnosis.error_type}`\n"
+        report += f"*Сообщение*: {last_diagnosis.error_message}\n"
+        report += f"*Серьезность*: {last_diagnosis.severity}\n\n"
+        
+        if last_diagnosis.possible_causes:
+            report += "*Возможные причины:*\n"
+            for cause in last_diagnosis.possible_causes:
+                report += f"• {cause}\n"
+            report += "\n"
+            
+        if last_diagnosis.suggested_fixes:
+            report += "*Предлагаемые решения:*\n"
+            for fix in last_diagnosis.suggested_fixes:
+                report += f"• {fix}\n"
+            report += "\n"
+            
+        if last_diagnosis.related_components:
+            report += "*Связанные компоненты:*\n"
+            for comp in last_diagnosis.related_components[:5]:
+                report += f"• `{comp}`\n"
+                
+        await update.message.reply_text(report, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка diagnose: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка диагностики: {e}")
+
+
+async def analyze_code_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /analyze_code <file_path> - анализ кода файла"""
+    if not context.args:
+        await update.message.reply_text(
+            "📝 Использование: `/analyze_code <путь_к_файлу>`\n"
+            "Пример: `/analyze_code sandbox/sandbox_manager.py`",
+            parse_mode='Markdown'
+        )
+        return
+        
+    file_path = ' '.join(context.args)
+    
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        analysis = awareness.analyze_code(file_path)
+        
+        if not analysis["exists"]:
+            await update.message.reply_text(f"❌ Файл не найден: `{file_path}`", parse_mode='Markdown')
+            return
+            
+        # Формируем отчет
+        report = f"📝 *Анализ кода*: `{file_path}`\n\n"
+        report += f"*Тип*: {analysis['type']}\n"
+        
+        if analysis['metrics']:
+            report += "\n*Метрики:*\n"
+            report += f"• Строк: {analysis['metrics'].get('lines', 0)}\n"
+            if analysis['type'] == 'python':
+                report += f"• Классов: {analysis['metrics'].get('classes', 0)}\n"
+                report += f"• Функций: {analysis['metrics'].get('functions', 0)}\n"
+                report += f"• Сложность: {analysis['metrics'].get('complexity', 0)}\n"
+                
+        if analysis['issues']:
+            report += "\n⚠️ *Проблемы:*\n"
+            for issue in analysis['issues']:
+                report += f"• {issue}\n"
+                
+        if analysis['suggestions']:
+            report += "\n💡 *Рекомендации:*\n"
+            for suggestion in analysis['suggestions']:
+                report += f"• {suggestion}\n"
+                
+        await update.message.reply_text(report[:4000], parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка analyze_code: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка анализа: {e}")
+
+
+async def capabilities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /capabilities - показать возможности системы"""
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        if context.args:
+            # Детали конкретной возможности
+            capability = ' '.join(context.args)
+            details = awareness.get_capability_details(capability)
+            
+            report = f"🛠️ *Возможность*: {capability}\n\n"
+            report += f"*Доступна*: {'✅ Да' if details['available'] else '❌ Нет'}\n\n"
+            
+            if details['components']:
+                report += "*Компоненты:*\n"
+                for comp in details['components']:
+                    status_emoji = "✅" if comp['status'] == "active" else "❌"
+                    report += f"{status_emoji} `{comp['name']}`\n"
+                report += "\n"
+                
+            if details['usage_examples']:
+                report += "*Примеры использования:*\n"
+                for example in details['usage_examples']:
+                    report += f"• {example}\n"
+                report += "\n"
+                
+            if details['limitations']:
+                report += "*Ограничения:*\n"
+                for limitation in details['limitations']:
+                    report += f"• {limitation}\n"
+                    
+        else:
+            # Список всех возможностей
+            report = "🛠️ *Доступные возможности*\n\n"
+            for cap in awareness.capabilities:
+                report += f"• `{cap}`\n"
+            report += "\n💡 Используйте `/capabilities <название>` для деталей"
+            
+        await update.message.reply_text(report, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка capabilities: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка: {e}")
+
+
 async def memory_delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         args = context.args
@@ -988,16 +1131,48 @@ async def memory_analyze_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
 async def self_analyze_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """Команда /self_analyze - генерирует отчёт о состоянии системы"""
     try:
-        analyzer = SelfAnalyzer()
-        analysis = analyzer.get_analysis()
-
-        # Разбиваем длинный отчёт на части по 4000 символов (лимит Telegram)
-        chunks = [analysis[i : i + 4000] for i in range(0, len(analysis), 4000)]
+        # Используем расширенный модуль самосознания
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        # Получаем описание
+        description = awareness.get_self_description()
+        
+        # Анализируем архитектуру
+        architecture = awareness.analyze_architecture()
+        
+        # Получаем предложения по улучшению
+        improvements = awareness.suggest_improvements()
+        
+        # Формируем отчет
+        report = f"🤖 *Самоанализ системы Mark*\n\n"
+        report += description + "\n\n"
+        
+        report += "📊 *Архитектура*\n"
+        report += f"Здоровье системы: {architecture['health_status']['score']}% ({architecture['health_status']['status']})\n"
+        report += f"Компонентов: {architecture['health_status']['components']['total']} "
+        report += f"(активных: {architecture['health_status']['components']['active']})\n\n"
+        
+        # Топ зависимости
+        report += "🔗 *Основные зависимости*\n"
+        for dep, count in list(architecture['dependencies'].items())[:5]:
+            report += f"• {dep}: используется {count} раз\n"
+        
+        # Предложения по улучшению
+        if improvements:
+            report += "\n💡 *Предложения по улучшению*\n"
+            for imp in improvements[:5]:  # Первые 5
+                emoji = "🔴" if imp['priority'] == "high" else "🟡" if imp['priority'] == "medium" else "🟢"
+                report += f"{emoji} {imp['issue']} → {imp['suggestion']}\n"
+        
+        # Разбиваем на части если слишком длинный
+        chunks = [report[i : i + 4000] for i in range(0, len(report), 4000)]
 
         for i, chunk in enumerate(chunks):
             if i == 0:
                 await update.message.reply_text(
-                    f"📊 *Отчёт о состоянии системы*\n\n{chunk}",
+                    chunk,
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
             else:
@@ -1140,6 +1315,24 @@ COMMANDS_REGISTRY = [
             "что можешь",
         ],
         "action": send_help_message,
+    },
+    {
+        "name": "/diagnose",
+        "description": "Диагностика последней ошибки в системе",
+        "triggers": ["диагностика", "diagnose", "/diagnose"],
+        "action": diagnose_cmd,
+    },
+    {
+        "name": "/analyze_code",
+        "description": "Анализ кода файла: /analyze_code <путь>",
+        "triggers": ["анализ кода", "analyze code", "/analyze_code"],
+        "action": analyze_code_cmd,
+    },
+    {
+        "name": "/capabilities",
+        "description": "Показать возможности системы",
+        "triggers": ["возможности системы", "capabilities", "/capabilities"],
+        "action": capabilities_cmd,
     },
     {
         "name": "/update_passport",
@@ -1288,7 +1481,10 @@ def main() -> None:
     application.add_handler(CommandHandler("selfcheck", selfcheck_cmd))
     application.add_handler(CommandHandler("update_passport", update_passport_cmd))
     application.add_handler(
-        CommandHandler("self_analyze", self_analyze_cmd)
+                    CommandHandler("self_analyze", self_analyze_cmd),
+            CommandHandler("diagnose", diagnose_cmd),
+            CommandHandler("analyze_code", analyze_code_cmd),
+            CommandHandler("capabilities", capabilities_cmd)
     )  # Добавляем новый обработчик
 
     # Регистрируем обработчики команд памяти
