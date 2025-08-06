@@ -16,109 +16,20 @@
   "memory": {
     "types": [
       {
-        "name": "Memory",
-        "description": "Диалоговая память — хранит сообщения пользователя и ассистента.",
-        "storage": "Weaviate",
+        "name": "Episodes",
+        "description": "Универсальная память — хранит все события, диалоги, опыт и инсайты в едином графе знаний.",
+        "storage": "GraphitiMemory (Neo4j)",
         "api": [
-          "insert",
-          "search",
-          "update",
-          "delete"
+          "create_episode",
+          "search_episodes",
+          "update_episode",
+          "delete_episode"
         ],
         "scenarios": [
-          "Сохранение истории диалогов",
-          "Поиск по истории",
-          "Обновление и удаление сообщений"
-        ]
-      },
-      {
-        "name": "Experience",
-        "description": "Опыт — важные случаи, инсайты, выводы.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search",
-          "update",
-          "delete"
-        ],
-        "scenarios": [
-          "Сохранение опыта",
-          "Поиск инсайтов",
-          "Обновление и удаление опыта"
-        ]
-      },
-      {
-        "name": "Insight",
-        "description": "Инсайты — ключевые выводы и обобщения.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search",
-          "update",
-          "delete"
-        ],
-        "scenarios": [
-          "Добавление инсайта",
-          "Поиск инсайтов",
-          "Обновление и удаление инсайтов"
-        ]
-      },
-      {
-        "name": "Persona",
-        "description": "Персонажи и их характеристики.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search"
-        ],
-        "scenarios": [
-          "Добавление персонажа",
-          "Поиск персонажей"
-        ]
-      },
-      {
-        "name": "UserFacts",
-        "description": "Факты о пользователе — имя, предпочтения и т.д.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search",
-          "update",
-          "delete"
-        ],
-        "scenarios": [
-          "Добавление факта",
-          "Поиск фактов",
-          "Обновление и удаление фактов"
-        ]
-      },
-      {
-        "name": "ChatGPTMemory",
-        "description": "Память для retrieval-блока ChatGPT.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search",
-          "update",
-          "delete"
-        ],
-        "scenarios": [
-          "Сохранение retrieval-данных",
-          "Поиск",
-          "Обновление и удаление"
-        ]
-      },
-      {
-        "name": "Document",
-        "description": "Документы и их содержимое.",
-        "storage": "Weaviate",
-        "api": [
-          "insert",
-          "search"
-        ],
-        "scenarios": [
-          "Добавление документа",
-          "Поиск по документам"
+          "Сохранение любых событий и диалогов",
+          "Векторный поиск по содержанию",
+          "Построение связей между воспоминаниями",
+          "Анализ паттернов и трендов"
         ]
       }
     ],

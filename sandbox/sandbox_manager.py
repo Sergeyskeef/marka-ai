@@ -7,9 +7,17 @@ import logging
 import shlex
 import os
 import ast
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+
+# Импортируем Event Bus
+try:
+    from core.event_bus import event_bus, EventTypes
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,38 @@ class SandboxManager:
         self.default_timeout = 30
         self.default_max_output = 1024 * 1024  # 1MB
         
+        # Белый список разрешенных shell команд
+        self.allowed_shell_commands = {
+            'echo', 'printf', 'date', 'pwd', 'whoami',
+            'ls', 'dir', 'find', 'grep', 'sed', 'awk',
+            'sort', 'uniq', 'wc', 'head', 'tail', 'cat',
+            'python', 'python3', 'pip', 'pip3', 'npm', 'node',
+            'git', 'curl', 'wget',  # для загрузки зависимостей
+            'mkdir', 'touch', 'mv', 'cp', 'rm',  # файловые операции
+            'cd', 'export', 'source',  # навигация
+        }
+        
+        # Опасные паттерны в командах
+        self.dangerous_patterns = [
+            r'rm\s+-rf\s+/',  # rm -rf /
+            r'rm\s+.*\s+/',   # rm что-то /
+            r'>\s*/dev/.*',   # перенаправление в /dev/
+            r'/etc/passwd',   # системные файлы
+            r'/etc/shadow',
+            r'sudo\s+',       # повышение привилегий
+            r'su\s+',
+            r'chmod\s+777',   # опасные права
+            r'docker\s+',     # управление контейнерами
+            r'systemctl',     # управление сервисами
+            r'service\s+',
+            r'kill\s+-9',     # убийство процессов
+            r'pkill',
+            r'nc\s+-l',       # сетевые утилиты
+            r'nmap',
+            r'telnet',
+            r'ssh\s+',
+        ]
+        
         # Список заблокированных модулей Python
         self.default_blocked_modules = [
             "os.system",
@@ -59,10 +99,21 @@ class SandboxManager:
         
         # Список опасных AST узлов
         self.dangerous_ast_nodes = {
-            'Import': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__'],
-            'ImportFrom': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__'],
-            'Call': ['eval', 'exec', 'compile', '__import__', 'open', 'file', 'input', 'raw_input']
+            'Import': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__',
+                      'socket', 'urllib', 'urllib2', 'urllib3', 'requests', 'httpx', 'aiohttp'],
+            'ImportFrom': ['os', 'sys', 'subprocess', 'importlib', '__builtin__', '__builtins__',
+                          'socket', 'urllib', 'urllib2', 'urllib3', 'requests', 'httpx', 'aiohttp'],
+            'Call': ['eval', 'exec', 'compile', '__import__', 'open', 'file', 'input', 'raw_input',
+                    'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars']
         }
+        
+        # Сетевые модули для блокировки
+        self.network_modules = {'socket', 'urllib', 'urllib2', 'urllib3', 'requests', 'httpx', 'aiohttp'}
+        
+        # Опасные встроенные функции
+        self.dangerous_builtins = {'eval', 'exec', 'compile', '__import__', 
+                                  'getattr', 'setattr', 'delattr', 
+                                  'globals', 'locals', 'vars'}
 
         # Создаем песочницу по умолчанию
         # Используем текущую директорию если /sandbox не существует
@@ -70,7 +121,33 @@ class SandboxManager:
         os.makedirs(sandbox_dir, exist_ok=True)
         self.create_sandbox("default", sandbox_dir)
 
-        logger.info("✅ SandboxManager инициализирован")
+        logger.info("✅ SandboxManager инициализирован с улучшенной безопасностью")
+
+    def _check_shell_command(self, command: str) -> str | None:
+        """Проверка shell команд на безопасность"""
+        try:
+            cmd_parts = shlex.split(command)
+            if not cmd_parts:
+                return "Пустая команда"
+                
+            base_cmd = cmd_parts[0]
+            
+            # Для путей типа /usr/bin/python берем последнюю часть
+            if '/' in base_cmd:
+                base_cmd = base_cmd.split('/')[-1]
+            
+            # Проверяем белый список
+            if base_cmd not in self.allowed_shell_commands:
+                return f"Команда '{base_cmd}' не в белом списке разрешенных команд"
+                
+            # Проверяем опасные паттерны
+            for pattern in self.dangerous_patterns:
+                if re.search(pattern, command, re.IGNORECASE):
+                    return f"Обнаружен опасный паттерн: {pattern}"
+                    
+            return None
+        except Exception as e:
+            return f"Ошибка парсинга команды: {str(e)}"
 
     def create_sandbox(self, sandbox_id: str, working_dir: str, **kwargs) -> Sandbox:
         """Создает новую песочницу"""
@@ -127,10 +204,16 @@ class SandboxManager:
                     for alias in node.names:
                         if alias.name in self.dangerous_ast_nodes.get('Import', []):
                             return f"Заблокирован импорт модуля: {alias.name}"
+                        # Проверяем сетевые модули
+                        if alias.name in self.network_modules:
+                            return f"Заблокирован сетевой модуль: {alias.name}"
                 
                 elif isinstance(node, ast.ImportFrom):
                     if node.module and node.module in self.dangerous_ast_nodes.get('ImportFrom', []):
                         return f"Заблокирован импорт из модуля: {node.module}"
+                    # Проверяем сетевые модули
+                    if node.module and node.module in self.network_modules:
+                        return f"Заблокирован сетевой модуль: {node.module}"
                 
                 # Проверяем вызовы функций
                 elif isinstance(node, ast.Call):
@@ -138,6 +221,9 @@ class SandboxManager:
                     if isinstance(node.func, ast.Name):
                         if node.func.id in self.dangerous_ast_nodes.get('Call', []):
                             return f"Заблокирован вызов функции: {node.func.id}"
+                        # Проверяем опасные встроенные функции
+                        if node.func.id in self.dangerous_builtins:
+                            return f"Заблокирована встроенная функция: {node.func.id}"
                     
                     # Проверяем вызовы атрибутов (например, os.system)
                     elif isinstance(node.func, ast.Attribute):
@@ -185,7 +271,33 @@ class SandboxManager:
         start_time = datetime.now()
 
         try:
-            # Проверяем на опасные операции
+            # Проверяем shell команды на безопасность
+            if not command.startswith("python"):
+                shell_error = self._check_shell_command(command)
+                if shell_error:
+                    result = CommandResult(
+                        success=False,
+                        output="",
+                        error=shell_error,
+                        command=command,
+                        execution_time=(datetime.now() - start_time).total_seconds()
+                    )
+                    
+                    # Публикуем событие о блокировке
+                    if EVENT_BUS_AVAILABLE:
+                        asyncio.create_task(event_bus.publish(
+                            EventTypes.SANDBOX_BLOCKED,
+                            {
+                                "command": command,
+                                "reason": shell_error,
+                                "sandbox_id": sandbox_id
+                            },
+                            source="SandboxManager"
+                        ))
+                    
+                    return result
+            
+            # Проверяем на опасные операции (Python код)
             danger_check = self._check_dangerous_code(command, sandbox)
             if danger_check:
                 return CommandResult(
@@ -255,6 +367,21 @@ class SandboxManager:
             self.command_history.append(result)
 
             logger.info(f"🔧 Команда выполнена: {command} (код: {process.returncode}, время: {execution_time:.2f}с)")
+
+            # Публикуем событие об успешном выполнении
+            if EVENT_BUS_AVAILABLE:
+                asyncio.create_task(event_bus.publish(
+                    EventTypes.SANDBOX_EXECUTED,
+                    {
+                        "command": command,
+                        "sandbox_id": sandbox_id,
+                        "success": result.success,
+                        "return_code": process.returncode,
+                        "execution_time": execution_time,
+                        "output_size": len(result.output)
+                    },
+                    source="SandboxManager"
+                ))
 
             return result
 

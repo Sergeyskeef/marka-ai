@@ -159,6 +159,115 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             # TODO: Implement retry logic
         elif action == "clarify":
             await query.edit_message_text("📝 Пожалуйста, уточните ваш вопрос:")
+    
+    elif data.startswith("plan:"):
+        await handle_plan_callback(query, context)
+
+
+async def handle_plan_callback(query, context):
+    """Обработчик действий с планами"""
+    data_parts = query.data.split(":")
+    if len(data_parts) < 2:
+        return
+        
+    action = data_parts[1]
+    
+    if action == "template":
+        # Шаблоны планов
+        if len(data_parts) >= 3:
+            template = data_parts[2]
+            templates = {
+                "code": "написать скрипт на Python для парсинга веб-страниц",
+                "fix": "найти и исправить ошибку в коде",
+                "learn": "изучить новую технологию или framework",
+                "project": "создать новый проект с нуля"
+            }
+            
+            goal = templates.get(template, "выполнить задачу")
+            # Эмулируем вызов команды с аргументами
+            context.args = goal.split()
+            await query.message.delete()
+            
+            # Создаем новое сообщение от имени пользователя
+            fake_update = type('obj', (object,), {
+                'message': type('obj', (object,), {
+                    'reply_text': query.message.reply_text,
+                    'from_user': query.from_user,
+                    'chat': query.message.chat
+                }),
+                'effective_user': query.from_user,
+                'effective_chat': query.message.chat
+            })
+            
+            await decompose_cmd(fake_update, context)
+            
+    elif action == "execute" and len(data_parts) >= 3:
+        plan_id = data_parts[2]
+        await query.edit_message_text("⚙️ Запускаю выполнение плана...")
+        
+        try:
+            response = await _post(f"/plan/{plan_id}/execute", {})
+            
+            if response.status_code == 200:
+                result = response.json()
+                text = f"✅ План выполнен!\n\n"
+                text += f"Выполнено задач: {result['completed_tasks']}/{result['total_tasks']}\n"
+                
+                if result.get('failed_tasks', 0) > 0:
+                    text += f"❌ Неудачных: {result['failed_tasks']}\n"
+                    
+                await query.edit_message_text(text)
+            else:
+                await query.edit_message_text("❌ Ошибка выполнения плана")
+        except Exception as e:
+            logger.error(f"Ошибка выполнения плана: {e}")
+            await query.edit_message_text("❌ Произошла ошибка")
+            
+    elif action == "status" and len(data_parts) >= 3:
+        plan_id = data_parts[2]
+        
+        try:
+            response = await _get(f"/plan/{plan_id}/status")
+            
+            if response.status_code == 200:
+                status = response.json()
+                
+                text = f"📊 *Статус плана*\n\n"
+                text += f"Цель: {status['goal']}\n"
+                text += f"Статус: {status['status']}\n"
+                text += f"Прогресс: {status['progress']['completed']}/{status['progress']['total']} "
+                text += f"({status['progress']['percentage']}%)\n"
+                text += f"Осталось времени: ~{status['estimated_time_remaining']} мин\n\n"
+                
+                text += "*Подзадачи:*\n"
+                for i, task in enumerate(status['subtasks'], 1):
+                    emoji = "✅" if task['status'] == "completed" else "⏳" if task['status'] == "in_progress" else "📝"
+                    text += f"{emoji} {i}. {task['description']}\n"
+                    
+                await query.edit_message_text(text, parse_mode='Markdown')
+            else:
+                await query.edit_message_text("❌ План не найден")
+        except Exception as e:
+            logger.error(f"Ошибка получения статуса: {e}")
+            await query.edit_message_text("❌ Произошла ошибка")
+            
+    elif action == "save":
+        await query.edit_message_text("💾 План сохранен в памяти")
+        
+    elif action == "cancel":
+        await query.edit_message_text("❌ План отменен")
+
+
+async def _get(url: str) -> httpx.Response:
+    """HTTP GET запрос"""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT)) as client:
+            r = await client.get(APP_HOST + url)
+            r.raise_for_status()
+            return r
+    except Exception as e:
+        logger.error(f"HTTP GET ошибка: {e}")
+        raise
 
 
 async def _post(url: str, payload: dict | None = None) -> httpx.Response:
@@ -493,7 +602,83 @@ async def approve_cmd(update, context):
 
 
 async def decompose_cmd(update, context):
-    await update.message.reply_text("Декомпозиция задачи: ... (пример)")
+    """Создает план выполнения задачи"""
+    if not context.args:
+        keyboard = [
+            [InlineKeyboardButton("📝 Написать код", callback_data="plan:template:code")],
+            [InlineKeyboardButton("🔧 Исправить баг", callback_data="plan:template:fix")],
+            [InlineKeyboardButton("📚 Изучить тему", callback_data="plan:template:learn")],
+            [InlineKeyboardButton("🏗️ Создать проект", callback_data="plan:template:project")]
+        ]
+        await update.message.reply_text(
+            "🎯 *Планирование задачи*\n\n"
+            "Опишите цель, которую хотите достичь, или выберите шаблон:\n\n"
+            "Пример: `декомпозируй написать REST API на FastAPI`",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return
+    
+    goal = ' '.join(context.args)
+    
+    # Показываем процесс
+    status_msg = await update.message.reply_text("🤔 Анализирую задачу и создаю план...")
+    
+    try:
+        # Создаем план через API
+        response = await _post("/plan/create", {
+            "goal": goal,
+            "user_id": str(update.effective_user.id) if update.effective_user else None,
+            "chat_id": str(update.effective_chat.id) if update.effective_chat else None
+        })
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                plan = data["plan"]
+                
+                # Форматируем план
+                text = f"📋 *План выполнения*\n\n"
+                text += f"🎯 *Цель:* {plan['goal']}\n"
+                text += f"⏱️ *Время:* ~{int(plan['estimated_duration_minutes'])} мин\n"
+                text += f"📊 *Этапов:* {len(plan['subtasks'])}\n\n"
+                
+                for i, task in enumerate(plan['subtasks'], 1):
+                    text += f"*{i}.* {task['description']}\n"
+                    text += f"   ⏱️ ~{task['estimated_time_minutes']} мин\n"
+                    if task['dependencies']:
+                        deps = [str(int(d)+1) for d in task['dependencies'] if d.isdigit()]
+                        if deps:
+                            text += f"   🔗 Зависит от: {', '.join(deps)}\n"
+                    if task['tool_required']:
+                        text += f"   🔧 Инструмент: `{task['tool_required']}`\n"
+                    text += "\n"
+                
+                # Кнопки управления планом
+                keyboard = [
+                    [
+                        InlineKeyboardButton("▶️ Выполнить", callback_data=f"plan:execute:{plan['id']}"),
+                        InlineKeyboardButton("📊 Статус", callback_data=f"plan:status:{plan['id']}")
+                    ],
+                    [
+                        InlineKeyboardButton("💾 Сохранить", callback_data=f"plan:save:{plan['id']}"),
+                        InlineKeyboardButton("❌ Отменить", callback_data=f"plan:cancel:{plan['id']}")
+                    ]
+                ]
+                
+                await status_msg.edit_text(
+                    text[:4000],  # Telegram limit
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await status_msg.edit_text(f"❌ Ошибка: {data.get('error', 'Неизвестная ошибка')}")
+        else:
+            await status_msg.edit_text("❌ Ошибка при создании плана")
+            
+    except Exception as e:
+        logger.error(f"Ошибка команды decompose: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка при создании плана")
 
 
 async def pytest_cmd(update, context):
@@ -778,6 +963,149 @@ async def memory_update_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"⚠️ Ошибка memory_update: {e}")
 
 
+async def diagnose_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /diagnose - диагностика последней ошибки"""
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        # Получаем последнюю ошибку из истории
+        if not awareness.error_history:
+            await update.message.reply_text("✅ Нет ошибок в истории для диагностики")
+            return
+            
+        # Берем последнюю ошибку
+        last_diagnosis = awareness.error_history[-1]
+        
+        # Формируем отчет
+        report = f"🔧 *Диагностика ошибки*\n\n"
+        report += f"*Тип*: `{last_diagnosis.error_type}`\n"
+        report += f"*Сообщение*: {last_diagnosis.error_message}\n"
+        report += f"*Серьезность*: {last_diagnosis.severity}\n\n"
+        
+        if last_diagnosis.possible_causes:
+            report += "*Возможные причины:*\n"
+            for cause in last_diagnosis.possible_causes:
+                report += f"• {cause}\n"
+            report += "\n"
+            
+        if last_diagnosis.suggested_fixes:
+            report += "*Предлагаемые решения:*\n"
+            for fix in last_diagnosis.suggested_fixes:
+                report += f"• {fix}\n"
+            report += "\n"
+            
+        if last_diagnosis.related_components:
+            report += "*Связанные компоненты:*\n"
+            for comp in last_diagnosis.related_components[:5]:
+                report += f"• `{comp}`\n"
+                
+        await update.message.reply_text(report, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка diagnose: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка диагностики: {e}")
+
+
+async def analyze_code_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /analyze_code <file_path> - анализ кода файла"""
+    if not context.args:
+        await update.message.reply_text(
+            "📝 Использование: `/analyze_code <путь_к_файлу>`\n"
+            "Пример: `/analyze_code sandbox/sandbox_manager.py`",
+            parse_mode='Markdown'
+        )
+        return
+        
+    file_path = ' '.join(context.args)
+    
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        analysis = awareness.analyze_code(file_path)
+        
+        if not analysis["exists"]:
+            await update.message.reply_text(f"❌ Файл не найден: `{file_path}`", parse_mode='Markdown')
+            return
+            
+        # Формируем отчет
+        report = f"📝 *Анализ кода*: `{file_path}`\n\n"
+        report += f"*Тип*: {analysis['type']}\n"
+        
+        if analysis['metrics']:
+            report += "\n*Метрики:*\n"
+            report += f"• Строк: {analysis['metrics'].get('lines', 0)}\n"
+            if analysis['type'] == 'python':
+                report += f"• Классов: {analysis['metrics'].get('classes', 0)}\n"
+                report += f"• Функций: {analysis['metrics'].get('functions', 0)}\n"
+                report += f"• Сложность: {analysis['metrics'].get('complexity', 0)}\n"
+                
+        if analysis['issues']:
+            report += "\n⚠️ *Проблемы:*\n"
+            for issue in analysis['issues']:
+                report += f"• {issue}\n"
+                
+        if analysis['suggestions']:
+            report += "\n💡 *Рекомендации:*\n"
+            for suggestion in analysis['suggestions']:
+                report += f"• {suggestion}\n"
+                
+        await update.message.reply_text(report[:4000], parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка analyze_code: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка анализа: {e}")
+
+
+async def capabilities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /capabilities - показать возможности системы"""
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        if context.args:
+            # Детали конкретной возможности
+            capability = ' '.join(context.args)
+            details = awareness.get_capability_details(capability)
+            
+            report = f"🛠️ *Возможность*: {capability}\n\n"
+            report += f"*Доступна*: {'✅ Да' if details['available'] else '❌ Нет'}\n\n"
+            
+            if details['components']:
+                report += "*Компоненты:*\n"
+                for comp in details['components']:
+                    status_emoji = "✅" if comp['status'] == "active" else "❌"
+                    report += f"{status_emoji} `{comp['name']}`\n"
+                report += "\n"
+                
+            if details['usage_examples']:
+                report += "*Примеры использования:*\n"
+                for example in details['usage_examples']:
+                    report += f"• {example}\n"
+                report += "\n"
+                
+            if details['limitations']:
+                report += "*Ограничения:*\n"
+                for limitation in details['limitations']:
+                    report += f"• {limitation}\n"
+                    
+        else:
+            # Список всех возможностей
+            report = "🛠️ *Доступные возможности*\n\n"
+            for cap in awareness.capabilities:
+                report += f"• `{cap}`\n"
+            report += "\n💡 Используйте `/capabilities <название>` для деталей"
+            
+        await update.message.reply_text(report, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Ошибка capabilities: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка: {e}")
+
+
 async def memory_delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         args = context.args
@@ -803,16 +1131,48 @@ async def memory_analyze_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
 async def self_analyze_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """Команда /self_analyze - генерирует отчёт о состоянии системы"""
     try:
-        analyzer = SelfAnalyzer()
-        analysis = analyzer.get_analysis()
-
-        # Разбиваем длинный отчёт на части по 4000 символов (лимит Telegram)
-        chunks = [analysis[i : i + 4000] for i in range(0, len(analysis), 4000)]
+        # Используем расширенный модуль самосознания
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        
+        awareness = MarkSelfAwareness()
+        
+        # Получаем описание
+        description = awareness.get_self_description()
+        
+        # Анализируем архитектуру
+        architecture = awareness.analyze_architecture()
+        
+        # Получаем предложения по улучшению
+        improvements = awareness.suggest_improvements()
+        
+        # Формируем отчет
+        report = f"🤖 *Самоанализ системы Mark*\n\n"
+        report += description + "\n\n"
+        
+        report += "📊 *Архитектура*\n"
+        report += f"Здоровье системы: {architecture['health_status']['score']}% ({architecture['health_status']['status']})\n"
+        report += f"Компонентов: {architecture['health_status']['components']['total']} "
+        report += f"(активных: {architecture['health_status']['components']['active']})\n\n"
+        
+        # Топ зависимости
+        report += "🔗 *Основные зависимости*\n"
+        for dep, count in list(architecture['dependencies'].items())[:5]:
+            report += f"• {dep}: используется {count} раз\n"
+        
+        # Предложения по улучшению
+        if improvements:
+            report += "\n💡 *Предложения по улучшению*\n"
+            for imp in improvements[:5]:  # Первые 5
+                emoji = "🔴" if imp['priority'] == "high" else "🟡" if imp['priority'] == "medium" else "🟢"
+                report += f"{emoji} {imp['issue']} → {imp['suggestion']}\n"
+        
+        # Разбиваем на части если слишком длинный
+        chunks = [report[i : i + 4000] for i in range(0, len(report), 4000)]
 
         for i, chunk in enumerate(chunks):
             if i == 0:
                 await update.message.reply_text(
-                    f"📊 *Отчёт о состоянии системы*\n\n{chunk}",
+                    chunk,
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
             else:
@@ -957,6 +1317,24 @@ COMMANDS_REGISTRY = [
         "action": send_help_message,
     },
     {
+        "name": "/diagnose",
+        "description": "Диагностика последней ошибки в системе",
+        "triggers": ["диагностика", "diagnose", "/diagnose"],
+        "action": diagnose_cmd,
+    },
+    {
+        "name": "/analyze_code",
+        "description": "Анализ кода файла: /analyze_code <путь>",
+        "triggers": ["анализ кода", "analyze code", "/analyze_code"],
+        "action": analyze_code_cmd,
+    },
+    {
+        "name": "/capabilities",
+        "description": "Показать возможности системы",
+        "triggers": ["возможности системы", "capabilities", "/capabilities"],
+        "action": capabilities_cmd,
+    },
+    {
         "name": "/update_passport",
         "description": "Обновить паспорт Марка",
         "triggers": ["обнови паспорт", "/update_passport"],
@@ -972,13 +1350,7 @@ COMMANDS_REGISTRY = [
         "name": "code_mode",
         "description": "Переключить в режим выполнения кода",
         "triggers": ["👨‍💻 code", "code mode", "/code"],
-        "action": lambda update, context: update.message.reply_text(
-            "🖥️ Режим Code активирован!\n\n"
-            "Теперь я буду выполнять код:\n"
-            "• Python: `print(342*100)`\n"
-            "• Shell: `!ls -la`\n"
-            "• Или используйте /run_code"
-        ),
+        "action": run_code_cmd,
     },
     {
         "name": "/run_code",
@@ -1109,7 +1481,10 @@ def main() -> None:
     application.add_handler(CommandHandler("selfcheck", selfcheck_cmd))
     application.add_handler(CommandHandler("update_passport", update_passport_cmd))
     application.add_handler(
-        CommandHandler("self_analyze", self_analyze_cmd)
+                    CommandHandler("self_analyze", self_analyze_cmd),
+            CommandHandler("diagnose", diagnose_cmd),
+            CommandHandler("analyze_code", analyze_code_cmd),
+            CommandHandler("capabilities", capabilities_cmd)
     )  # Добавляем новый обработчик
 
     # Регистрируем обработчики команд памяти
@@ -1130,7 +1505,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_msg))
 
     # Регистрируем обработчик callback кнопок
-    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^(feedback:|pref:|menu:)"))
+    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^(feedback:|pref:|menu:|plan:)"))
 
     # Регистрируем обработчик ошибок
     application.add_error_handler(error_handler)

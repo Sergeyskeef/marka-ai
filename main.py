@@ -39,6 +39,7 @@ from langchain_api.routers.task_router import router as task_router
 from langchain_api.routes.trace_ui import router as trace_router
 from langchain_api.utils.toolkit import get_tools_for_agent, tool_registry
 from langchain_api.sandbox.sandbox_manager import SandboxManager
+from langchain_api.sandbox.task_planning_system import task_planner
 from langchain_api.core.middleware import MetricsMiddleware
 from langchain_api.middlewares.agents_trace import AgentsTraceMiddleware
 from langchain_api.core.metrics import metrics_manager
@@ -193,6 +194,20 @@ async def startup_event():
         task_executor_module.task_executor = _task_executor
 
         logger.info("TaskExecutor и SandboxManager успешно инициализированы")
+        
+        # Инициализация Event Monitor
+        try:
+            from langchain_api.core.event_monitor import event_monitor
+            logger.info("EventMonitor успешно инициализирован")
+            
+            # Публикуем событие о запуске системы
+            from langchain_api.core.event_bus import event_bus, EventTypes
+            await event_bus.publish(EventTypes.SYSTEM_STARTUP, {
+                "timestamp": time.time(),
+                "services": ["TaskExecutor", "SandboxManager", "EventMonitor"]
+            }, source="main")
+        except Exception as e:
+            logger.warning(f"EventMonitor не инициализирован: {e}")
 
     except Exception as e:
         logger.error(f"Ошибка при инициализации сервисов: {str(e)}")
@@ -264,6 +279,19 @@ class V1ChatResponse(BaseModel):
     answer: str = Field(..., description="Ответ от системы")
     chat_id: int | None = Field(None, description="ID чата")
     error: str | None = Field(None, description="Ошибка, если есть")
+
+
+class PlanRequest(BaseModel):
+    goal: str = Field(..., description="Цель для достижения")
+    user_id: str | None = Field(None, description="ID пользователя")
+    chat_id: str | None = Field(None, description="ID чата")
+    available_tools: list[str] | None = Field(None, description="Доступные инструменты")
+
+
+class PlanResponse(BaseModel):
+    success: bool = Field(..., description="Успешность создания плана")
+    plan: dict[str, Any] | None = Field(None, description="Созданный план")
+    error: str | None = Field(None, description="Сообщение об ошибке")
 
 # API эндпоинты с улучшенной документацией
 
@@ -441,6 +469,260 @@ async def sandbox_exec(request: SandboxExecRequest):
         execution_time=result.execution_time,
         returncode=result.return_code
     )
+
+
+# Planning endpoints
+@app.post("/plan/create", response_model=PlanResponse, tags=["planning"])
+async def create_plan(request: PlanRequest):
+    """
+    Создать план выполнения задачи
+    
+    План автоматически декомпозируется на подзадачи с помощью LLM.
+    Каждая подзадача содержит описание, оценку времени и зависимости.
+    """
+    try:
+        logger.info(f"Создание плана для цели: {request.goal[:100]}...")
+        
+        plan = await task_planner.create_plan(
+            goal=request.goal,
+            context={
+                "user_id": request.user_id,
+                "chat_id": request.chat_id,
+                "available_tools": request.available_tools or []
+            }
+        )
+        
+        return PlanResponse(
+            success=True,
+            plan=plan.to_dict()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания плана: {e}")
+        return PlanResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.get("/plan/{plan_id}/status", tags=["planning"])
+async def get_plan_status(plan_id: str):
+    """
+    Получить статус выполнения плана
+    
+    Возвращает текущий статус плана, прогресс выполнения и состояние подзадач.
+    """
+    status = task_planner.get_plan_status(plan_id)
+    
+    if "error" in status:
+        raise HTTPException(status_code=404, detail=status["error"])
+        
+    return status
+
+
+@app.post("/plan/{plan_id}/execute", tags=["planning"])
+async def execute_plan(plan_id: str):
+    """
+    Запустить выполнение плана
+    
+    Начинает выполнение всех подзадач плана с учетом их зависимостей.
+    """
+    result = await task_planner.execute_plan(plan_id)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Ошибка выполнения плана"))
+        
+    return result
+
+
+@app.get("/plan/list", tags=["planning"])
+async def list_plans(user_id: str | None = None):
+    """
+    Получить список всех планов
+    
+    Опционально можно фильтровать по user_id.
+    """
+    plans = await task_planner.get_all_plans(user_id)
+    return {"plans": plans, "total": len(plans)}
+
+
+@app.get("/events/stats", tags=["monitoring"])
+async def get_event_stats():
+    """
+    Получить статистику событий системы
+    
+    Возвращает счетчики событий, метрики производительности и последние ошибки.
+    """
+    try:
+        from langchain_api.core.event_monitor import event_monitor
+        return event_monitor.get_report()
+    except ImportError:
+        return {"error": "EventMonitor не инициализирован"}
+
+
+@app.get("/events/history", tags=["monitoring"])
+async def get_event_history(
+    event_type: str | None = None,
+    source: str | None = None,
+    limit: int = 50
+):
+    """
+    Получить историю событий
+    
+    Параметры:
+    - event_type: фильтр по типу события
+    - source: фильтр по источнику
+    - limit: максимальное количество событий
+    """
+    try:
+        from langchain_api.core.event_bus import event_bus
+        events = event_bus.get_history(event_type, source, limit)
+        return {
+            "events": [
+                {
+                    "type": e.type,
+                    "source": e.source,
+                    "timestamp": e.timestamp.isoformat(),
+                    "data": e.data
+                }
+                for e in events
+            ],
+            "total": len(events)
+        }
+    except ImportError:
+        return {"error": "EventBus не инициализирован"}
+
+
+@app.get("/self/architecture", tags=["self-awareness"])
+async def get_architecture():
+    """
+    Получить анализ архитектуры системы
+    
+    Возвращает информацию о компонентах, интеграциях и здоровье системы.
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        return awareness.analyze_architecture()
+    except Exception as e:
+        logger.error(f"Ошибка анализа архитектуры: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/self/improvements", tags=["self-awareness"])
+async def get_improvements():
+    """
+    Получить предложения по улучшению системы
+    
+    Возвращает список предложений с приоритетами.
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        improvements = awareness.suggest_improvements()
+        return {
+            "improvements": improvements,
+            "total": len(improvements)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения улучшений: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/self/analyze-code", tags=["self-awareness"])
+async def analyze_code(file_path: str):
+    """
+    Анализировать код файла
+    
+    Параметры:
+    - file_path: путь к файлу для анализа
+    """
+    try:
+        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        awareness = MarkSelfAwareness()
+        analysis = awareness.analyze_code(file_path)
+        return analysis
+    except Exception as e:
+        logger.error(f"Ошибка анализа кода: {e}")
+        return {"error": str(e)}
+
+
+# Webhook endpoints
+webhook_subscribers = []
+
+
+@app.post("/webhooks/subscribe", tags=["webhooks"])
+async def subscribe_webhook(url: str, events: list[str] = None):
+    """
+    Подписаться на события через webhook
+    
+    Параметры:
+    - url: URL для отправки событий
+    - events: список типов событий для подписки (если пусто - все события)
+    """
+    webhook = {
+        "url": url,
+        "events": events or ["*"],
+        "subscribed_at": datetime.now().isoformat()
+    }
+    webhook_subscribers.append(webhook)
+    logger.info(f"Webhook подписан: {url}")
+    return {"success": True, "message": "Webhook subscribed"}
+
+
+@app.delete("/webhooks/unsubscribe", tags=["webhooks"])
+async def unsubscribe_webhook(url: str):
+    """
+    Отписаться от webhook
+    
+    Параметры:
+    - url: URL для отписки
+    """
+    global webhook_subscribers
+    before = len(webhook_subscribers)
+    webhook_subscribers = [w for w in webhook_subscribers if w["url"] != url]
+    removed = before - len(webhook_subscribers)
+    
+    if removed > 0:
+        logger.info(f"Webhook отписан: {url}")
+        return {"success": True, "message": "Webhook unsubscribed"}
+    else:
+        return {"success": False, "message": "Webhook not found"}
+
+
+@app.get("/webhooks/list", tags=["webhooks"])
+async def list_webhooks():
+    """
+    Список активных webhooks
+    """
+    return {
+        "webhooks": webhook_subscribers,
+        "total": len(webhook_subscribers)
+    }
+
+
+async def send_webhook_event(event_type: str, data: dict):
+    """Отправка события всем подписанным webhooks"""
+    import httpx
+    
+    for webhook in webhook_subscribers:
+        # Проверяем, подписан ли webhook на этот тип события
+        if "*" in webhook["events"] or event_type in webhook["events"]:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        webhook["url"],
+                        json={
+                            "event": event_type,
+                            "data": data,
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        timeout=10.0
+                    )
+                logger.debug(f"Webhook отправлен на {webhook['url']}: {event_type}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки webhook на {webhook['url']}: {e}")
+
 
 @app.get("/ping", tags=["health"])
 def ping():
