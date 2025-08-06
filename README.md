@@ -282,13 +282,6 @@ marka-ai/
 - Минимальное требование: 50% покрытия кода
 - Отчеты в PR с результатами
 
-## 🤝 Вклад в проект
-
-1. Fork репозитория
-2. Создайте branch для фичи (`git checkout -b feature/amazing-feature`)
-3. Commit изменения (`git commit -m 'Add amazing feature'`)
-4. Push в branch (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
 
 ## 📝 Лицензия
 
