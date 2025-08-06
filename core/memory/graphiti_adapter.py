@@ -13,6 +13,13 @@ from core.memory.graphiti_cache import get_cache
 import asyncio
 import os
 
+# Импортируем Event Bus
+try:
+    from core.event_bus import event_bus, EventTypes
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -142,6 +149,20 @@ class GraphitiMemoryAdapter:
             if response.status_code == 201:  # Graphiti возвращает 201 для создания
                 response_data = response.json()
                 logger.info(f"✅ Эпизод создан в Graphiti: {text[:50]}...")
+                
+                # Публикуем событие о сохранении в память
+                if EVENT_BUS_AVAILABLE:
+                    asyncio.create_task(event_bus.publish(
+                        EventTypes.MEMORY_STORED,
+                        {
+                            "episode_id": node_id,
+                            "text_preview": text[:100],
+                            "metadata": metadata,
+                            "size": len(text)
+                        },
+                        source="GraphitiAdapter"
+                    ))
+                
                 return {"success": True, "id": node_id, "data": response_data}
             else:
                 error_text = response.text

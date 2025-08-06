@@ -16,6 +16,9 @@ from utils.openai_proxy_client import chat_model
 # Импортируем адаптер памяти
 from core.memory.graphiti_adapter import graphiti_adapter
 
+# Импортируем Event Bus
+from core.event_bus import event_bus, EventTypes
+
 logger = logging.getLogger(__name__)
 
 
@@ -191,6 +194,19 @@ class TaskPlanner:
             # Сохраняем в локальном кеше
             self.plans[plan.id] = plan
             
+            # Публикуем событие о создании плана
+            await event_bus.publish(
+                EventTypes.PLAN_CREATED,
+                {
+                    "plan_id": plan.id,
+                    "goal": plan.goal,
+                    "subtasks_count": len(plan.subtasks),
+                    "user_id": plan.user_id,
+                    "confidence_score": plan.confidence_score
+                },
+                source="TaskPlanner"
+            )
+            
             logger.info(f"✅ План создан: {plan.id}, подзадач: {len(subtasks)}")
             return plan
             
@@ -223,6 +239,18 @@ class TaskPlanner:
         
         # Обновляем в памяти
         await self._save_to_memory(plan)
+        
+        # Публикуем событие о выполнении плана
+        await event_bus.publish(
+            EventTypes.PLAN_EXECUTED,
+            {
+                "plan_id": plan_id,
+                "status": plan.status.value,
+                "completed_tasks": completed_tasks,
+                "total_tasks": len(plan.subtasks)
+            },
+            source="TaskPlanner"
+        )
         
         return {
             "success": True,

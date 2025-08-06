@@ -194,6 +194,20 @@ async def startup_event():
         task_executor_module.task_executor = _task_executor
 
         logger.info("TaskExecutor и SandboxManager успешно инициализированы")
+        
+        # Инициализация Event Monitor
+        try:
+            from langchain_api.core.event_monitor import event_monitor
+            logger.info("EventMonitor успешно инициализирован")
+            
+            # Публикуем событие о запуске системы
+            from langchain_api.core.event_bus import event_bus, EventTypes
+            await event_bus.publish(EventTypes.SYSTEM_STARTUP, {
+                "timestamp": time.time(),
+                "services": ["TaskExecutor", "SandboxManager", "EventMonitor"]
+            }, source="main")
+        except Exception as e:
+            logger.warning(f"EventMonitor не инициализирован: {e}")
 
     except Exception as e:
         logger.error(f"Ошибка при инициализации сервисов: {str(e)}")
@@ -530,6 +544,53 @@ async def list_plans(user_id: str | None = None):
     """
     plans = await task_planner.get_all_plans(user_id)
     return {"plans": plans, "total": len(plans)}
+
+
+@app.get("/events/stats", tags=["monitoring"])
+async def get_event_stats():
+    """
+    Получить статистику событий системы
+    
+    Возвращает счетчики событий, метрики производительности и последние ошибки.
+    """
+    try:
+        from langchain_api.core.event_monitor import event_monitor
+        return event_monitor.get_report()
+    except ImportError:
+        return {"error": "EventMonitor не инициализирован"}
+
+
+@app.get("/events/history", tags=["monitoring"])
+async def get_event_history(
+    event_type: str | None = None,
+    source: str | None = None,
+    limit: int = 50
+):
+    """
+    Получить историю событий
+    
+    Параметры:
+    - event_type: фильтр по типу события
+    - source: фильтр по источнику
+    - limit: максимальное количество событий
+    """
+    try:
+        from langchain_api.core.event_bus import event_bus
+        events = event_bus.get_history(event_type, source, limit)
+        return {
+            "events": [
+                {
+                    "type": e.type,
+                    "source": e.source,
+                    "timestamp": e.timestamp.isoformat(),
+                    "data": e.data
+                }
+                for e in events
+            ],
+            "total": len(events)
+        }
+    except ImportError:
+        return {"error": "EventBus не инициализирован"}
 
 
 @app.get("/ping", tags=["health"])

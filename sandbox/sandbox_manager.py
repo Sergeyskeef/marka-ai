@@ -12,6 +12,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+# Импортируем Event Bus
+try:
+    from core.event_bus import event_bus, EventTypes
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -268,13 +275,27 @@ class SandboxManager:
             if not command.startswith("python"):
                 shell_error = self._check_shell_command(command)
                 if shell_error:
-                    return CommandResult(
+                    result = CommandResult(
                         success=False,
                         output="",
                         error=shell_error,
                         command=command,
                         execution_time=(datetime.now() - start_time).total_seconds()
                     )
+                    
+                    # Публикуем событие о блокировке
+                    if EVENT_BUS_AVAILABLE:
+                        asyncio.create_task(event_bus.publish(
+                            EventTypes.SANDBOX_BLOCKED,
+                            {
+                                "command": command,
+                                "reason": shell_error,
+                                "sandbox_id": sandbox_id
+                            },
+                            source="SandboxManager"
+                        ))
+                    
+                    return result
             
             # Проверяем на опасные операции (Python код)
             danger_check = self._check_dangerous_code(command, sandbox)
@@ -346,6 +367,21 @@ class SandboxManager:
             self.command_history.append(result)
 
             logger.info(f"🔧 Команда выполнена: {command} (код: {process.returncode}, время: {execution_time:.2f}с)")
+
+            # Публикуем событие об успешном выполнении
+            if EVENT_BUS_AVAILABLE:
+                asyncio.create_task(event_bus.publish(
+                    EventTypes.SANDBOX_EXECUTED,
+                    {
+                        "command": command,
+                        "sandbox_id": sandbox_id,
+                        "success": result.success,
+                        "return_code": process.returncode,
+                        "execution_time": execution_time,
+                        "output_size": len(result.output)
+                    },
+                    source="SandboxManager"
+                ))
 
             return result
 
