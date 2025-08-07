@@ -33,7 +33,8 @@ from langchain_api.core.memory.prefs import get_user_pref, upsert_user_pref, get
 # Импортируем упрощенную функцию чата вместо RAG
 # from rag.rag_chain import generate_response
 # from langchain_api.rag.enhanced_rag_chain import generate_response
-from langchain_api.simple_chat import simple_chat
+# from langchain_api.simple_chat import simple_chat  # REPLACED with OpenAI SDK
+from app.agents.chat_handler import simple_chat, enhanced_chat
 # Удалены импорты неиспользуемых роутеров
 from langchain_api.routers.task_router import router as task_router
 from langchain_api.routes.trace_ui import router as trace_router

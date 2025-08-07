@@ -6,7 +6,9 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Test Coverage](https://img.shields.io/badge/coverage-%E2%89%A550%25-yellow.svg)](.github/workflows/test-coverage.yml)
 
-> ⚡ **Статус проекта:** Активная оптимизация! Завершена Фаза 0 - удалено 9,500+ строк мертвого кода (-63%). См. [PHASE0_COMPLETION_REPORT.md](PHASE0_COMPLETION_REPORT.md)
+> ⚡ **Статус проекта:** Активная оптимизация! 
+> - ✅ Фаза 0: Удалено 9,500+ строк мертвого кода (-63%). См. [PHASE0_COMPLETION_REPORT.md](PHASE0_COMPLETION_REPORT.md)
+> - ✅ Фаза 1: Миграция на OpenAI Agents SDK завершена! См. [PHASE1_COMPLETION_REPORT.md](PHASE1_COMPLETION_REPORT.md)
 
 ## 📖 О проекте
 
