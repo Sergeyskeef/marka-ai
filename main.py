@@ -48,7 +48,7 @@ from langchain_api.core.prompt_manager import prompt_manager
 # Удалены импорты неиспользуемых сервисов
 
 # Импортируем дополнительные компоненты системы
-from langchain_api.services.task_executor import TaskExecutor
+# from langchain_api.services.task_executor import TaskExecutor  # REMOVED: dead code
 from langchain_api.core.guardrails_client import with_guardrails, is_guardrails_enabled
 from core.error_middleware import ErrorHandlingMiddleware, handle_errors
 

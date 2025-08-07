@@ -9,8 +9,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from langchain_api.sandbox.self_awareness import MarkSelfAwareness, TaskResult
-from langchain_api.services.security import AccessLevel, TaskCategory
-from langchain_api.services.task_executor import TaskPriority, TaskStatus, task_executor
+# from langchain_api.services.security import AccessLevel, TaskCategory  # REMOVED: dead code
+# from langchain_api.services.task_executor import TaskPriority, TaskStatus, task_executor  # REMOVED: dead code
 
 # Инициализация логгера
 logger = logging.getLogger(__name__)
