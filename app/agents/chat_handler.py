@@ -10,6 +10,9 @@ from openai import AsyncOpenAI
 from .mark_agent import MarkAgent
 from .tools import tool_registry
 from .memory_tools import MEMORY_TOOLS
+from .advanced_memory_tools import ADVANCED_MEMORY_TOOLS
+from .learning_tools import LEARNING_TOOLS
+from .vector_search_tools import VECTOR_SEARCH_TOOLS
 from core.memory.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
@@ -33,12 +36,14 @@ async def get_agent() -> MarkAgent:
             temperature=0.7
         )
         
-        # Регистрируем инструменты памяти
-        for tool in MEMORY_TOOLS:
+        # Регистрируем все инструменты
+        all_tools = MEMORY_TOOLS + ADVANCED_MEMORY_TOOLS + LEARNING_TOOLS + VECTOR_SEARCH_TOOLS
+        
+        for tool in all_tools:
             definition = tool._openai_tool_definition
             _agent_instance.register_tool(definition, tool)
             
-        logger.info("✅ Агент Марк инициализирован с инструментами памяти")
+        logger.info(f"✅ Агент Марк инициализирован с {len(all_tools)} инструментами")
         
     return _agent_instance
 
