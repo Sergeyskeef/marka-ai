@@ -14,15 +14,15 @@
 - **Покрытие тестами:** 13%
 
 ### К чему придем:
-- **Стек:** OpenAI Agents SDK, LangGraph, Mem0/LangMem, Neo4j
-- **Преимущества:** Простота, производительность, самообучение
+- **Стек:** OpenAI Agents SDK, LangGraph, Graphiti (расширенная), Neo4j
+- **Преимущества:** Простота, производительность, самообучение, графовые связи
 - **Покрытие тестами:** 70%+
 
 ### Ключевые принципы:
-1. **Использовать только gpt-4o-mini** (как указано в .env)
+1. **Использовать только gpt-4.1-mini** (как указано в .env)
 2. **Минимализм** - убрать все лишнее
 3. **Модульность** - четкое разделение компонентов
-4. **Самообучение** - память и адаптация
+4. **Самообучение** - память и адаптация через Graphiti
 
 ---
 
@@ -139,28 +139,21 @@ async def chat(request: ChatRequest):
 
 ---
 
-## 🧠 ФАЗА 2: ПРОДВИНУТАЯ СИСТЕМА ПАМЯТИ (2 недели)
+## 🧠 ФАЗА 2: ПРОДВИНУТАЯ СИСТЕМА ПАМЯТИ С GRAPHITI (2 недели)
 
-### Неделя 2: Базовая память
+### Неделя 2: Расширение Graphiti
 
-#### День 1-3: Интеграция Mem0/LangMem
-```python
-# app/memory/semantic_memory.py
-from langmem import create_memory_manager
-from pydantic import BaseModel
+#### День 1-3: Три типа памяти в Neo4j
+```cypher
+-- Создание структуры для трех типов памяти
+CREATE CONSTRAINT fact_id IF NOT EXISTS ON (f:Fact) ASSERT f.id IS UNIQUE;
+CREATE CONSTRAINT episode_id IF NOT EXISTS ON (e:Episode) ASSERT e.id IS UNIQUE;
+CREATE CONSTRAINT skill_id IF NOT EXISTS ON (s:Skill) ASSERT s.id IS UNIQUE;
 
-class UserFact(BaseModel):
-    subject: str
-    attribute: str
-    value: str
-    confidence: float = 1.0
-
-semantic_memory = create_memory_manager(
-    model="gpt-4o-mini",  # Наша модель!
-    schemas=[UserFact],
-    instructions="Извлекай факты о пользователе и мире",
-    enable_updates=True
-)
+-- Векторные индексы для семантического поиска
+CREATE VECTOR INDEX fact_embeddings IF NOT EXISTS
+FOR (f:Fact) ON f.embedding
+OPTIONS {indexConfig: {`vector.dimensions`: 1536}};
 ```
 
 #### День 4-5: Эпизодическая память
