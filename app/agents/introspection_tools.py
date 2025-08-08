@@ -30,7 +30,8 @@ async def analyze_my_capabilities() -> str:
             vector_search_tools,
             learning_tools,
             file_tools,
-            test_tools
+            test_tools,
+            code_analysis_tools
         )
         
         capabilities = {
@@ -46,7 +47,8 @@ async def analyze_my_capabilities() -> str:
             ("Векторный поиск", vector_search_tools),
             ("Обучение", learning_tools),
             ("Работа с файлами", file_tools),
-            ("Тестирование", test_tools)
+            ("Тестирование", test_tools),
+            ("Анализ кода", code_analysis_tools)
         ]
         
         for category, module in tool_modules:
@@ -83,9 +85,9 @@ async def analyze_my_capabilities() -> str:
         
         # Даем рекомендации
         capabilities["recommendations"] = [
-            "Для анализа кода нужны AST инструменты и анализ зависимостей",
             "Для управления пакетами нужны инструменты pip",
-            "Рекомендуется использовать coverage для отслеживания покрытия тестами"
+            "Рекомендуется использовать coverage для отслеживания покрытия тестами",
+            "Используйте анализ кода для поддержания качества и выявления проблем"
         ]
         
         return json.dumps(capabilities, ensure_ascii=False, indent=2)
@@ -141,11 +143,14 @@ async def can_i_do_this(task_description: str) -> str:
                     "✅ Поддерживаю: чтение по строкам, поиск по регулярным выражениям, информация о файлах"
                 )
             elif category == "код":
-                capabilities_status["can_do_partially"].append(
-                    "⚠️ Могу выполнять код в песочнице и работать с файлами проекта"
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу выполнять код в песочнице и работать с файлами проекта"
                 )
                 capabilities_status["can_do_fully"].append(
-                    "✅ Могу читать и анализировать исходный код Python"
+                    "✅ Могу читать, анализировать и находить проблемы в коде Python"
+                )
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу анализировать импорты, зависимости, сложность и метрики кода"
                 )
             elif category == "тест":
                 capabilities_status["can_do_fully"].append(

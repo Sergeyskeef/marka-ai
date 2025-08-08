@@ -30,12 +30,12 @@ MAX_TEST_DURATION = 300  # 5 минут
 # Поддерживаемые тестовые фреймворки
 SUPPORTED_FRAMEWORKS = {
     "pytest": {
-        "command": "pytest",
+        "command": ["python3", "-m", "pytest"],
         "config_files": ["pytest.ini", "pyproject.toml", "setup.cfg"],
         "test_patterns": ["test_*.py", "*_test.py", "tests/"]
     },
     "unittest": {
-        "command": "python -m unittest",
+        "command": ["python3", "-m", "unittest"],
         "config_files": [],
         "test_patterns": ["test_*.py", "*_test.py"]
     }
@@ -102,7 +102,7 @@ async def run_tests(
         
         # Формирование команды
         framework_info = SUPPORTED_FRAMEWORKS[framework]
-        cmd_parts = [framework_info["command"]]
+        cmd_parts = list(framework_info["command"])  # Копируем список команды
         
         # Добавляем путь
         cmd_parts.append(test_path)
@@ -190,7 +190,10 @@ async def run_tests(
                     if failed_tests:
                         result["failed_tests"] = failed_tests[:10]  # Максимум 10
                 
-                os.remove("/tmp/pytest_report.json")
+                try:
+                    os.remove("/tmp/pytest_report.json")
+                except FileNotFoundError:
+                    pass
             except Exception as e:
                 logger.error(f"Ошибка парсинга pytest отчета: {e}")
         
@@ -402,7 +405,7 @@ async def analyze_test_coverage(
             })
         
         # Формируем команду coverage
-        cmd_parts = ["coverage", "run", "-m", "pytest", path]
+        cmd_parts = ["python3", "-m", "coverage", "run", "-m", "pytest", path]
         
         # Запуск тестов с coverage
         process = await asyncio.create_subprocess_exec(
@@ -419,12 +422,12 @@ async def analyze_test_coverage(
             logger.warning(f"Тесты завершились с ошибкой: {process.returncode}")
         
         # Генерация отчета
-        report_cmd = ["coverage", "report", "--format=json"]
+        report_cmd = ["python3", "-m", "coverage", "report", "--format=json"]
         
         if format == "html":
-            report_cmd = ["coverage", "html", "-d", "/tmp/coverage_html"]
+            report_cmd = ["python3", "-m", "coverage", "html", "-d", "/tmp/coverage_html"]
         elif format == "xml":
-            report_cmd = ["coverage", "xml", "-o", "/tmp/coverage.xml"]
+            report_cmd = ["python3", "-m", "coverage", "xml", "-o", "/tmp/coverage.xml"]
         
         report_process = await asyncio.create_subprocess_exec(
             *report_cmd,
@@ -533,6 +536,10 @@ async def find_tests(
             })
         
         test_files = []
+        
+        # Нормализуем путь директории один раз
+        if not os.path.isabs(directory):
+            directory = os.path.join("/workspace", directory)
         
         # Анализируем каждый найденный файл
         for file_info in files_data.get("files", []):
@@ -652,7 +659,7 @@ async def test_single_function(
             "",
             "print(json.dumps({",
             "    'success': True,",
-            "    'function': '" + function_name + "',",
+            "    'function': " + json.dumps(function_name) + ",",
             "    'total_tests': len(test_cases),",
             "    'passed': sum(1 for r in results if r.get('passed')),",
             "    'results': results",
