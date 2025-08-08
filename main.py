@@ -1590,5 +1590,55 @@ async def delete_preference(user_id: str, key: str):
         logger.error(f"Ошибка при удалении предпочтения: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
 
+# === ENHANCED CHAT ENDPOINT ===
+class EnhancedChatRequest(BaseModel):
+    question: str
+    user_id: str
+    chat_id: Optional[int] = None
+    mode: str = "chat"  # chat, task, analysis
+
+class EnhancedChatResponse(BaseModel):
+    content: str
+    tool_calls: List[Dict[str, Any]] = []
+    metadata: Dict[str, Any] = {}
+    error: bool = False
+
+@app.post("/chat/enhanced", response_model=EnhancedChatResponse, tags=["chat"])
+async def enhanced_chat_endpoint(request: EnhancedChatRequest):
+    """
+    Enhanced chat endpoint с использованием нового агента из Фазы 1
+    
+    Поддерживает:
+    - Различные режимы работы (chat, task, analysis)
+    - Использование всех инструментов (память, обучение, векторный поиск)
+    - Отслеживание использованных инструментов
+    """
+    try:
+        # Используем enhanced_chat из нового агента
+        result = await enhanced_chat(
+            question=request.question,
+            user_id=request.user_id,
+            chat_id=request.chat_id
+        )
+        
+        # Форматируем ответ
+        return EnhancedChatResponse(
+            content=result.get("content", ""),
+            tool_calls=result.get("tool_calls", []),
+            metadata={
+                "mode": request.mode,
+                "tokens_used": result.get("metadata", {}).get("tokens_used", 0),
+                "processing_time": result.get("metadata", {}).get("processing_time", 0)
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced_chat_endpoint: {e}")
+        return EnhancedChatResponse(
+            content=f"Произошла ошибка: {str(e)}",
+            error=True,
+            metadata={"error": str(e)}
+        )
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
