@@ -13,6 +13,7 @@ from .memory_tools import MEMORY_TOOLS
 from .advanced_memory_tools import ADVANCED_MEMORY_TOOLS
 from .learning_tools import LEARNING_TOOLS
 from .vector_search_tools import VECTOR_SEARCH_TOOLS
+from .introspection_tools import INTROSPECTION_TOOLS
 from core.memory.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,9 @@ async def get_agent() -> MarkAgent:
         )
         
         # Регистрируем все инструменты
-        all_tools = MEMORY_TOOLS + ADVANCED_MEMORY_TOOLS + LEARNING_TOOLS + VECTOR_SEARCH_TOOLS
+        all_tools = (MEMORY_TOOLS + ADVANCED_MEMORY_TOOLS + 
+                    LEARNING_TOOLS + VECTOR_SEARCH_TOOLS + 
+                    INTROSPECTION_TOOLS)
         
         for tool in all_tools:
             definition = tool._openai_tool_definition
