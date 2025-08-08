@@ -70,6 +70,12 @@ class MarkBot:
         # Устанавливаем команды бота
         await self._set_bot_commands()
         
+        # Логируем режим работы
+        if self.config.DEV_MODE:
+            logger.warning("🔧 Bot running in DEV MODE - all users are admins!")
+        else:
+            logger.info("🔒 Bot running in PRODUCTION MODE - admin checks enabled")
+        
         logger.info("✅ Bot initialized successfully")
     
     def _register_handlers(self):

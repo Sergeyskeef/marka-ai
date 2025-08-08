@@ -37,6 +37,11 @@ class RateLimiter:
     
     def get_limit_for_user(self, user_id: int) -> int:
         """Получить лимит для конкретного пользователя"""
+        # В режиме разработки все получают админский лимит
+        if bot_config.DEV_MODE:
+            return self.default_limit * self.admin_multiplier
+        
+        # В production режиме проверяем список админов
         if user_id in bot_config.ADMIN_USERS:
             return self.default_limit * self.admin_multiplier
         return self.default_limit

@@ -25,17 +25,23 @@ def check_admin(func: Callable) -> Callable:
         if not user:
             return
         
-        if user.id not in bot_config.ADMIN_USERS:
-            logger.warning(f"Unauthorized admin access attempt by user {user.id} ({user.username})")
-            
-            message = "⛔ Эта команда доступна только администраторам."
-            
-            if update.message:
-                await update.message.reply_text(message)
-            elif update.callback_query:
-                await update.callback_query.answer(message, show_alert=True)
-            
-            return
+        # Проверка режима разработки
+        if bot_config.DEV_MODE:
+            # В режиме разработки все пользователи - админы
+            logger.debug(f"Admin access granted to user {user.id} ({user.username}) - DEV MODE")
+        else:
+            # В production режиме проверяем права
+            if user.id not in bot_config.ADMIN_USERS:
+                logger.warning(f"Unauthorized admin access attempt by user {user.id} ({user.username})")
+                
+                message = "⛔ Эта команда доступна только администраторам."
+                
+                if update.message:
+                    await update.message.reply_text(message)
+                elif update.callback_query:
+                    await update.callback_query.answer(message, show_alert=True)
+                
+                return
         
         # Пользователь - админ, выполняем функцию
         return await func(update, context, *args, **kwargs)

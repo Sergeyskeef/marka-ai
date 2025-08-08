@@ -57,6 +57,9 @@ class BotConfig:
     USE_ADVANCED_MEMORY: bool = app_settings.USE_DIRECT_NEO4J
     USE_LEARNING_SYSTEM: bool = True
     
+    # Режим разработки
+    DEV_MODE: bool = os.getenv("BOT_DEV_MODE", "true").lower() == "true"
+    
     # Логирование
     LOG_LEVEL: str = os.getenv("BOT_LOG_LEVEL", "INFO")
     LOG_USER_MESSAGES: bool = os.getenv("LOG_USER_MESSAGES", "false").lower() == "true"
