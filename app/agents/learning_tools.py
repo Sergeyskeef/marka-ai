@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 
 from app.learning.reap_cycle import reap_cycle
+from core.memory.memory_manager import memory_manager
 from .tools import register_tool, format_tool_result, format_tool_error
 
 logger = logging.getLogger(__name__)
@@ -105,11 +106,29 @@ async def get_learning_status() -> str:
         memory_stats = await reap_cycle.memory.get_memory_stats()
         
         # Анализируем последние циклы обучения
-        # TODO: Добавить хранение истории циклов
+        # Получаем историю из эпизодов с типом "learning_cycle"
+        cycle_history = await memory_manager.search_episodes(
+            "learning_cycle REAP", 
+            limit=10
+        )
+        
+        recent_cycles = []
+        if cycle_history.get("items"):
+            for item in cycle_history["items"]:
+                metadata = item.get("metadata", {})
+                if metadata.get("action") == "reap_cycle":
+                    recent_cycles.append({
+                        "timestamp": metadata.get("timestamp"),
+                        "facts_extracted": metadata.get("facts_extracted", 0),
+                        "skills_updated": metadata.get("skills_updated", 0),
+                        "effectiveness": metadata.get("effectiveness", 0)
+                    })
         
         status = {
             "is_running": reap_cycle.is_running,
             "memory_stats": memory_stats,
+            "recent_cycles": recent_cycles[-5:],  # Последние 5 циклов
+            "total_cycles_found": len(recent_cycles),
             "recommendations": []
         }
         
