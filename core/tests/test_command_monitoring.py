@@ -1,6 +1,6 @@
 import os
 
-from langchain_api.core.command_monitoring import CommandEvent, CommandMonitoringSystem
+from core.command_monitoring import CommandEvent, CommandMonitoringSystem
 
 
 def test_log_command_and_result(tmp_path):

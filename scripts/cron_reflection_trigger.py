@@ -13,7 +13,7 @@ from pathlib import Path
 # Добавляем путь к проекту
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langchain_api.sandbox.reflection_manager import ReflectionManager
+from sandbox.reflection_manager import ReflectionManager
 
 
 def get_system_status() -> dict:

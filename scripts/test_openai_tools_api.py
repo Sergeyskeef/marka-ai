@@ -13,7 +13,7 @@ import httpx
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langchain_api.utils.openai_proxy_client import create_openai_client
+from utils.openai_proxy_client import create_openai_client
 
 # Создаем клиент OpenAI
 openai_client = create_openai_client(timeout=30.0)

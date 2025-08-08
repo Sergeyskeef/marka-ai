@@ -14,7 +14,7 @@ from typing import Any
 # Добавляем путь к проекту
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langchain_api.core.memory.system_memory import SystemMemory
+from core.memory.system_memory import SystemMemory
 
 
 class MarkSelfMapGenerator:

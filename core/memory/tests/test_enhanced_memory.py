@@ -5,7 +5,7 @@
 import unittest
 from datetime import datetime, timedelta
 
-from langchain_api.core.memory.enhanced_memory import EnhancedMemory, InsightType
+from core.memory.enhanced_memory import EnhancedMemory, InsightType
 
 
 class TestEnhancedMemory(unittest.TestCase):

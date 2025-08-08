@@ -1,4 +1,4 @@
-from langchain_api.utils.openai_proxy_client import chat_model
+from utils.openai_proxy_client import chat_model
 
 
 def test_roundtrip():

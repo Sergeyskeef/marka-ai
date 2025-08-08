@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from langchain_api.core.memory.prefs import (
+from core.memory.prefs import (
     get_user_pref, upsert_user_pref, get_all_user_prefs, delete_user_pref
 )
 

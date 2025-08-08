@@ -6,7 +6,7 @@ E2E тест для системы сессий
 import pytest
 import time
 from unittest.mock import patch, MagicMock
-from langchain_api.core.memory.sessions import SessionBuffer, add_message_to_session, get_user_session
+from core.memory.sessions import SessionBuffer, add_message_to_session, get_user_session
 
 
 class TestSessionEviction:
@@ -21,7 +21,7 @@ class TestSessionEviction:
         self.session_buffer.max_len = 3  # Уменьшаем для тестов
         
         # Патчим глобальные функции для использования нашего мока
-        from langchain_api.core.memory.sessions import session_buffer
+        from core.memory.sessions import session_buffer
         session_buffer.redis_client = self.mock_redis
         session_buffer.max_len = 3
     
@@ -109,7 +109,7 @@ class TestSessionEviction:
         user_id = "test_user_006"
         
         # Устанавливаем redis_client в None (симуляция недоступности)
-        from langchain_api.core.memory.sessions import session_buffer
+        from core.memory.sessions import session_buffer
         session_buffer.redis_client = None
         
         # Пытаемся добавить сообщение

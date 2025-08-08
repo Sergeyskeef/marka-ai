@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from langchain_api.memory.memory_manager import MemoryManager
-from langchain_api.sandbox.task_manager import TaskPriority
-from langchain_api.telegram_bot.handlers.sandbox_handlers import SandboxHandler
+from core.memory.memory_manager import MemoryManager
+from sandbox.task_manager import TaskPriority
+from .telegram_bot.handlers.sandbox_handlers import SandboxHandler
 
 
 class TestSandboxHandler(unittest.IsolatedAsyncioTestCase):

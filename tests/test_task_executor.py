@@ -2,8 +2,8 @@ import time
 
 import pytest
 
-from langchain_api.core.feedback_system import FeedbackSystem
-from langchain_api.services.task_executor import (
+from core.feedback_system import FeedbackSystem
+from services.task_executor import (
     AccessLevel,
     TaskCategory,
     TaskExecutor,

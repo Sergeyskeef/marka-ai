@@ -1,4 +1,4 @@
-from langchain_api.memory_logic import (
+from .memory_logic import (
     memory_analyze_logic,
     memory_delete_logic,
     memory_save_logic,

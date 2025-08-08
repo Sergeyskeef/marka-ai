@@ -1,7 +1,7 @@
 
 import pytest
 
-from langchain_api.core.reflection.reflection_analyzer import ReflectionAnalyzer
+from core.reflection.reflection_analyzer import ReflectionAnalyzer
 
 
 @pytest.fixture

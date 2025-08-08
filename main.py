@@ -21,36 +21,36 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict
 
-from langchain_api.core.backend_selector import get_backend_status
-from langchain_api.core.memory.prefs import get_user_pref, upsert_user_pref, get_all_user_prefs, delete_user_pref
+from core.backend_selector import get_backend_status
+from core.memory.prefs import get_user_pref, upsert_user_pref, get_all_user_prefs, delete_user_pref
 # Удалены импорты неиспользуемых event интеграций
 
 # Импортируем LLM Integration Hub
 
-# from langchain_api.core.monitoring import metrics  # Убираем конфликтующий импорт
+# from core.monitoring import metrics  # Убираем конфликтующий импорт
 
-# from langchain_api.globals import passport_sync_service  # Удаляем неиспользуемый импорт
+# from .globals import passport_sync_service  # Удаляем неиспользуемый импорт
 # Импортируем упрощенную функцию чата вместо RAG
 # from rag.rag_chain import generate_response
-# from langchain_api.rag.enhanced_rag_chain import generate_response
-# from langchain_api.simple_chat import simple_chat  # REPLACED with OpenAI SDK
+# from rag.enhanced_rag_chain import generate_response
+# from .simple_chat import simple_chat  # REPLACED with OpenAI SDK
 from app.agents.chat_handler import simple_chat, enhanced_chat
 # Удалены импорты неиспользуемых роутеров
-from langchain_api.routers.task_router import router as task_router
-from langchain_api.routes.trace_ui import router as trace_router
-from langchain_api.utils.toolkit import get_tools_for_agent, tool_registry
-from langchain_api.sandbox.sandbox_manager import SandboxManager
-from langchain_api.sandbox.task_planning_system import task_planner
-from langchain_api.core.middleware import MetricsMiddleware
-from langchain_api.middlewares.agents_trace import AgentsTraceMiddleware
-from langchain_api.core.metrics import metrics_manager
-from langchain_api.core.prompt_manager import prompt_manager
+from routers.task_router import router as task_router
+from routes.trace_ui import router as trace_router
+from utils.toolkit import get_tools_for_agent, tool_registry
+from sandbox.sandbox_manager import SandboxManager
+from sandbox.task_planning_system import task_planner
+from core.middleware import MetricsMiddleware
+from middlewares.agents_trace import AgentsTraceMiddleware
+from core.metrics import metrics_manager
+from core.prompt_manager import prompt_manager
 # Удален неиспользуемый импорт ChangeReport
 # Удалены импорты неиспользуемых сервисов
 
 # Импортируем дополнительные компоненты системы
-# from langchain_api.services.task_executor import TaskExecutor  # REMOVED: dead code
-from langchain_api.core.guardrails_client import with_guardrails, is_guardrails_enabled
+# from services.task_executor import TaskExecutor  # REMOVED: dead code
+from core.guardrails_client import with_guardrails, is_guardrails_enabled
 from core.error_middleware import ErrorHandlingMiddleware, handle_errors
 
 # Настройка логирования
@@ -191,18 +191,18 @@ async def startup_event():
         sandbox_manager = _sandbox_manager  # Устанавливаем глобальную переменную
 
         # 🔧 ИСПРАВЛЕНИЕ: Заменяем глобальный экземпляр task_executor на наш
-        import langchain_api.services.task_executor as task_executor_module
+        import services.task_executor as task_executor_module
         task_executor_module.task_executor = _task_executor
 
         logger.info("TaskExecutor и SandboxManager успешно инициализированы")
         
         # Инициализация Event Monitor
         try:
-            from langchain_api.core.event_monitor import event_monitor
+            from core.event_monitor import event_monitor
             logger.info("EventMonitor успешно инициализирован")
             
             # Публикуем событие о запуске системы
-            from langchain_api.core.event_bus import event_bus, EventTypes
+            from core.event_bus import event_bus, EventTypes
             await event_bus.publish(EventTypes.SYSTEM_STARTUP, {
                 "timestamp": time.time(),
                 "services": ["TaskExecutor", "SandboxManager", "EventMonitor"]
@@ -397,7 +397,7 @@ async def v1_chat(request: V1ChatRequest):
     """
     # Валидация через Guardrails
     if is_guardrails_enabled():
-        from langchain_api.core.guardrails_client import validate_llm_input
+        from core.guardrails_client import validate_llm_input
         input_validation = validate_llm_input(request.content)
         if not input_validation["valid"]:
             logger.warning(f"❌ Валидация входящих данных не прошла: {input_validation['issues']}")
@@ -555,7 +555,7 @@ async def get_event_stats():
     Возвращает счетчики событий, метрики производительности и последние ошибки.
     """
     try:
-        from langchain_api.core.event_monitor import event_monitor
+        from core.event_monitor import event_monitor
         return event_monitor.get_report()
     except ImportError:
         return {"error": "EventMonitor не инициализирован"}
@@ -576,7 +576,7 @@ async def get_event_history(
     - limit: максимальное количество событий
     """
     try:
-        from langchain_api.core.event_bus import event_bus
+        from core.event_bus import event_bus
         events = event_bus.get_history(event_type, source, limit)
         return {
             "events": [
@@ -602,7 +602,7 @@ async def get_architecture():
     Возвращает информацию о компонентах, интеграциях и здоровье системы.
     """
     try:
-        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        from sandbox.self_awareness import MarkSelfAwareness
         awareness = MarkSelfAwareness()
         return awareness.analyze_architecture()
     except Exception as e:
@@ -618,7 +618,7 @@ async def get_improvements():
     Возвращает список предложений с приоритетами.
     """
     try:
-        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        from sandbox.self_awareness import MarkSelfAwareness
         awareness = MarkSelfAwareness()
         improvements = awareness.suggest_improvements()
         return {
@@ -639,7 +639,7 @@ async def analyze_code(file_path: str):
     - file_path: путь к файлу для анализа
     """
     try:
-        from langchain_api.sandbox.self_awareness import MarkSelfAwareness
+        from sandbox.self_awareness import MarkSelfAwareness
         awareness = MarkSelfAwareness()
         analysis = awareness.analyze_code(file_path)
         return analysis

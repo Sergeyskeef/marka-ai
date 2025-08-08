@@ -9,7 +9,7 @@ import asyncio
 import unittest.mock as mock
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from langchain_api.core.agent.reflexion import (
+from core.agent.reflexion import (
     ReflexionAgent,
     reflexion_agent
 )
@@ -288,7 +288,7 @@ class TestGlobalReflexionAgent:
     
     def test_global_instance_is_singleton(self):
         """Тест что глобальный экземпляр - синглтон"""
-        from langchain_api.core.agent.reflexion import reflexion_agent as agent2
+        from core.agent.reflexion import reflexion_agent as agent2
         assert reflexion_agent is agent2
 
 

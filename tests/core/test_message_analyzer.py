@@ -5,7 +5,7 @@
 
 import pytest
 
-from langchain_api.core.message_analyzer import MessageAnalyzer
+from core.message_analyzer import MessageAnalyzer
 
 
 class TestMessageAnalyzer:

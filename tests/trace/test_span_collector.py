@@ -8,7 +8,7 @@ import os
 from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
 
-from langchain_api.middlewares.agents_trace import (
+from middlewares.agents_trace import (
     TraceSpan,
     TraceCollector,
     trace_span,
@@ -229,7 +229,7 @@ class TestTraceContextManager:
         
         try:
             # Используем глобальный экземпляр, но с временной БД
-            from langchain_api.middlewares.agents_trace import trace_collector
+            from middlewares.agents_trace import trace_collector
             original_db_path = trace_collector.db_path
             trace_collector.db_path = db_path
             trace_collector._init_database()  # Инициализируем новую БД
@@ -258,7 +258,7 @@ class TestTraceContextManager:
         
         try:
             # Используем глобальный экземпляр, но с временной БД
-            from langchain_api.middlewares.agents_trace import trace_collector
+            from middlewares.agents_trace import trace_collector
             original_db_path = trace_collector.db_path
             trace_collector.db_path = db_path
             trace_collector._init_database()  # Инициализируем новую БД
@@ -291,7 +291,7 @@ class TestTraceFunctions:
         
         try:
             # Используем глобальный экземпляр, но с временной БД
-            from langchain_api.middlewares.agents_trace import trace_collector
+            from middlewares.agents_trace import trace_collector
             original_db_path = trace_collector.db_path
             trace_collector.db_path = db_path
             trace_collector._init_database()  # Инициализируем новую БД
@@ -318,7 +318,7 @@ class TestTraceFunctions:
         
         try:
             # Используем глобальный экземпляр, но с временной БД
-            from langchain_api.middlewares.agents_trace import trace_collector
+            from middlewares.agents_trace import trace_collector
             original_db_path = trace_collector.db_path
             trace_collector.db_path = db_path
             trace_collector._init_database()  # Инициализируем новую БД

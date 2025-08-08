@@ -6,14 +6,14 @@ from datetime import datetime
 
 import pytest
 
-from langchain_api.core.memory.enhanced_memory import EnhancedMemory
-from langchain_api.core.reflection.memory_integration import MemoryIntegration
-from langchain_api.core.reflection.reasoning_chains import (
+from core.memory.enhanced_memory import EnhancedMemory
+from core.reflection.memory_integration import MemoryIntegration
+from core.reflection.reasoning_chains import (
     ReasoningChain,
     ReasoningStep,
     ReasoningSystem,
 )
-from langchain_api.core.reflection.self_learning import SelfLearningSystem
+from core.reflection.self_learning import SelfLearningSystem
 
 
 @pytest.fixture

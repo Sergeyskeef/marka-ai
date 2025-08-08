@@ -311,11 +311,18 @@ class REAPLearningCycle:
             # Обновляем навыки
             for update in knowledge.skill_updates:
                 try:
-                    # TODO: Реализовать evolve_skill в memory adapter
-                    logger.info(f"Обновление навыка: {update}")
+                    # Эволюция навыка через memory adapter
+                    await self.memory.evolve_skill(
+                        skill_name=update.get("name"),
+                        improved_procedure=update.get("procedure"),
+                        improved_prompt=update.get("prompt", ""),
+                        performance_improvement=update.get("improvement", 0.1),
+                        reason=update.get("reason", "Улучшено через REAP цикл")
+                    )
+                    logger.info(f"Навык обновлен: {update.get('name')}")
                     results["skills_updated"] += 1
                 except Exception as e:
-                    results["errors"].append(f"Навык: {e}")
+                    results["errors"].append(f"Навык {update.get('name', 'unknown')}: {e}")
             
             # Применяем уроки (сохраняем как эпизоды обучения)
             for lesson in knowledge.lessons:
@@ -352,7 +359,29 @@ class REAPLearningCycle:
             }
             
             # Оптимизация структуры графа
-            # TODO: Реализовать оптимизацию через Cypher
+            from app.memory.neo4j_direct import neo4j_client
+            
+            # Оптимизируем граф: удаляем избыточные связи и объединяем похожие факты
+            optimization_query = """
+            // Находим и объединяем дублирующиеся факты
+            MATCH (f1:Fact), (f2:Fact)
+            WHERE f1.id < f2.id 
+            AND f1.subject = f2.subject 
+            AND f1.predicate = f2.predicate
+            AND f1.object = f2.object
+            MERGE (f1)-[:DUPLICATES]->(f2)
+            SET f2.archived = true
+            RETURN count(f2) as merged_facts
+            """
+            
+            try:
+                merge_results = await neo4j_client.run_custom_query(optimization_query)
+                if merge_results:
+                    merged_count = merge_results[0].get("merged_facts", 0)
+                    results["optimizations"].append(f"Объединено дублирующихся фактов: {merged_count}")
+                    logger.info(f"Оптимизация графа: объединено {merged_count} фактов")
+            except Exception as e:
+                logger.warning(f"Ошибка оптимизации графа: {e}")
             
             # Архивация старых данных
             archived_count = await self._archive_old_memories()
@@ -442,7 +471,14 @@ class REAPLearningCycle:
     
     async def _get_episode_by_id(self, episode_id: str) -> Optional[Dict[str, Any]]:
         """Получить эпизод по ID"""
-        # TODO: Реализовать через прямой запрос к Neo4j
+        from app.memory.neo4j_direct import neo4j_client
+        
+        # Прямой запрос к Neo4j для получения эпизода
+        episode = await neo4j_client.get_node_by_id(episode_id, node_type="Episode")
+        if episode:
+            return episode
+        
+        # Fallback на Graphiti если не найдено в Neo4j
         results = await self.memory.graphiti.search_episodes(episode_id, limit=1)
         if results.get("items"):
             return results["items"][0]
@@ -620,8 +656,33 @@ class REAPLearningCycle:
         reflection: ReflectionResult
     ) -> List[Dict[str, Any]]:
         """Извлечь улучшения для навыков"""
-        # TODO: Реализовать извлечение улучшений навыков
-        return []
+        improvements = []
+        
+        # Анализируем паттерны ошибок для улучшения навыков
+        if reflection.patterns:
+            for pattern in reflection.patterns:
+                if pattern.get("type") == "repeated_error" and pattern.get("count", 0) > 2:
+                    # Создаем улучшение для навыка обработки этой ошибки
+                    improvements.append({
+                        "name": f"handle_{pattern.get('error_type', 'error')}",
+                        "procedure": f"При возникновении {pattern.get('error_type')}: {pattern.get('suggested_fix', 'использовать альтернативный подход')}",
+                        "prompt": f"Избегать {pattern.get('error_type')} используя проверенные методы",
+                        "improvement": 0.2,
+                        "reason": f"Обнаружена повторяющаяся ошибка (встречается {pattern.get('count')} раз)"
+                    })
+        
+        # Анализируем успешные паттерны для усиления навыков
+        if hasattr(reflection, 'successful_patterns'):
+            for pattern in reflection.successful_patterns:
+                if pattern.get("success_rate", 0) > 0.8:
+                    improvements.append({
+                        "name": pattern.get("skill_name", "unknown_skill"),
+                        "procedure": pattern.get("refined_procedure", ""),
+                        "improvement": pattern.get("success_rate", 0.8) - 0.5,
+                        "reason": f"Высокая успешность: {pattern.get('success_rate', 0)*100:.0f}%"
+                    })
+        
+        return improvements
     
     async def _extract_lessons(
         self,
@@ -694,8 +755,29 @@ class REAPLearningCycle:
     
     async def _update_learning_stats(self):
         """Обновить статистику обучения"""
-        # TODO: Реализовать обновление статистики
-        pass
+        try:
+            # Получаем текущую статистику
+            stats = await self.memory.get_memory_stats()
+            
+            # Сохраняем статистику как факт
+            await self.memory.save_fact(
+                subject="learning_system",
+                predicate="stats_updated",
+                object=json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "total_facts": stats.get("facts", 0),
+                    "total_episodes": stats.get("episodes", 0),
+                    "total_skills": stats.get("skills", 0),
+                    "last_cycle": self.stats
+                }),
+                confidence=1.0,
+                source="reap_cycle"
+            )
+            
+            logger.info(f"📊 Статистика обновлена: {stats}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка обновления статистики: {e}")
 
 
 # Глобальный экземпляр
