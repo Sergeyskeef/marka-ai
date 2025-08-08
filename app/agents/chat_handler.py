@@ -29,11 +29,13 @@ async def get_agent() -> MarkAgent:
         # Создаем OpenAI клиент
         client = AsyncOpenAI()
         
-        # Создаем агента
+        # Создаем агента с настройками из конфигурации
+        from app.config import settings
         _agent_instance = MarkAgent(
             client=client,
-            model="gpt-4.1-mini",  # Используем указанную модель!
-            temperature=0.7
+            model=settings.OPENAI_MODEL,
+            temperature=settings.OPENAI_TEMPERATURE,
+            max_tokens=settings.OPENAI_MAX_TOKENS
         )
         
         # Регистрируем все инструменты

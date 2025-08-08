@@ -11,6 +11,8 @@ import asyncio
 from neo4j import AsyncGraphDatabase
 import os
 
+from app.utils import id_generator, IDType
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,7 +78,7 @@ class Neo4jDirectClient:
         """Создать новый факт"""
         await self._ensure_connected()
         
-        fact_id = f"fact-{uuid.uuid4()}"
+        fact_id = id_generator.generate(IDType.FACT)
         query = """
         CREATE (f:Fact {
             id: $id,
@@ -165,7 +167,7 @@ class Neo4jDirectClient:
         """Заменить устаревший факт новым"""
         await self._ensure_connected()
         
-        new_fact_id = f"fact-{uuid.uuid4()}"
+        new_fact_id = id_generator.generate(IDType.FACT)
         query = """
         MATCH (old:Fact {id: $old_id})
         CREATE (new:Fact {
@@ -226,7 +228,7 @@ class Neo4jDirectClient:
         """Создать новый эпизод"""
         await self._ensure_connected()
         
-        episode_id = f"episode-{uuid.uuid4()}"
+        episode_id = id_generator.generate(IDType.EPISODE)
         query = """
         CREATE (e:Episode {
             id: $id,
@@ -318,7 +320,7 @@ class Neo4jDirectClient:
         """Создать новый навык"""
         await self._ensure_connected()
         
-        skill_id = f"skill-{uuid.uuid4()}"
+        skill_id = id_generator.generate(IDType.SKILL)
         query = """
         CREATE (s:Skill {
             id: $id,
@@ -391,7 +393,7 @@ class Neo4jDirectClient:
             old_skill = dict(record["old"])
             
             # Создаем новую версию
-            new_skill_id = f"skill-{uuid.uuid4()}"
+            new_skill_id = id_generator.generate(IDType.SKILL)
             evolve_query = """
             MATCH (old:Skill {id: $old_id})
             CREATE (new:Skill {

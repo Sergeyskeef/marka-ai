@@ -5,16 +5,26 @@ Advanced Memory Adapter - расширенный адаптер для рабо�
 import json
 import logging
 import uuid
+import os
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 
 from core.memory.graphiti_adapter import GraphitiMemoryAdapter
 from .neo4j_direct import neo4j_client
+from app.utils import id_generator, IDType
 import httpx
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+# Конфигурация из единого места
+from app.config import settings
+
+USE_DIRECT_NEO4J = settings.USE_DIRECT_NEO4J
+SYNC_TO_GRAPHITI = settings.SYNC_TO_GRAPHITI
+
+logger.info(f"🔧 Конфигурация памяти: USE_DIRECT_NEO4J={USE_DIRECT_NEO4J}, SYNC_TO_GRAPHITI={SYNC_TO_GRAPHITI}")
 
 
 class MemoryType(Enum):
@@ -62,7 +72,7 @@ class AdvancedMemoryAdapter:
             metadata: Дополнительные метаданные
         """
         try:
-            fact_id = f"fact-{uuid.uuid4()}"
+            fact_id = id_generator.generate(IDType.FACT)
             fact_text = f"{subject} {predicate} {object}"
             
             # Получаем embedding
@@ -85,28 +95,42 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через прямой Neo4j
-            result = await neo4j_client.create_fact(
-                subject=subject,
-                predicate=predicate,
-                object=object,
-                confidence=confidence,
-                source=source,
-                embedding=embedding,
-                metadata=metadata
-            )
-            
-            if result["success"]:
-                # Также сохраняем в Graphiti для совместимости
-                await self.graphiti.add_episode(
+            if USE_DIRECT_NEO4J:
+                # Сохраняем через прямой Neo4j
+                result = await neo4j_client.create_fact(
+                    subject=subject,
+                    predicate=predicate,
+                    object=object,
+                    confidence=confidence,
+                    source=source,
+                    embedding=embedding,
+                    metadata=metadata
+                )
+                
+                if result["success"]:
+                    # Опционально синхронизируем с Graphiti
+                    if SYNC_TO_GRAPHITI:
+                        try:
+                            await self.graphiti.add_episode(
+                                text=fact_text,
+                                metadata={**fact_data, "neo4j_id": result["id"]}
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ Не удалось синхронизировать с Graphiti: {e}")
+                    
+                    logger.info(f"✅ Факт сохранен в Neo4j: {result['id']} - {fact_text}")
+                    return {"success": True, "id": result["id"], "fact": fact_text}
+                else:
+                    return result
+            else:
+                # Используем старую систему через Graphiti
+                result = await self.graphiti.add_episode(
                     text=fact_text,
                     metadata=fact_data
                 )
                 
-                logger.info(f"✅ Факт сохранен: {result['id']} - {fact_text}")
-                return {"success": True, "id": result["id"], "fact": fact_text}
-            else:
-                return result
+                logger.info(f"✅ Факт сохранен через Graphiti: {fact_id} - {fact_text}")
+                return {"success": True, "id": fact_id, "fact": fact_text}
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения факта: {e}")
@@ -234,7 +258,7 @@ class AdvancedMemoryAdapter:
             metadata: Дополнительные метаданные
         """
         try:
-            episode_id = f"episode-{uuid.uuid4()}"
+            episode_id = id_generator.generate(IDType.EPISODE)
             episode_text = f"Ситуация: {situation}. Результат: {outcome}. Урок: {lesson_learned}"
             
             # Получаем embedding
@@ -257,29 +281,43 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через прямой Neo4j
-            result = await neo4j_client.create_episode(
-                situation=situation,
-                actions_taken=actions_taken,
-                outcome=outcome,
-                reasoning=reasoning,
-                lesson_learned=lesson_learned,
-                satisfaction=satisfaction,
-                embedding=embedding,
-                metadata=metadata
-            )
-            
-            if result["success"]:
-                # Также сохраняем в Graphiti для совместимости
-                await self.graphiti.add_episode(
+            if USE_DIRECT_NEO4J:
+                # Сохраняем через прямой Neo4j
+                result = await neo4j_client.create_episode(
+                    situation=situation,
+                    actions_taken=actions_taken,
+                    outcome=outcome,
+                    reasoning=reasoning,
+                    lesson_learned=lesson_learned,
+                    satisfaction=satisfaction,
+                    embedding=embedding,
+                    metadata=metadata
+                )
+                
+                if result["success"]:
+                    # Опционально синхронизируем с Graphiti
+                    if SYNC_TO_GRAPHITI:
+                        try:
+                            await self.graphiti.add_episode(
+                                text=episode_text,
+                                metadata={**episode_data, "neo4j_id": result["id"]}
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ Не удалось синхронизировать с Graphiti: {e}")
+                    
+                    logger.info(f"✅ Эпизод сохранен в Neo4j: {result['id']}")
+                    return {"success": True, "id": result["id"], "outcome": outcome}
+                else:
+                    return result
+            else:
+                # Используем старую систему через Graphiti
+                result = await self.graphiti.add_episode(
                     text=episode_text,
                     metadata=episode_data
                 )
                 
-                logger.info(f"✅ Эпизод сохранен: {result['id']}")
-                return {"success": True, "id": result["id"], "outcome": outcome}
-            else:
-                return result
+                logger.info(f"✅ Эпизод сохранен через Graphiti: {episode_id}")
+                return {"success": True, "id": episode_id, "outcome": outcome}
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения эпизода: {e}")
@@ -331,7 +369,7 @@ class AdvancedMemoryAdapter:
             metadata: Дополнительные метаданные
         """
         try:
-            skill_id = f"skill-{uuid.uuid4()}"
+            skill_id = id_generator.generate(IDType.SKILL)
             skill_text = f"Навык: {name}. Процедура: {procedure}"
             
             # Получаем embedding
@@ -355,29 +393,43 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через прямой Neo4j
-            result = await neo4j_client.create_skill(
-                name=name,
-                trigger_patterns=trigger_patterns,
-                procedure=procedure,
-                system_prompt=system_prompt,
-                version=1,
-                performance_score=performance_score,
-                embedding=embedding,
-                metadata=metadata
-            )
-            
-            if result["success"]:
-                # Также сохраняем в Graphiti для совместимости
-                await self.graphiti.add_episode(
+            if USE_DIRECT_NEO4J:
+                # Сохраняем через прямой Neo4j
+                result = await neo4j_client.create_skill(
+                    name=name,
+                    trigger_patterns=trigger_patterns,
+                    procedure=procedure,
+                    system_prompt=system_prompt,
+                    version=1,
+                    performance_score=performance_score,
+                    embedding=embedding,
+                    metadata=metadata
+                )
+                
+                if result["success"]:
+                    # Опционально синхронизируем с Graphiti
+                    if SYNC_TO_GRAPHITI:
+                        try:
+                            await self.graphiti.add_episode(
+                                text=skill_text,
+                                metadata={**skill_data, "neo4j_id": result["id"]}
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ Не удалось синхронизировать с Graphiti: {e}")
+                    
+                    logger.info(f"✅ Навык сохранен в Neo4j: {result['id']} - {name}")
+                    return {"success": True, "id": result["id"], "name": name}
+                else:
+                    return result
+            else:
+                # Используем старую систему через Graphiti
+                result = await self.graphiti.add_episode(
                     text=skill_text,
                     metadata=skill_data
                 )
                 
-                logger.info(f"✅ Навык сохранен: {result['id']} - {name}")
-                return {"success": True, "id": result["id"], "name": name}
-            else:
-                return result
+                logger.info(f"✅ Навык сохранен через Graphiti: {skill_id} - {name}")
+                return {"success": True, "id": skill_id, "name": name}
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения навыка: {e}")
