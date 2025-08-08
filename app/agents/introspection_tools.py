@@ -31,7 +31,8 @@ async def analyze_my_capabilities() -> str:
             learning_tools,
             file_tools,
             test_tools,
-            code_analysis_tools
+            code_analysis_tools,
+            dependency_tools
         )
         
         capabilities = {
@@ -48,7 +49,8 @@ async def analyze_my_capabilities() -> str:
             ("Обучение", learning_tools),
             ("Работа с файлами", file_tools),
             ("Тестирование", test_tools),
-            ("Анализ кода", code_analysis_tools)
+            ("Анализ кода", code_analysis_tools),
+            ("Управление зависимостями", dependency_tools)
         ]
         
         for category, module in tool_modules:
@@ -85,9 +87,9 @@ async def analyze_my_capabilities() -> str:
         
         # Даем рекомендации
         capabilities["recommendations"] = [
-            "Для управления пакетами нужны инструменты pip",
             "Рекомендуется использовать coverage для отслеживания покрытия тестами",
-            "Используйте анализ кода для поддержания качества и выявления проблем"
+            "Используйте анализ кода для поддержания качества и выявления проблем",
+            "Регулярно проверяйте зависимости на уязвимости безопасности"
         ]
         
         return json.dumps(capabilities, ensure_ascii=False, indent=2)
@@ -165,6 +167,13 @@ async def can_i_do_this(task_description: str) -> str:
                 )
                 capabilities_status["need_tools"].append(
                     "Нужны инструменты Git (не планируется в ближайшее время)"
+                )
+            elif category == "pip" or category == "пакет" or category == "установ" or category == "зависимост":
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу управлять Python пакетами через pip"
+                )
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу анализировать зависимости, проверять безопасность, генерировать requirements"
                 )
     
     # Формируем ответ

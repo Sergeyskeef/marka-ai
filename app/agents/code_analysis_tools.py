@@ -297,6 +297,10 @@ def calculate_cyclomatic_complexity(node: ast.AST) -> int:
     for child in ast.walk(node):
         if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
             complexity += 1
+            # Учитываем elif
+            if isinstance(child, ast.If) and hasattr(child, 'orelse'):
+                if child.orelse and isinstance(child.orelse[0], ast.If):
+                    complexity += 1
         elif isinstance(child, ast.BoolOp):
             complexity += len(child.values) - 1
         elif isinstance(child, ast.comprehension):
@@ -361,6 +365,10 @@ async def find_code_patterns(
         
         results = []
         patterns_found = 0
+        
+        # Нормализация directory
+        if not os.path.isabs(directory):
+            directory = os.path.join("/workspace", directory)
         
         for file_info in files_data.get("files", []):
             if patterns_found >= max_results:
@@ -840,7 +848,11 @@ def get_stdlib_modules() -> Set[str]:
     stdlib = set(sys.builtin_module_names)
     stdlib.update(['os', 'sys', 'json', 're', 'math', 'random', 'datetime', 
                    'collections', 'itertools', 'functools', 'typing', 'pathlib',
-                   'unittest', 'logging', 'asyncio', 'threading', 'subprocess'])
+                   'unittest', 'logging', 'asyncio', 'threading', 'subprocess',
+                   'io', 'abc', 'contextlib', 'copy', 'pickle', 'traceback',
+                   'warnings', 'weakref', 'types', 'importlib', 'inspect',
+                   'ast', 'tokenize', 'shutil', 'tempfile', 'glob', 'fnmatch',
+                   'hashlib', 'hmac', 'secrets', 'uuid', 'platform', 'dataclasses'])
     return stdlib
 
 
