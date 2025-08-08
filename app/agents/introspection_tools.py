@@ -29,7 +29,8 @@ async def analyze_my_capabilities() -> str:
             advanced_memory_tools,
             vector_search_tools,
             learning_tools,
-            file_tools
+            file_tools,
+            test_tools
         )
         
         capabilities = {
@@ -44,7 +45,8 @@ async def analyze_my_capabilities() -> str:
             ("Продвинутая память", advanced_memory_tools),
             ("Векторный поиск", vector_search_tools),
             ("Обучение", learning_tools),
-            ("Работа с файлами", file_tools)
+            ("Работа с файлами", file_tools),
+            ("Тестирование", test_tools)
         ]
         
         for category, module in tool_modules:
@@ -81,9 +83,9 @@ async def analyze_my_capabilities() -> str:
         
         # Даем рекомендации
         capabilities["recommendations"] = [
-            "Для тестирования нужен доступ к pytest и возможность запуска тестов",
             "Для анализа кода нужны AST инструменты и анализ зависимостей",
-            "Для управления пакетами нужны инструменты pip"
+            "Для управления пакетами нужны инструменты pip",
+            "Рекомендуется использовать coverage для отслеживания покрытия тестами"
         ]
         
         return json.dumps(capabilities, ensure_ascii=False, indent=2)
@@ -146,11 +148,11 @@ async def can_i_do_this(task_description: str) -> str:
                     "✅ Могу читать и анализировать исходный код Python"
                 )
             elif category == "тест":
-                capabilities_status["cannot_do"].append(
-                    "❌ Не могу запускать тесты pytest"
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу запускать тесты pytest и unittest"
                 )
-                capabilities_status["need_tools"].append(
-                    "Нужны инструменты: run_tests, analyze_coverage"
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу создавать шаблоны тестов, анализировать покрытие, тестировать отдельные функции"
                 )
             elif category == "git":
                 capabilities_status["cannot_do"].append(

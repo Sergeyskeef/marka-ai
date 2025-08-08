@@ -51,8 +51,14 @@ def is_safe_path(path: str) -> bool:
         
         # Проверяем запрещенные паттерны
         for pattern in FORBIDDEN_PATTERNS:
-            if fnmatch.fnmatch(abs_path, pattern):
-                return False
+            # Для паттернов с путями проверяем полный путь
+            if '/' in pattern:
+                if fnmatch.fnmatch(abs_path, f"*{pattern}"):
+                    return False
+            else:
+                # Для паттернов без путей проверяем только имя файла
+                if fnmatch.fnmatch(os.path.basename(abs_path), pattern):
+                    return False
         
         return True
     except Exception:
@@ -79,13 +85,13 @@ async def read_file(
         Содержимое файла или его части
     """
     try:
-        # Проверка безопасности
-        if not is_safe_path(file_path):
-            return f"❌ Ошибка: небезопасный путь '{file_path}'"
-        
         # Если путь относительный, делаем относительно /workspace
         if not os.path.isabs(file_path):
             file_path = os.path.join("/workspace", file_path)
+        
+        # Проверка безопасности после нормализации пути
+        if not is_safe_path(file_path):
+            return f"❌ Ошибка: небезопасный путь '{file_path}'"
         
         if not os.path.exists(file_path):
             return f"❌ Ошибка: файл '{file_path}' не найден"
@@ -148,13 +154,13 @@ async def write_file(
         Сообщение о результате операции
     """
     try:
-        # Проверка безопасности
-        if not is_safe_path(file_path):
-            return f"❌ Ошибка: небезопасный путь '{file_path}'"
-        
         # Если путь относительный, делаем относительно /workspace
         if not os.path.isabs(file_path):
             file_path = os.path.join("/workspace", file_path)
+        
+        # Проверка безопасности после нормализации пути
+        if not is_safe_path(file_path):
+            return f"❌ Ошибка: небезопасный путь '{file_path}'"
         
         # Создаем директории если нужно
         if create_dirs:
@@ -197,13 +203,13 @@ async def append_to_file(
         Сообщение о результате операции
     """
     try:
-        # Проверка безопасности
-        if not is_safe_path(file_path):
-            return f"❌ Ошибка: небезопасный путь '{file_path}'"
-        
         # Если путь относительный, делаем относительно /workspace
         if not os.path.isabs(file_path):
             file_path = os.path.join("/workspace", file_path)
+        
+        # Проверка безопасности после нормализации пути
+        if not is_safe_path(file_path):
+            return f"❌ Ошибка: небезопасный путь '{file_path}'"
         
         # Проверяем существование файла
         if not os.path.exists(file_path):
@@ -305,6 +311,15 @@ async def list_files(
                     
                     file_path = os.path.relpath(os.path.join(root, filename), directory)
                     full_path = os.path.join(root, filename)
+                    
+                    # Проверяем безопасность файла
+                    skip_file = False
+                    for forbidden in FORBIDDEN_PATTERNS:
+                        if fnmatch.fnmatch(filename, forbidden) or fnmatch.fnmatch(file_path, forbidden):
+                            skip_file = True
+                            break
+                    if skip_file:
+                        continue
                     
                     try:
                         size = os.path.getsize(full_path)
@@ -508,13 +523,13 @@ async def delete_file(
         if not confirm:
             return "⚠️ Для удаления файла установите confirm=True"
         
-        # Проверка безопасности
-        if not is_safe_path(file_path):
-            return f"❌ Ошибка: небезопасный путь '{file_path}'"
-        
         # Если путь относительный, делаем относительно /workspace
         if not os.path.isabs(file_path):
             file_path = os.path.join("/workspace", file_path)
+        
+        # Проверка безопасности после нормализации пути
+        if not is_safe_path(file_path):
+            return f"❌ Ошибка: небезопасный путь '{file_path}'"
         
         if not os.path.exists(file_path):
             return f"❌ Ошибка: файл '{file_path}' не существует"
