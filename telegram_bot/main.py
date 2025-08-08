@@ -23,6 +23,10 @@ from config import bot_config
 from middleware import RateLimiter, log_message
 from handlers.start import start_command
 from handlers.chat import handle_text_message, handle_chat_mode_callback
+from handlers.memory import (
+    handle_memory_menu, handle_memory_search, 
+    handle_memory_add, handle_memory_stats
+)
 from services import ChatService
 
 # Настройка логирования
@@ -100,6 +104,20 @@ class MarkBot:
                 handle_chat_mode_callback,
                 pattern="^chat:mode:"
             )
+        )
+        
+        # Memory callbacks
+        self.app.add_handler(
+            CallbackQueryHandler(handle_memory_menu, pattern="^menu:memory$")
+        )
+        self.app.add_handler(
+            CallbackQueryHandler(handle_memory_search, pattern="^memory:search$")
+        )
+        self.app.add_handler(
+            CallbackQueryHandler(handle_memory_add, pattern="^memory:add$")
+        )
+        self.app.add_handler(
+            CallbackQueryHandler(handle_memory_stats, pattern="^memory:stats$")
         )
         
         # Обработчик ошибок
