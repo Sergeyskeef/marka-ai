@@ -10,7 +10,7 @@ from pathlib import Path
 import ast
 import logging
 
-from ..agents.tools import create_openai_tool
+from .tools import create_openai_tool
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,8 @@ async def analyze_my_capabilities() -> str:
             memory_tools, 
             advanced_memory_tools,
             vector_search_tools,
-            learning_tools
+            learning_tools,
+            file_tools
         )
         
         capabilities = {
@@ -42,7 +43,8 @@ async def analyze_my_capabilities() -> str:
             ("Память", memory_tools),
             ("Продвинутая память", advanced_memory_tools),
             ("Векторный поиск", vector_search_tools),
-            ("Обучение", learning_tools)
+            ("Обучение", learning_tools),
+            ("Работа с файлами", file_tools)
         ]
         
         for category, module in tool_modules:
@@ -70,7 +72,7 @@ async def analyze_my_capabilities() -> str:
         
         # Анализируем ограничения
         capabilities["limitations"] = [
-            "Нет прямого доступа к файловой системе проекта",
+            "Доступ к файлам ограничен безопасными директориями (/workspace, /app, /sandbox)",
             "Песочница изолирована от основной системы",
             "Нет инструментов для работы с Git",
             "Ограниченное время выполнения команд (30 сек)",
@@ -79,9 +81,9 @@ async def analyze_my_capabilities() -> str:
         
         # Даем рекомендации
         capabilities["recommendations"] = [
-            "Для работы с файлами нужны инструменты чтения/записи",
-            "Для тестирования нужен доступ к pytest",
-            "Для анализа кода нужны AST инструменты"
+            "Для тестирования нужен доступ к pytest и возможность запуска тестов",
+            "Для анализа кода нужны AST инструменты и анализ зависимостей",
+            "Для управления пакетами нужны инструменты pip"
         ]
         
         return json.dumps(capabilities, ensure_ascii=False, indent=2)
@@ -130,15 +132,18 @@ async def can_i_do_this(task_description: str) -> str:
                     "✅ Могу обучаться на основе опыта через REAP цикл"
                 )
             elif category == "файл":
-                capabilities_status["cannot_do"].append(
-                    "❌ Не могу работать с файлами напрямую"
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу работать с файлами: читать, писать, искать, удалять"
                 )
-                capabilities_status["need_tools"].append(
-                    "Нужны инструменты: read_file, write_file, list_files"
+                capabilities_status["can_do_fully"].append(
+                    "✅ Поддерживаю: чтение по строкам, поиск по регулярным выражениям, информация о файлах"
                 )
             elif category == "код":
                 capabilities_status["can_do_partially"].append(
-                    "⚠️ Могу выполнять код в песочнице, но не могу читать/писать файлы проекта"
+                    "⚠️ Могу выполнять код в песочнице и работать с файлами проекта"
+                )
+                capabilities_status["can_do_fully"].append(
+                    "✅ Могу читать и анализировать исходный код Python"
                 )
             elif category == "тест":
                 capabilities_status["cannot_do"].append(

@@ -84,7 +84,8 @@ def create_openai_tool(func: Callable) -> Dict[str, Any]:
     # Добавляем атрибут к функции для удобства
     func._openai_tool_definition = tool_definition
     
-    return tool_definition
+    # Возвращаем саму функцию (для использования как декоратор)
+    return func
 
 
 def _python_type_to_json_type(python_type) -> str:
@@ -171,7 +172,9 @@ class ToolRegistry:
         if hasattr(func, '_openai_tool_definition'):
             definition = func._openai_tool_definition
         else:
-            definition = create_openai_tool(func)
+            # Применяем декоратор и получаем определение
+            func = create_openai_tool(func)
+            definition = func._openai_tool_definition
             
         self.tools[tool_name] = func
         self.definitions.append(definition)
@@ -206,8 +209,9 @@ def register_tool(name: str = None):
             return "result"
     """
     def decorator(func: Callable) -> Callable:
-        # Создаем определение
-        definition = create_openai_tool(func)
+        # Применяем create_openai_tool если еще не применен
+        if not hasattr(func, '_openai_tool_definition'):
+            func = create_openai_tool(func)
         
         # Регистрируем в глобальном реестре
         tool_registry.register(func, name)
