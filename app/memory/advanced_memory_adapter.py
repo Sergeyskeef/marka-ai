@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 
 from core.memory.graphiti_adapter import GraphitiMemoryAdapter
+from .neo4j_direct import neo4j_client
 import httpx
 from openai import AsyncOpenAI
 
@@ -84,14 +85,28 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через базовый API
-            result = await self.graphiti.add_episode(
-                text=fact_text,
-                metadata=fact_data
+            # Сохраняем через прямой Neo4j
+            result = await neo4j_client.create_fact(
+                subject=subject,
+                predicate=predicate,
+                object=object,
+                confidence=confidence,
+                source=source,
+                embedding=embedding,
+                metadata=metadata
             )
             
-            logger.info(f"✅ Факт сохранен: {fact_id} - {fact_text}")
-            return {"success": True, "id": fact_id, "fact": fact_text}
+            if result["success"]:
+                # Также сохраняем в Graphiti для совместимости
+                await self.graphiti.add_episode(
+                    text=fact_text,
+                    metadata=fact_data
+                )
+                
+                logger.info(f"✅ Факт сохранен: {result['id']} - {fact_text}")
+                return {"success": True, "id": result["id"], "fact": fact_text}
+            else:
+                return result
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения факта: {e}")
@@ -104,8 +119,34 @@ class AdvancedMemoryAdapter:
         reason: str = ""
     ) -> Dict[str, Any]:
         """Обновить уверенность в факте"""
-        # TODO: Реализовать обновление через Cypher запрос
-        pass
+        try:
+            # Обновляем через прямой Neo4j клиент
+            result = await neo4j_client.update_fact_confidence(
+                fact_id=fact_id,
+                new_confidence=new_confidence,
+                reason=reason
+            )
+            
+            if result["success"]:
+                # Создаем эпизод об обновлении для отслеживания
+                await self.save_episode(
+                    situation=f"Обновление уверенности в факте {fact_id}",
+                    actions_taken=["Анализ новых данных", "Корректировка уверенности"],
+                    outcome="success",
+                    reasoning=reason,
+                    lesson_learned=f"Уверенность изменена с ? на {new_confidence}",
+                    satisfaction=0.9,
+                    metadata={"fact_id": fact_id, "action": "confidence_update"}
+                )
+                
+                logger.info(f"✅ Уверенность факта {fact_id} обновлена: {new_confidence}")
+                return result
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления уверенности: {e}")
+            return {"success": False, "error": str(e)}
     
     async def supersede_fact(
         self,
@@ -117,19 +158,52 @@ class AdvancedMemoryAdapter:
     ) -> Dict[str, Any]:
         """Заменить устаревший факт новым"""
         try:
-            # Сохраняем новый факт
-            new_fact = await self.save_fact(
-                subject=new_subject,
-                predicate=new_predicate,
-                object=new_object,
-                source="fact_update",
-                metadata={"supersedes": old_fact_id, "reason": reason}
+            # Получаем embedding для нового факта
+            new_fact_text = f"{new_subject} {new_predicate} {new_object}"
+            embedding = await self._get_embedding(new_fact_text)
+            
+            # Используем прямой Neo4j для создания связи SUPERSEDES
+            new_fact_data = {
+                "subject": new_subject,
+                "predicate": new_predicate,
+                "object": new_object,
+                "confidence": 0.9,
+                "source": "fact_update",
+                "embedding": embedding,
+                "reason": reason
+            }
+            
+            result = await neo4j_client.supersede_fact(
+                old_fact_id=old_fact_id,
+                new_fact_data=new_fact_data
             )
             
-            # TODO: Создать связь SUPERSEDES в Neo4j
-            # TODO: Установить valid_to для старого факта
-            
-            return new_fact
+            if result["success"]:
+                logger.info(f"✅ Факт {old_fact_id} заменен новым")
+                
+                # Создаем эпизод о замене факта
+                await self.save_episode(
+                    situation=f"Замена устаревшего факта {old_fact_id}",
+                    actions_taken=["Анализ изменений", "Создание нового факта", "Установка связи SUPERSEDES"],
+                    outcome="success",
+                    reasoning=reason,
+                    lesson_learned="Факты могут устаревать и требовать обновления",
+                    satisfaction=0.9,
+                    metadata={
+                        "old_fact_id": old_fact_id,
+                        "new_fact_id": result["new_fact"]["id"],
+                        "action": "fact_supersede"
+                    }
+                )
+                
+                return {
+                    "success": True,
+                    "id": result["new_fact"]["id"],
+                    "old_fact_id": old_fact_id,
+                    "fact": f"{new_subject} {new_predicate} {new_object}"
+                }
+            else:
+                return result
             
         except Exception as e:
             logger.error(f"❌ Ошибка замены факта: {e}")
@@ -183,14 +257,29 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через базовый API
-            result = await self.graphiti.add_episode(
-                text=episode_text,
-                metadata=episode_data
+            # Сохраняем через прямой Neo4j
+            result = await neo4j_client.create_episode(
+                situation=situation,
+                actions_taken=actions_taken,
+                outcome=outcome,
+                reasoning=reasoning,
+                lesson_learned=lesson_learned,
+                satisfaction=satisfaction,
+                embedding=embedding,
+                metadata=metadata
             )
             
-            logger.info(f"✅ Эпизод сохранен: {episode_id}")
-            return {"success": True, "id": episode_id, "outcome": outcome}
+            if result["success"]:
+                # Также сохраняем в Graphiti для совместимости
+                await self.graphiti.add_episode(
+                    text=episode_text,
+                    metadata=episode_data
+                )
+                
+                logger.info(f"✅ Эпизод сохранен: {result['id']}")
+                return {"success": True, "id": result["id"], "outcome": outcome}
+            else:
+                return result
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения эпизода: {e}")
@@ -266,14 +355,29 @@ class AdvancedMemoryAdapter:
                 **(metadata or {})
             }
             
-            # Сохраняем через базовый API
-            result = await self.graphiti.add_episode(
-                text=skill_text,
-                metadata=skill_data
+            # Сохраняем через прямой Neo4j
+            result = await neo4j_client.create_skill(
+                name=name,
+                trigger_patterns=trigger_patterns,
+                procedure=procedure,
+                system_prompt=system_prompt,
+                version=1,
+                performance_score=performance_score,
+                embedding=embedding,
+                metadata=metadata
             )
             
-            logger.info(f"✅ Навык сохранен: {skill_id} - {name}")
-            return {"success": True, "id": skill_id, "name": name}
+            if result["success"]:
+                # Также сохраняем в Graphiti для совместимости
+                await self.graphiti.add_episode(
+                    text=skill_text,
+                    metadata=skill_data
+                )
+                
+                logger.info(f"✅ Навык сохранен: {result['id']} - {name}")
+                return {"success": True, "id": result["id"], "name": name}
+            else:
+                return result
             
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения навыка: {e}")
@@ -288,11 +392,53 @@ class AdvancedMemoryAdapter:
         reason: str
     ) -> Dict[str, Any]:
         """Эволюционировать навык на основе опыта"""
-        # TODO: Реализовать через Cypher запрос
-        # 1. Получить текущий навык
-        # 2. Создать новую версию с version+1
-        # 3. Создать связь EVOLVED_FROM
-        pass
+        try:
+            # Используем прямой Neo4j клиент для эволюции
+            result = await neo4j_client.evolve_skill(
+                old_skill_id=skill_id,
+                improved_procedure=improved_procedure,
+                improved_prompt=improved_prompt,
+                performance_improvement=performance_improvement,
+                reason=reason
+            )
+            
+            if result["success"]:
+                logger.info(f"✅ Навык {skill_id} эволюционировал")
+                
+                # Создаем эпизод об эволюции навыка
+                await self.save_episode(
+                    situation=f"Эволюция навыка {result['old_skill'].get('name', skill_id)}",
+                    actions_taken=[
+                        "Анализ производительности",
+                        "Оптимизация процедуры",
+                        "Улучшение промпта",
+                        "Создание новой версии"
+                    ],
+                    outcome="success",
+                    reasoning=reason,
+                    lesson_learned=f"Навыки можно улучшать на основе опыта. Прирост эффективности: {performance_improvement}",
+                    satisfaction=0.95,
+                    metadata={
+                        "old_skill_id": skill_id,
+                        "new_skill_id": result["new_skill"]["id"],
+                        "improvement": performance_improvement,
+                        "action": "skill_evolution"
+                    }
+                )
+                
+                return {
+                    "success": True,
+                    "new_skill_id": result["new_skill"]["id"],
+                    "old_skill_id": skill_id,
+                    "version": result["new_skill"].get("version", 2),
+                    "improvement": performance_improvement
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка эволюции навыка: {e}")
+            return {"success": False, "error": str(e)}
     
     async def get_relevant_skill(
         self,
@@ -337,17 +483,21 @@ class AdvancedMemoryAdapter:
     async def get_memory_stats(self) -> Dict[str, Any]:
         """Получить статистику памяти по типам"""
         try:
-            # TODO: Реализовать через Cypher запрос
-            # MATCH (n) WHERE n:Fact OR n:Episode OR n:Skill
-            # RETURN labels(n)[0] as type, count(n) as count
+            # Получаем статистику через прямой Neo4j клиент
+            stats = await neo4j_client.get_memory_stats()
             
+            return {
+                "facts": stats["by_type"].get("Fact", 0),
+                "episodes": stats["by_type"].get("Episode", 0),
+                "skills": stats["by_type"].get("Skill", 0),
+                "total": stats["total"]
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения статистики: {e}")
             return {
                 "facts": 0,
                 "episodes": 0,
                 "skills": 0,
                 "total": 0
             }
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения статистики: {e}")
-            return {}

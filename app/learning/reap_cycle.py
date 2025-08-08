@@ -468,7 +468,37 @@ class REAPLearningCycle:
         similar_episodes: List[Dict[str, Any]]
     ) -> List[str]:
         """Найти общие действия в эпизодах"""
-        # TODO: Реализовать анализ общих действий
+        from collections import Counter
+        
+        all_actions = []
+        
+        # Извлекаем действия из основного эпизода
+        episode_actions = episode.get("metadata", {}).get("actions_taken", "[]")
+        if isinstance(episode_actions, str):
+            try:
+                episode_actions = json.loads(episode_actions)
+            except:
+                episode_actions = []
+        all_actions.extend(episode_actions)
+        
+        # Извлекаем действия из похожих эпизодов
+        for ep in similar_episodes:
+            actions = ep.get("metadata", {}).get("actions_taken", "[]")
+            if isinstance(actions, str):
+                try:
+                    actions = json.loads(actions)
+                except:
+                    actions = []
+            all_actions.extend(actions)
+        
+        # Находим частые действия
+        if all_actions:
+            action_counts = Counter(all_actions)
+            # Возвращаем действия, встречающиеся более 2 раз
+            common = [action for action, count in action_counts.items() if count > 2]
+            logger.info(f"🔍 Найдено {len(common)} общих действий из {len(all_actions)} всего")
+            return common
+        
         return []
     
     def _analyze_time_pattern(
@@ -476,11 +506,65 @@ class REAPLearningCycle:
         episodes: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Анализировать временные паттерны"""
-        # TODO: Реализовать анализ временных паттернов
+        from collections import Counter
+        from datetime import datetime as dt
+        
+        hours = []
+        days = []
+        
+        for ep in episodes:
+            occurred_at = ep.get("metadata", {}).get("occurred_at", "")
+            if occurred_at:
+                try:
+                    # Парсим datetime
+                    if isinstance(occurred_at, str):
+                        timestamp = dt.fromisoformat(occurred_at.replace('Z', '+00:00'))
+                    else:
+                        timestamp = occurred_at
+                    
+                    hours.append(timestamp.hour)
+                    days.append(timestamp.weekday())
+                except:
+                    pass
+        
+        # Анализируем частоту по часам
+        peak_hours = []
+        if hours:
+            hour_counts = Counter(hours)
+            # Топ-3 часа по активности
+            peak_hours = [hour for hour, _ in hour_counts.most_common(3)]
+        
+        # Определяем тренд
+        if len(episodes) >= 2:
+            # Сравниваем первую и последнюю половину
+            mid = len(episodes) // 2
+            first_half_success = sum(1 for ep in episodes[:mid] 
+                                   if ep.get("metadata", {}).get("outcome") == "success")
+            second_half_success = sum(1 for ep in episodes[mid:] 
+                                    if ep.get("metadata", {}).get("outcome") == "success")
+            
+            if second_half_success > first_half_success:
+                trend = "improving"
+            elif second_half_success < first_half_success:
+                trend = "declining"
+            else:
+                trend = "stable"
+        else:
+            trend = "insufficient_data"
+        
+        # Определяем частоту
+        if len(episodes) > 20:
+            frequency = "high"
+        elif len(episodes) > 5:
+            frequency = "moderate"
+        else:
+            frequency = "low"
+        
         return {
-            "frequency": "daily",
-            "peak_hours": [14, 15, 16],
-            "trend": "stable"
+            "frequency": frequency,
+            "peak_hours": peak_hours,
+            "trend": trend,
+            "total_episodes": len(episodes)
         }
     
     async def _generate_insights(
@@ -576,8 +660,37 @@ class REAPLearningCycle:
     
     async def _archive_old_memories(self) -> int:
         """Архивировать старые воспоминания"""
-        # TODO: Реализовать архивацию через Cypher
-        return 0
+        try:
+            # Импортируем neo4j_client
+            from app.memory.neo4j_direct import neo4j_client
+            
+            # Выполняем архивацию через прямой Neo4j клиент (90 дней по умолчанию)
+            archived_count = await neo4j_client.archive_old_memories(days_threshold=90)
+            
+            logger.info(f"📦 Архивировано {archived_count} старых воспоминаний")
+            
+            # Создаем эпизод об архивации если что-то архивировано
+            if archived_count > 0:
+                await self.memory.save_episode(
+                    situation="Плановая архивация старых воспоминаний",
+                    actions_taken=[
+                        "Поиск воспоминаний старше 90 дней",
+                        "Проверка на наличие активных связей",
+                        "Добавление метки Archived",
+                        "Обновление временных меток"
+                    ],
+                    outcome="success",
+                    reasoning="Архивация помогает поддерживать производительность системы памяти",
+                    lesson_learned=f"Регулярная архивация необходима. Архивировано {archived_count} элементов",
+                    satisfaction=0.9,
+                    metadata={"archived_count": archived_count, "action": "memory_archival"}
+                )
+            
+            return archived_count
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка архивации: {e}")
+            return 0
     
     async def _update_learning_stats(self):
         """Обновить статистику обучения"""

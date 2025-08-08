@@ -258,13 +258,39 @@ async def update_memory_embeddings(
             force_update=force
         )
         
-        # TODO: Сохранить обновленные embeddings обратно в Graphiti
+        # Сохраняем обновленные embeddings обратно в Neo4j
+        from app.memory.neo4j_direct import neo4j_client
+        
+        saved_count = 0
+        for item in items:
+            item_id = item.get("metadata", {}).get("id")
+            embedding = None
+            
+            # Извлекаем embedding из разных возможных мест
+            if "embedding" in item:
+                embedding = item["embedding"]
+            elif "metadata" in item and "embedding" in item["metadata"]:
+                embedding = item["metadata"]["embedding"]
+            
+            if item_id and embedding:
+                try:
+                    success = await neo4j_client.update_node_embedding(
+                        node_id=item_id,
+                        embedding=embedding
+                    )
+                    if success:
+                        saved_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка сохранения embedding для {item_id}: {e}")
+        
+        logger.info(f"💾 Сохранено в Neo4j: {saved_count} embeddings")
         
         return json.dumps({
             "success": True,
             "total_items": len(items),
             "updated": updated,
-            "message": f"Обновлено {updated} из {len(items)} элементов"
+            "saved_to_neo4j": saved_count,
+            "message": f"Обновлено {updated} embeddings, сохранено в Neo4j: {saved_count}"
         }, ensure_ascii=False)
         
     except Exception as e:
