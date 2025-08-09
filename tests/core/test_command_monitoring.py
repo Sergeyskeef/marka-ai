@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from langchain_api.core.command_monitoring import CommandEvent, CommandMonitoringSystem
+from core.command_monitoring import CommandEvent, CommandMonitoringSystem
 
 
 class TestCommandEvent:

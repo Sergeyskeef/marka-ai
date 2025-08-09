@@ -208,13 +208,46 @@ class SelfAnalyzer:
 
     def _assess_memory_status(self) -> dict:
         """Оценивает состояние памяти"""
-        # TODO: Реализовать проверку использования памяти
-        return {'status': 'good', 'message': self.templates['memory_usage']['good']}
+        try:
+            import psutil
+            # Получаем информацию о памяти процесса
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            memory_percent = process.memory_percent()
+            
+            # Оцениваем использование памяти
+            if memory_percent > 80:
+                return {'status': 'critical', 'message': f"Критическое использование памяти: {memory_percent:.1f}%"}
+            elif memory_percent > 60:
+                return {'status': 'warning', 'message': f"Высокое использование памяти: {memory_percent:.1f}%"}
+            else:
+                return {'status': 'good', 'message': f"Память в норме: {memory_percent:.1f}% ({memory_info.rss / 1024 / 1024:.1f} MB)"}
+        except Exception as e:
+            return {'status': 'unknown', 'message': f"Не удалось проверить память: {e}"}
 
     def _assess_performance(self) -> dict:
         """Оценивает производительность системы"""
-        # TODO: Реализовать проверку производительности
-        return {'status': 'good', 'message': self.templates['performance']['good']}
+        try:
+            import time
+            import httpx
+            
+            # Тестируем время отклика API
+            start_time = time.time()
+            response = httpx.get("http://localhost:8001/health", timeout=5)
+            response_time = (time.time() - start_time) * 1000  # в миллисекундах
+            
+            # Оцениваем производительность
+            if response.status_code != 200:
+                return {'status': 'critical', 'message': "API недоступен"}
+            elif response_time > 1000:
+                return {'status': 'warning', 'message': f"Медленный отклик API: {response_time:.0f}ms"}
+            elif response_time > 500:
+                return {'status': 'ok', 'message': f"Средняя производительность: {response_time:.0f}ms"}
+            else:
+                return {'status': 'good', 'message': f"Отличная производительность: {response_time:.0f}ms"}
+                
+        except Exception as e:
+            return {'status': 'unknown', 'message': f"Не удалось проверить производительность: {e}"}
 
     def _generate_recommendations(self, log_stats: dict, passport_stats: dict, code_quality: dict) -> list[str]:
         """Генерирует рекомендации на основе анализа"""

@@ -4,7 +4,7 @@
 """
 import pytest
 from fastapi.testclient import TestClient
-from langchain_api.main import app
+from main import app
 
 client = TestClient(app)
 

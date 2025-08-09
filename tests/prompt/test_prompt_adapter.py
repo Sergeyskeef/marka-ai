@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from langchain_api.core.prompt_adapter import PromptAdapter, get_prompt_adapter
+from core.prompt_adapter import PromptAdapter, get_prompt_adapter
 
 class TestPromptAdapter:
     """Тесты для адаптера промптов"""

@@ -10,7 +10,7 @@ import unittest.mock as mock
 from unittest.mock import MagicMock, patch, AsyncMock
 import json
 
-from langchain_api.core.graphiti.backend_neo4j import (
+from core.graphiti.backend_neo4j import (
     Neo4jDiaryBackend,
     neo4j_diary_backend
 )
@@ -287,7 +287,7 @@ class TestGlobalBackend:
     
     def test_global_instance_is_singleton(self):
         """Тест что глобальный экземпляр - синглтон"""
-        from langchain_api.core.graphiti.backend_neo4j import neo4j_diary_backend as backend2
+        from core.graphiti.backend_neo4j import neo4j_diary_backend as backend2
         assert neo4j_diary_backend is backend2
 
 

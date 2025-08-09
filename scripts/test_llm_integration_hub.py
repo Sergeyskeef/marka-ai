@@ -16,7 +16,7 @@ import sys
 # Добавляем путь к проекту
 sys.path.insert(0, '/app/langchain_api')
 
-from core.llm_integration_hub import LLMRequest, get_llm_hub, shutdown_llm_hub
+# from core.llm_integration_hub import LLMRequest, get_llm_hub, shutdown_llm_hub  # REMOVED: module deleted
 
 
 async def test_llm_integration_hub():

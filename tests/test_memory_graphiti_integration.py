@@ -8,7 +8,7 @@ import time
 import pytest
 
 # Импортируем компоненты для тестирования
-from langchain_api.core.memory.memory_manager import memory_manager
+from core.memory.memory_manager import memory_manager
 
 
 @pytest.mark.core

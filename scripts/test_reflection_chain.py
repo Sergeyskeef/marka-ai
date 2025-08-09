@@ -1,7 +1,7 @@
 import time
 import uuid
 
-from langchain_api.memory.memory_manager import MemoryManager
+from core.memory.memory_manager import MemoryManager
 
 TEST_QUESTION = "Тестовый вопрос для проверки рефлексии и важно сохранить опыт"
 TEST_ANSWER = "Тестовый ответ ассистента, требующий анализа"

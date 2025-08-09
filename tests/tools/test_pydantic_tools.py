@@ -4,8 +4,8 @@
 """
 
 import pytest
-from langchain_api.utils.toolkit import run_code, search_memory, summarize_text
-from langchain_api.core.tools.schemas import (
+from utils.toolkit import run_code, search_memory, summarize_text
+from core.tools.schemas import (
     CodeExecutionIn, CodeExecutionOut,
     MemoryRetrieveIn, MemoryRetrieveOut,
     SummarizeIn, SummarizeOut
@@ -67,7 +67,7 @@ def test_summarize_text_validation():
 
 def test_tool_imports():
     """Тест импорта функций"""
-    from langchain_api.utils.toolkit import (
+    from utils.toolkit import (
         run_code, search_memory, web_search, 
         graph_search, summarize_text, read_file, write_file
     )

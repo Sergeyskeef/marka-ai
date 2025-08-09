@@ -1,6 +1,6 @@
 import time
 
-from langchain_api.memory.memory_manager import MemoryManager
+from core.memory.memory_manager import MemoryManager
 
 mm = MemoryManager()
 exp = mm.memory_registry.get("Experience")

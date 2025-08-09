@@ -2,11 +2,11 @@ from datetime import datetime
 
 import pytest
 
-from langchain_api.core.reflection.reasoning_chains import (
+from core.reflection.reasoning_chains import (
     ReasoningStep,
     ReasoningSystem,
 )
-from langchain_api.core.reflection.self_learning import (
+from core.reflection.self_learning import (
     LearningPattern,
     SelfLearningSystem,
 )

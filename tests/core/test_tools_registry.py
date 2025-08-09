@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from langchain_api.core.tools_registry import (
+from core.tools_registry import (
     ToolMetadata,
     ToolsRegistry,
     get_available_tools,

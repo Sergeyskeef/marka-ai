@@ -1,9 +1,9 @@
 import logging
 import os
+from typing import Optional
 
 import httpx
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 
 # Настройка логирования
 logging.basicConfig(
@@ -30,7 +30,7 @@ def get_proxy_config() -> dict[str, str]:
 
     return proxies
 
-def get_httpx_client(timeout: float = 60.0) -> httpx.Client | None:
+def get_httpx_client(timeout: float = 60.0) -> Optional[httpx.Client]:
     """Создает httpx клиент с настроенным прокси и таймаутом.
 
     Args:
@@ -61,10 +61,41 @@ def get_httpx_client(timeout: float = 60.0) -> httpx.Client | None:
         logging.error(f"❌ Ошибка при создании HTTP клиента: {e}")
         return None
 
+def get_async_httpx_client(timeout: float = 60.0) -> Optional[httpx.AsyncClient]:
+    """Создает асинхронный httpx клиент с настроенным прокси и таймаутом.
+
+    Args:
+        timeout: Таймаут для HTTP запросов в секундах
+
+    Returns:
+        httpx.AsyncClient или None если прокси не настроен
+    """
+    proxies = get_proxy_config()
+    proxy_url = None
+    if proxies.get("https://"):
+        proxy_url = proxies["https://"]
+    elif proxies.get("http://"):
+        proxy_url = proxies["http://"]
+    if not proxy_url:
+        logging.warning("Прокси не настроен, возвращаем None")
+        return None
+    # Создаем клиент с proxy и таймаутом
+    try:
+        client = httpx.AsyncClient(
+            proxy=proxy_url,
+            timeout=timeout,
+            follow_redirects=True
+        )
+        logging.info(f"✅ Async HTTP клиент с proxy создан успешно (таймаут: {timeout}с)")
+        return client
+    except Exception as e:
+        logging.error(f"❌ Ошибка при создании Async HTTP клиента: {e}")
+        return None
+
 def create_openai_client(
-    base_url: str | None = None,
-    api_key: str | None = None,
-    org_id: str | None = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    org_id: Optional[str] = None,
     timeout: float = 60.0
 ) -> OpenAI:
     """Создает клиент OpenAI с настроенным прокси.
@@ -107,77 +138,62 @@ def create_openai_client(
 
     return OpenAI(**params)
 
-def embeddings(
-    model: str = "text-embedding-3-small",
-    dimensions: int | None = None,
+def create_async_openai_client(
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    org_id: Optional[str] = None,
     timeout: float = 60.0
-) -> OpenAIEmbeddings:
-    """Создает объект эмбеддингов с настроенным прокси.
+) -> AsyncOpenAI:
+    """Создает асинхронный клиент OpenAI с настроенным прокси.
 
     Args:
-        model: Модель для эмбеддингов
-        dimensions: Размерность векторов (опционально)
+        base_url: Базовый URL для API OpenAI (опционально)
+        api_key: API ключ OpenAI (по умолчанию берется из переменных окружения)
+        org_id: ID организации в OpenAI (опционально)
         timeout: Таймаут для HTTP запросов в секундах
 
     Returns:
-        OpenAIEmbeddings: Объект эмбеддингов с настроенным прокси
+        AsyncOpenAI: Асинхронный клиент OpenAI с настроенным прокси
     """
-    http_client = get_httpx_client(timeout=timeout)
-    api_key = os.getenv("OPENAI_API_KEY")
+    http_client = get_async_httpx_client(timeout=timeout)
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    org_id = org_id or os.getenv("OPENAI_ORG_ID")
+
+    if not api_key:
+        logging.error("❌ OPENAI_API_KEY не найден в переменных окружения!")
 
     # Базовые параметры
     params = {
-        "model": model,
-        "openai_api_key": api_key
+        "api_key": api_key
     }
 
-    # Добавляем размерность, если она указана
-    if dimensions:
-        params["dimensions"] = dimensions
+    # Добавляем опциональные параметры если они указаны
+    if base_url:
+        params["base_url"] = base_url
+    if org_id:
+        params["organization"] = org_id
 
-    # Добавляем httpx клиент, если он создан
-    if http_client is not None:
-        params["client"] = http_client
-        logging.info(f"✅ Создан объект эмбеддингов с прокси для модели {model} (таймаут: {timeout}с)")
-    else:
-        logging.warning(f"Создан объект эмбеддингов без прокси для модели {model}")
+    # Если прокси не настроен, вернем клиент по умолчанию
+    if http_client is None:
+        logging.warning("Создаем асинхронный клиент OpenAI без прокси")
+        return AsyncOpenAI(**params)
 
-    return OpenAIEmbeddings(**params)
+    # Добавляем http_client если он создан
+    params["http_client"] = http_client
+    logging.info(f"✅ Создаем асинхронный клиент OpenAI с настроенным прокси (таймаут: {timeout}с)")
 
-# 👉 теперь возвращаем ChatOpenAI с proxy_client внутри
+    return AsyncOpenAI(**params)
 
 # ---------------------------------------------------------
 # Публичный клиент через прокси (не затираем модуль openai)
 # ---------------------------------------------------------
-proxy_client = OpenAI(
-    api_key     = os.getenv("OPENAI_API_KEY"),
-    base_url    = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-    http_client = httpx.Client(proxy=os.getenv("HTTP_PROXY"), timeout=30),
-)
-
-# ---------------------------------------------------------
-# Chat‑модель для всех цепочек проекта
-# ---------------------------------------------------------
-def chat_model(
-    model: str = "gpt-4.1-mini",
-    temperature: float = 0.3,
-    max_tokens: int = 2000,
-    timeout: float = 60.0,
-):
-    return ChatOpenAI(
-        model_name=model,
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        temperature=temperature,
-        max_tokens=max_tokens,
-        request_timeout=timeout,
-    )
+proxy_client = create_openai_client()
 
 # Создаем глобальный клиент OpenAI для использования в проекте
 openai_client = create_openai_client()
 
-# Глобальный объект эмбеддингов для всего проекта
-global_embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+# Создаем глобальный асинхронный клиент
+async_openai_client = create_async_openai_client()
 
-# Экспортируем chat_model, openai_client, embeddings для использования в других модулях
-__all__ = ["chat_model", "openai_client", "embeddings", "global_embeddings"]
+# Экспортируем для использования в других модулях
+__all__ = ["openai_client", "async_openai_client", "create_openai_client", "create_async_openai_client", "proxy_client"]

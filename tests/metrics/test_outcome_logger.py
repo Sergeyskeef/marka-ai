@@ -8,7 +8,7 @@ import time
 import unittest.mock as mock
 from unittest.mock import MagicMock, patch
 
-from langchain_api.core.metrics.outcome_logger import (
+from core.metrics.outcome_logger import (
     OutcomeLogger,
     OutcomeStatus,
     ToolCallOutcome,
@@ -235,7 +235,7 @@ class TestGlobalOutcomeLogger:
     
     def test_global_instance_is_singleton(self):
         """Тест что глобальный экземпляр - синглтон"""
-        from langchain_api.core.metrics.outcome_logger import outcome_logger as logger2
+        from core.metrics.outcome_logger import outcome_logger as logger2
         assert outcome_logger is logger2
 
 

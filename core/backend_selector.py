@@ -10,8 +10,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from langchain_api.memory.graphiti_memory import GraphitiMemoryAdapter
-    from langchain_api.memory.multi_layer_memory import MultiLayerMemory
+    from memory.graphiti_memory import GraphitiMemoryAdapter
+    from memory.multi_layer_memory import MultiLayerMemory
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class BackendSelector:
         """
         try:
             # Импортируем классы здесь, чтобы избежать циклических импортов
-            from langchain_api.memory.graphiti_memory import GraphitiMemoryAdapter
+            from memory.graphiti_memory import GraphitiMemoryAdapter
 
             # Определяем backend для использования
             selected_backend = self._determine_backend(backend, session_id, force_fallback)
@@ -91,7 +91,7 @@ class BackendSelector:
             logger.error(f"❌ Ошибка выбора backend'а: {e}")
             if self.fallback_enabled:
                 logger.info("🔄 Fallback на GraphitiMemoryAdapter")
-                from langchain_api.memory.graphiti_memory import GraphitiMemoryAdapter
+                from memory.graphiti_memory import GraphitiMemoryAdapter
                 return GraphitiMemoryAdapter
             else:
                 raise
@@ -117,7 +117,7 @@ class BackendSelector:
 
         try:
             # 🔗 F2: Используем Connection Pool для избежания переинициализации
-            from langchain_api.core.connection_pool import get_connection_pool
+            from core.connection_pool import get_connection_pool
             pool = get_connection_pool()
 
             instance = pool.get_graphiti_memory_adapter(short_term_limit)
@@ -154,7 +154,7 @@ class BackendSelector:
     def _is_graphiti_available(self) -> bool:
         """Проверить доступность GraphitiMemory"""
         try:
-            from langchain_api.core.graphiti_config import get_graphiti_config
+            from core.graphiti_config import get_graphiti_config
 
             config = get_graphiti_config()
             if not config.enabled:

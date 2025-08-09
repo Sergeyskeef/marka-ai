@@ -13,7 +13,7 @@ import httpx
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langchain_api.utils.openai_proxy_client import create_openai_client
+from utils.openai_proxy_client import create_openai_client
 
 # Создаем клиент OpenAI
 openai_client = create_openai_client(timeout=30.0)
@@ -104,7 +104,7 @@ async def test_tools_api():
         try:
             # Первый запрос - получаем tool_calls
             response = openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
+                model="gpt-5-mini",
                 temperature=0,
                 tools=tools,
                 tool_choice="auto",
@@ -144,7 +144,7 @@ async def test_tools_api():
 
                         # Второй запрос - получаем финальный ответ
                         final_response = openai_client.chat.completions.create(
-                            model="gpt-4.1-mini",
+                            model="gpt-5-mini",
                             temperature=0,
                             messages=messages
                         )
@@ -168,7 +168,7 @@ async def test_forced_tool_call():
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-5-mini",
             temperature=0,
             tools=tools,
             tool_choice={"name": "execute_sandbox_command"},  # Принудительный вызов

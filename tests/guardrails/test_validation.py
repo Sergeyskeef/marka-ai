@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from langchain_api.core.guardrails_client import (
+from core.guardrails_client import (
     GuardrailsValidator,
     validate_llm_input,
     validate_llm_output,

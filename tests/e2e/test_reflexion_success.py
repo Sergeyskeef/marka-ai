@@ -9,7 +9,7 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from langchain_api.core.agent.runner import AgentRunner, agent_runner
+from core.agent.runner import AgentRunner, agent_runner
 
 
 class TestReflexionSuccess:

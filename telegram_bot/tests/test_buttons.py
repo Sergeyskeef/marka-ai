@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from telegram import Update, CallbackQuery, User, Message, Chat
 from telegram.ext import ContextTypes
 
-from langchain_api.telegram_bot.handlers.buttons import (
+from .telegram_bot.handlers.buttons import (
     PreferenceButtons,
     handle_preference_callback,
     handle_feedback,

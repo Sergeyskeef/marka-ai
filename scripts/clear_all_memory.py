@@ -1,6 +1,6 @@
 import logging
 
-from langchain_api.memory.memory_manager import MemoryManager
+from core.memory.memory_manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO)
 

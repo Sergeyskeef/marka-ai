@@ -9,8 +9,11 @@ WORKDIR /bot/langchain_api
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
 
-# Устанавливаем PYTHONPATH
-ENV PYTHONPATH=/bot
+# Устанавливаем PYTHONPATH для импорта модулей app
+ENV PYTHONPATH=/bot/langchain_api
 
-# Запускаем бота
-CMD ["python", "-c", "import asyncio; from langchain_api.telegram_bot.bot import main; asyncio.run(main())"]
+# Переходим в директорию бота
+WORKDIR /bot/langchain_api/telegram_bot
+
+# Запускаем новый main.py
+CMD ["python", "main.py"]

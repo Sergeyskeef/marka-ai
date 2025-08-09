@@ -1,4 +1,4 @@
-from langchain_api.core.reflection.reflection_system import (
+from core.reflection.reflection_system import (
     InsightType,
     ReflectionSystem,
 )

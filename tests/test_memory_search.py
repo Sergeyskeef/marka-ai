@@ -1,4 +1,4 @@
-from langchain_api.memory_logic import memory_search_logic
+from .memory_logic import memory_search_logic
 
 
 class DummyMemoryManager:

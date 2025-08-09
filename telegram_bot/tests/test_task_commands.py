@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from langchain_api.services.security import AccessLevel, TaskCategory
-from langchain_api.services.task_executor import Task, TaskPriority, TaskStatus
-from langchain_api.telegram_bot.handlers.task_commands import (
+from services.security import AccessLevel, TaskCategory
+from services.task_executor import Task, TaskPriority, TaskStatus
+from .telegram_bot.handlers.task_commands import (
     task_analyze,
     task_cancel,
     task_create,

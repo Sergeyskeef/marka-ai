@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from langchain_api.core.reflection.reasoning_chains import (
+from core.reflection.reasoning_chains import (
     ReasoningChain,
     ReasoningStep,
     ReasoningSystem,

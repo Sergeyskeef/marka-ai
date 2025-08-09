@@ -5,7 +5,7 @@ import pytest
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
-import langchain_api.telegram_bot.bot as bot_module
+import telegram_bot.bot as bot_module
 
 
 @pytest.fixture
