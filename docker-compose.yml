@@ -26,7 +26,7 @@ services:
       - marka_net
     volumes:
       - dev_sandbox:/sandbox
-      - .:/app/langchain_api
+      - .:/app
       - ./scripts:/app/scripts
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
