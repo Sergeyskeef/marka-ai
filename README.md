@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Test Coverage](https://img.shields.io/badge/coverage-%E2%89%A550%25-yellow.svg)](.github/workflows/test-coverage.yml)
 
-> ⚡ **Статус проекта:** ✅ READY FOR PRODUCTION! Обновлен на GPT-5-mini (январь 2025) 
+> ⚡ **Статус проекта:** ✅ READY FOR PRODUCTION! Обновлен на GPT-5-mini (август 2025) 
 > 
 > **Достигнуто:**
 > - 📉 Сокращение кода на 60% (удалено 15,000+ строк)
@@ -68,7 +68,7 @@ workspace/
 └── docker-compose.yml   # 6 сервисов
 ```
 
-## 🎨 Новые возможности (январь 2025)
+## 🎨 Новые возможности (август 2025)
 
 ### 📝 Динамическая система промптов
 
