@@ -15,9 +15,13 @@ logger = logging.getLogger(__name__)
 
 # Инициализируем tokenizer для подсчета токенов
 try:
-    tokenizer = tiktoken.encoding_for_model("gpt-4")
+    tokenizer = tiktoken.encoding_for_model("gpt-5-mini")
 except Exception:
-    tokenizer = tiktoken.get_encoding("cl100k_base")
+    # Fallback на GPT-4 encoding если GPT-5 еще не поддерживается tiktoken
+    try:
+        tokenizer = tiktoken.encoding_for_model("gpt-4")
+    except Exception:
+        tokenizer = tiktoken.get_encoding("cl100k_base")
 
 
 def count_tokens(text: str) -> int:

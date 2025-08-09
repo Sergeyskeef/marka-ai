@@ -337,6 +337,7 @@ class ContextArchitect:
         model_configs = {
             "gpt-4": {"max_tokens": 8192, "attention_curve": "standard"},
             "gpt-4.1-mini": {"max_tokens": 16384, "attention_curve": "improved"},
+            "gpt-5-mini": {"max_tokens": 32768, "attention_curve": "advanced"},  # GPT-5 с улучшенной обработкой контекста
             "claude-3": {"max_tokens": 100000, "attention_curve": "flat"},
             "gemini-pro": {"max_tokens": 32768, "attention_curve": "standard"}
         }
@@ -356,5 +357,10 @@ class ContextArchitect:
             self.position_weights[ContextPosition.MIDDLE] = 0.6
             self.position_weights[ContextPosition.MIDDLE_HIGH] = 0.7
             self.position_weights[ContextPosition.MIDDLE_LOW] = 0.65
+        elif config["attention_curve"] == "advanced":
+            # GPT-5 продвинутая обработка - почти равномерное внимание
+            self.position_weights[ContextPosition.MIDDLE] = 0.8
+            self.position_weights[ContextPosition.MIDDLE_HIGH] = 0.85
+            self.position_weights[ContextPosition.MIDDLE_LOW] = 0.8
         
         return optimized

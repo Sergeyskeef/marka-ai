@@ -2,12 +2,12 @@
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
-![OpenAI](https://img.shields.io/badge/OpenAI-Agents_SDK-orange.svg)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--5--mini-orange.svg)
 ![Neo4j](https://img.shields.io/badge/Neo4j-5.0+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Test Coverage](https://img.shields.io/badge/coverage-%E2%89%A550%25-yellow.svg)](.github/workflows/test-coverage.yml)
 
-> ⚡ **Статус проекта:** ✅ ОПТИМИЗАЦИЯ ЗАВЕРШЕНА! 
+> ⚡ **Статус проекта:** ✅ ОПТИМИЗАЦИЯ ЗАВЕРШЕНА! Обновлен на GPT-5-mini (январь 2025) 
 > 
 > **Достигнуто:**
 > - 📉 Сокращение кода на 60% (удалено 15,000+ строк)

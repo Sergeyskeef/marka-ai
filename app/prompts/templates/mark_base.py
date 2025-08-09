@@ -125,7 +125,7 @@ def create_mark_base_prompt() -> PromptTemplate:
         components=components,
         metadata=metadata,
         variables={
-            "model_name": "gpt-4.1-mini",
+            "model_name": "gpt-5-mini",
             "user_id": "",
             "user_preferences": "краткие и точные ответы",
             "user_expertise": "средний",
