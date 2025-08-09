@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_TOOLS: int = 5
     TOOL_TIMEOUT: int = 30  # seconds
     
+    # Prompt Management System
+    PROMPTS_STORAGE_PATH: str = "/workspace/data/prompts"
+    PROMPTS_CACHE_TTL: int = 3600  # 1 hour
+    PROMPTS_MAX_CONTEXT_TOKENS: int = 8192
+    PROMPTS_EVOLUTION_ENABLED: bool = True
+    PROMPTS_EVOLUTION_CHECK_INTERVAL: int = 60  # seconds
+    PROMPTS_ROUTER_ALPHA: float = 0.25  # exploration parameter
+    PROMPTS_DEFAULT_ENVIRONMENT: str = "development"
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

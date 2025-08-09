@@ -6,10 +6,17 @@ import json
 import logging
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+import asyncio
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCall
 from openai.types.chat.chat_completion import ChatCompletion
+
+from ..prompts import (
+    PromptManager, DynamicPromptRouter, ContextArchitect,
+    PromptEvolution
+)
+from ..prompts.templates.mark_base import create_mark_base_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -23,35 +30,57 @@ class MarkAgent:
     - Встроенная поддержка инструментов (tools)
     - Интеграция с Graphiti памятью
     - Модель gpt-4.1-mini по умолчанию
+    - Продвинутая система управления промптами
     """
     
     def __init__(
         self, 
         client: AsyncOpenAI,
         model: str = "gpt-4.1-mini",
-        system_prompt: str = None,
         temperature: float = 0.7,
-        max_tokens: int = None
+        max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None,
+        prompt_manager: Optional[PromptManager] = None,
+        use_dynamic_prompts: bool = True
     ):
         """
         Инициализация агента
         
         Args:
-            client: AsyncOpenAI клиент
-            model: Модель для использования (по умолчанию gpt-4.1-mini)
-            system_prompt: Системный промпт
+            client: Клиент OpenAI
+            model: Модель для использования
             temperature: Температура генерации
             max_tokens: Максимальное количество токенов
+            system_prompt: Системный промпт (если не используется динамический)
+            prompt_manager: Менеджер промптов
+            use_dynamic_prompts: Использовать ли динамическую систему промптов
         """
         self.client = client
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.tools = []
-        self.tool_functions = {}
-        
-        # Системный промпт по умолчанию
         self.system_prompt = system_prompt or self._get_default_system_prompt()
+        
+        # Система промптов
+        self.prompt_manager = prompt_manager
+        self.use_dynamic_prompts = use_dynamic_prompts and prompt_manager is not None
+        
+        if self.use_dynamic_prompts:
+            # Инициализируем компоненты системы промптов
+            self.prompt_router = DynamicPromptRouter(prompt_manager)
+            self.context_architect = ContextArchitect()
+            self.prompt_evolution = PromptEvolution(prompt_manager)
+            
+            # Создаем и сохраняем базовый промпт если его нет
+            asyncio.create_task(self._ensure_base_prompt())
+        
+        # Инструменты
+        self.tools: List[Dict[str, Any]] = []
+        self.tool_functions: Dict[str, Any] = {}
+        
+        # История
+        self.conversation_history: List[Dict[str, str]] = []
+        self.total_tokens_used = 0
         
         logger.info(f"✅ MarkAgent инициализирован с моделью {model}")
     
@@ -140,6 +169,19 @@ class MarkAgent:
                 "tokens_used": response.usage.total_tokens if response.usage else None
             }
             
+            # Обновляем историю
+            self.conversation_history.append({"role": "user", "content": message})
+            self.conversation_history.append({"role": "assistant", "content": result["content"]})
+            
+            # Обновляем награду в роутере если используем динамические промпты
+            if self.use_dynamic_prompts and hasattr(self, '_last_prompt_name'):
+                quality = self._evaluate_response_quality(result)
+                await self.prompt_router.update_reward(
+                    self._last_prompt_name,
+                    self._last_router_context,
+                    quality
+                )
+            
             return result
             
         except Exception as e:
@@ -149,37 +191,6 @@ class MarkAgent:
                 "error": True,
                 "metadata": {"error": str(e)}
             }
-    
-    def _prepare_messages(
-        self, 
-        message: str, 
-        context: Optional[List[Dict[str, str]]] = None,
-        user_id: Optional[str] = None
-    ) -> List[Dict[str, str]]:
-        """Подготовка сообщений для API"""
-        messages = []
-        
-        # Системное сообщение
-        messages.append({
-            "role": "system",
-            "content": self.system_prompt
-        })
-        
-        # Добавляем контекст если есть
-        if context:
-            messages.extend(context)
-        
-        # Сообщение пользователя
-        user_content = message
-        if user_id:
-            user_content = f"[User: {user_id}] {message}"
-            
-        messages.append({
-            "role": "user",
-            "content": user_content
-        })
-        
-        return messages
     
     async def _process_response(
         self, 
@@ -305,3 +316,178 @@ class MarkAgent:
         )
         
         return response.choices[0].message.content
+
+    async def _ensure_base_prompt(self):
+        """Убедиться что базовый промпт существует"""
+        try:
+            base_prompt = await self.prompt_manager.get_prompt("mark_base")
+            if not base_prompt:
+                logger.info("Создаю базовый промпт Mark")
+                base_prompt = create_mark_base_prompt()
+                await self.prompt_manager.save_prompt(base_prompt)
+                
+                # Запускаем мониторинг эволюции
+                if hasattr(self, 'prompt_evolution'):
+                    await self.prompt_evolution.start_monitoring("mark_base")
+        except Exception as e:
+            logger.error(f"Ошибка создания базового промпта: {e}")
+    
+    async def _prepare_messages_dynamic(
+        self,
+        message: str,
+        context: Optional[List[Dict[str, str]]] = None,
+        user_id: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Подготовка сообщений с динамическим промптом"""
+        # Подготавливаем контекст для роутера
+        router_context = {
+            "query": message,
+            "user_id": user_id or "unknown",
+            "complexity": self._estimate_complexity(message),
+            "domain": self._classify_domain(message),
+            "requires_memory": "помни" in message.lower() or "запомни" in message.lower(),
+            "requires_tools": any(kw in message.lower() for kw in ["файл", "код", "тест", "анализ"]),
+            "conversation_length": len(self.conversation_history)
+        }
+        
+        # Выбираем оптимальный промпт
+        prompt_template, confidence = await self.prompt_router.select_prompt(router_context)
+        logger.info(f"Выбран промпт: {prompt_template.name} (уверенность: {confidence:.2f})")
+        
+        # Подготавливаем данные для контекста
+        context_data = {
+            "model_name": self.model,
+            "user_id": user_id or "",
+            "user_query": message,
+            "interaction_count": len(self.conversation_history),
+            "working_memory": self._get_working_memory()
+        }
+        
+        # Строим оптимизированный контекст
+        optimized_context, metrics = self.context_architect.architect_context(
+            template=prompt_template,
+            context_data=context_data,
+            optimization_mode="balanced"
+        )
+        
+        logger.debug(f"Метрики контекста: {metrics}")
+        
+        # Формируем сообщения
+        messages = [{"role": "system", "content": optimized_context}]
+        
+        # Добавляем историю
+        if context:
+            messages.extend(context)
+        
+        messages.append({"role": "user", "content": message})
+        
+        # Сохраняем информацию для оценки качества
+        self._last_prompt_name = prompt_template.name
+        self._last_router_context = router_context
+        
+        return messages
+    
+    def _estimate_complexity(self, message: str) -> float:
+        """Оценка сложности запроса"""
+        # Простая эвристика
+        complexity = 0.3  # базовая сложность
+        
+        # Увеличиваем за длину
+        if len(message) > 200:
+            complexity += 0.2
+        if len(message) > 500:
+            complexity += 0.2
+            
+        # Увеличиваем за технические термины
+        tech_terms = ["код", "функция", "класс", "тест", "анализ", "рефакторинг"]
+        for term in tech_terms:
+            if term in message.lower():
+                complexity += 0.1
+                
+        return min(complexity, 1.0)
+    
+    def _classify_domain(self, message: str) -> str:
+        """Классификация домена запроса"""
+        message_lower = message.lower()
+        
+        if any(kw in message_lower for kw in ["код", "программ", "функц", "класс", "тест"]):
+            return "technical"
+        elif any(kw in message_lower for kw in ["расскаж", "объясни", "помоги понять"]):
+            return "educational"
+        elif any(kw in message_lower for kw in ["напиши", "создай", "придумай"]):
+            return "creative"
+        else:
+            return "general"
+    
+    def _get_working_memory(self) -> str:
+        """Получение текущей рабочей памяти"""
+        # Берем последние 3 обмена из истории
+        recent = self.conversation_history[-6:] if len(self.conversation_history) > 6 else self.conversation_history
+        
+        memory_parts = []
+        for msg in recent:
+            role = msg.get("role", "")
+            content = msg.get("content", "")[:200]  # Ограничиваем длину
+            memory_parts.append(f"{role}: {content}")
+        
+        return "\n".join(memory_parts)
+    
+    def _prepare_messages(
+        self, 
+        message: str, 
+        context: Optional[List[Dict[str, str]]] = None,
+        user_id: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Подготовка сообщений для API"""
+        # Если используем динамические промпты, делегируем
+        if self.use_dynamic_prompts:
+            # Возвращаем синхронную обертку для обратной совместимости
+            import asyncio
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(
+                self._prepare_messages_dynamic(message, context, user_id)
+            )
+        
+        # Иначе используем статический промпт
+        messages = []
+        
+        # Системное сообщение
+        messages.append({
+            "role": "system",
+            "content": self.system_prompt
+        })
+        
+        # Добавляем контекст если есть
+        if context:
+            messages.extend(context)
+        
+        # Добавляем сообщение пользователя
+        messages.append({
+            "role": "user", 
+            "content": message
+        })
+        
+        return messages
+
+    def _evaluate_response_quality(self, result: Dict[str, Any]) -> float:
+        """Оценка качества ответа для обновления награды"""
+        # Базовая оценка
+        quality = 0.7
+        
+        # Проверяем длину ответа
+        content = result.get("content", "")
+        if len(content) < 10:
+            quality -= 0.3  # Слишком короткий
+        elif len(content) > 2000:
+            quality -= 0.1  # Возможно слишком многословный
+        
+        # Проверяем наличие ошибок
+        if result.get("error"):
+            quality = 0.1  # Минимальная оценка при ошибке
+        
+        # Проверяем использование инструментов
+        if result.get("tool_calls"):
+            quality += 0.1  # Бонус за использование инструментов
+        
+        # Ограничиваем диапазон
+        return max(0.0, min(1.0, quality))

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import asyncio
 import aiofiles
-from redis import Redis
+from redis.asyncio import Redis
 import logging
 
 from .base import (
@@ -34,11 +34,11 @@ class PromptManager:
     def __init__(self, 
                  storage_path: Optional[Path] = None,
                  redis_client: Optional[Redis] = None):
-        self.storage_path = storage_path or Path("/workspace/data/prompts")
+        self.storage_path = storage_path or Path(settings.PROMPTS_STORAGE_PATH)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         
         self.redis = redis_client
-        self.cache_ttl = 3600  # 1 час
+        self.cache_ttl = settings.PROMPTS_CACHE_TTL
         
         # Хранилище промптов в памяти
         self._templates: Dict[str, Dict[str, PromptTemplate]] = {}
@@ -47,8 +47,22 @@ class PromptManager:
         # Метрики
         self._usage_stats: Dict[str, Dict[str, Any]] = {}
         
-        # Загружаем промпты при инициализации
-        asyncio.create_task(self._load_all_prompts())
+        # Задача загрузки будет запущена извне
+        self._load_task = None
+    
+    async def startup(self):
+        """Запуск менеджера - загрузка промптов"""
+        if self._load_task is None:
+            self._load_task = asyncio.create_task(self._load_all_prompts())
+    
+    async def shutdown(self):
+        """Остановка менеджера"""
+        if self._load_task and not self._load_task.done():
+            self._load_task.cancel()
+            try:
+                await self._load_task
+            except asyncio.CancelledError:
+                pass
     
     async def _load_all_prompts(self):
         """Загрузка всех промптов из хранилища"""
@@ -96,7 +110,7 @@ class PromptManager:
         # Кешируем в Redis если доступен
         if self.redis:
             cache_key = f"prompt:{template.metadata.environment}:{template.name}:{template.metadata.version}"
-            self.redis.setex(
+            await self.redis.setex(
                 cache_key,
                 self.cache_ttl,
                 template.json()
@@ -113,7 +127,7 @@ class PromptManager:
         # Проверяем кеш Redis
         if self.redis and version:
             cache_key = f"prompt:{environment}:{name}:{version}"
-            cached = self.redis.get(cache_key)
+            cached = await self.redis.get(cache_key)
             if cached:
                 return PromptTemplate.parse_raw(cached)
         

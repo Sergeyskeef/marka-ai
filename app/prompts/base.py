@@ -9,8 +9,20 @@ from enum import Enum
 from pydantic import BaseModel, Field
 import json
 import logging
+import tiktoken
 
 logger = logging.getLogger(__name__)
+
+# Инициализируем tokenizer для подсчета токенов
+try:
+    tokenizer = tiktoken.encoding_for_model("gpt-4")
+except Exception:
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str) -> int:
+    """Точный подсчет токенов"""
+    return len(tokenizer.encode(text))
 
 
 class PromptLayer(Enum):
@@ -86,8 +98,8 @@ class PromptTemplate(BaseModel):
                 if component.tokens:
                     total += component.tokens
                 else:
-                    # Грубая оценка: ~4 символа на токен
-                    total += len(component.content) // 4
+                    # Точный подсчет токенов
+                    total += count_tokens(component.content)
         return total
 
 

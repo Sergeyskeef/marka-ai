@@ -7,12 +7,14 @@ from .manager import PromptManager
 from .evolution import PromptEvolution
 from .context_architect import ContextArchitect
 from .router import DynamicPromptRouter
+from .factory import PromptSystemFactory
 
 __all__ = [
     'PromptManager',
     'PromptEvolution', 
     'ContextArchitect',
-    'DynamicPromptRouter'
+    'DynamicPromptRouter',
+    'PromptSystemFactory'
 ]
 
 __version__ = '1.0.0'

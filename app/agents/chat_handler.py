@@ -19,29 +19,68 @@ from .test_tools import TEST_TOOLS
 from .code_analysis_tools import CODE_ANALYSIS_TOOLS
 from .dependency_tools import DEPENDENCY_TOOLS
 from core.memory.memory_manager import memory_manager
+from ..prompts import PromptSystemFactory
+from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
 # Глобальный экземпляр агента (будет инициализирован позже)
 _agent_instance: Optional[MarkAgent] = None
+_prompt_system: Optional[dict] = None
 
 
 async def get_agent() -> MarkAgent:
     """Получить или создать экземпляр агента"""
-    global _agent_instance
+    global _agent_instance, _prompt_system
     
     if _agent_instance is None:
         # Создаем OpenAI клиент
         client = AsyncOpenAI()
         
-        # Создаем агента с настройками из конфигурации
-        from app.config import settings
-        _agent_instance = MarkAgent(
-            client=client,
-            model=settings.OPENAI_MODEL,
-            temperature=settings.OPENAI_TEMPERATURE,
-            max_tokens=settings.OPENAI_MAX_TOKENS
-        )
+        # Создаем систему промптов
+        try:
+            from app.config import settings
+            redis_client = None
+            
+            # Пытаемся подключиться к Redis если настроен
+            if settings.REDIS_URL:
+                try:
+                    redis_client = Redis.from_url(settings.REDIS_URL)
+                    await redis_client.ping()
+                    logger.info("✅ Подключен к Redis для системы промптов")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось подключиться к Redis: {e}")
+                    redis_client = None
+            
+            # Создаем систему промптов
+            _prompt_system = await PromptSystemFactory.create_system(
+                redis_client=redis_client
+            )
+            
+            # Создаем агента с системой промптов
+            _agent_instance = MarkAgent(
+                client=client,
+                model=settings.OPENAI_MODEL,
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                prompt_manager=_prompt_system["manager"],
+                use_dynamic_prompts=True
+            )
+            
+            logger.info("✅ Агент создан с динамической системой промптов")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания системы промптов: {e}")
+            logger.info("⚠️ Создаю агента без динамических промптов")
+            
+            # Fallback - создаем агента без системы промптов
+            _agent_instance = MarkAgent(
+                client=client,
+                model=settings.OPENAI_MODEL,
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                use_dynamic_prompts=False
+            )
         
         # Регистрируем все инструменты
         all_tools = (MEMORY_TOOLS + ADVANCED_MEMORY_TOOLS + 
@@ -202,6 +241,22 @@ async def _process_result(
         logger.error(f"⚠️ Не удалось сохранить диалог: {str(e)}")
     
     return result
+
+
+async def shutdown_agent():
+    """Корректное завершение работы агента и системы промптов"""
+    global _agent_instance, _prompt_system
+    
+    if _prompt_system:
+        try:
+            await PromptSystemFactory.shutdown_system(_prompt_system)
+            logger.info("✅ Система промптов остановлена")
+        except Exception as e:
+            logger.error(f"❌ Ошибка остановки системы промптов: {e}")
+        _prompt_system = None
+    
+    _agent_instance = None
+    logger.info("✅ Агент остановлен")
 
 
 # Функция обратной совместимости с simple_chat
