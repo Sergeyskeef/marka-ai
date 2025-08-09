@@ -44,6 +44,11 @@ class PromptManager:
         self._templates: Dict[str, Dict[str, PromptTemplate]] = {}
         self._active_versions: Dict[str, str] = {}  # name -> active version
         
+        # Индексы для быстрого поиска
+        self._name_index: Dict[str, List[str]] = {}  # name -> [env:name keys]
+        self._tag_index: Dict[str, List[str]] = {}   # tag -> [template keys]
+        self._version_index: Dict[str, str] = {}     # env:name:version -> env:name
+        
         # Метрики
         self._usage_stats: Dict[str, Dict[str, Any]] = {}
         
@@ -80,7 +85,7 @@ class PromptManager:
             logger.error(f"Ошибка загрузки промптов: {e}")
     
     def _store_in_memory(self, template: PromptTemplate):
-        """Сохранение промпта в памяти"""
+        """Сохранение промпта в памяти с индексацией"""
         key = f"{template.metadata.environment}:{template.name}"
         if key not in self._templates:
             self._templates[key] = {}
@@ -91,6 +96,24 @@ class PromptManager:
         if (key not in self._active_versions or 
             template.metadata.environment == "production"):
             self._active_versions[key] = template.metadata.version
+        
+        # Обновляем индексы
+        # Индекс по имени
+        if template.name not in self._name_index:
+            self._name_index[template.name] = []
+        if key not in self._name_index[template.name]:
+            self._name_index[template.name].append(key)
+        
+        # Индекс по тегам
+        for tag in template.metadata.tags:
+            if tag not in self._tag_index:
+                self._tag_index[tag] = []
+            if key not in self._tag_index[tag]:
+                self._tag_index[tag].append(key)
+        
+        # Индекс по версиям
+        version_key = f"{key}:{template.metadata.version}"
+        self._version_index[version_key] = key
     
     async def save_prompt(self, template: PromptTemplate) -> str:
         """Сохранение промпта"""
@@ -280,3 +303,35 @@ class PromptManager:
             })
         
         return sorted(history, key=lambda x: x["created_at"], reverse=True)
+    
+    async def find_by_tags(self, tags: List[str], environment: str = None) -> List[PromptTemplate]:
+        """Поиск промптов по тегам"""
+        results = []
+        
+        # Находим все ключи для указанных тегов
+        keys = set()
+        for tag in tags:
+            if tag in self._tag_index:
+                keys.update(self._tag_index[tag])
+        
+        # Фильтруем по окружению если указано
+        for key in keys:
+            if environment and not key.startswith(f"{environment}:"):
+                continue
+            
+            # Получаем активную версию
+            active_version = self._active_versions.get(key)
+            if active_version and key in self._templates:
+                template = self._templates[key].get(active_version)
+                if template:
+                    results.append(template)
+        
+        return results
+    
+    def clear_cache(self):
+        """Очистка кеша промптов"""
+        # В текущей реализации очищаем только Redis кеш
+        # В памяти данные остаются для быстрого доступа
+        if self.redis:
+            # Здесь можно добавить логику очистки Redis
+            logger.info("Кеш промптов очищен")

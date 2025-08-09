@@ -34,10 +34,11 @@ from core.memory.prefs import get_user_pref, upsert_user_pref, get_all_user_pref
 # from rag.rag_chain import generate_response
 # from rag.enhanced_rag_chain import generate_response
 # from .simple_chat import simple_chat  # REPLACED with OpenAI SDK
-from app.agents.chat_handler import simple_chat, enhanced_chat
+from app.agents.chat_handler import simple_chat, enhanced_chat, shutdown_agent
 # Удалены импорты неиспользуемых роутеров
 from routers.task_router import router as task_router
 from routes.trace_ui import router as trace_router
+from app.api.prompts_api import register_prompts_api
 from utils.toolkit import get_tools_for_agent, tool_registry
 from sandbox.sandbox_manager import SandboxManager
 from sandbox.task_planning_system import task_planner
@@ -174,6 +175,9 @@ app.include_router(task_router)
 app.include_router(trace_router)
 # Удалены неиспользуемые роутеры
 
+# Регистрируем API для промптов
+register_prompts_api(app)
+
 # Подключаем метрики
 # metrics.setup_metrics(app)  # Убираем конфликтующий вызов
 
@@ -219,6 +223,12 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Очистка ресурсов при остановке приложения"""
+    # Останавливаем систему промптов
+    try:
+        await shutdown_agent()
+    except Exception as e:
+        logger.error(f"Ошибка остановки системы промптов: {e}")
+    
     logger.info("Приложение остановлено")
 
 

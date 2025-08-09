@@ -9,9 +9,11 @@ from datetime import datetime
 import logging
 from collections import defaultdict
 import asyncio
+import time
 
 from .base import PromptTemplate, PromptLayer
 from .manager import PromptManager
+from .metrics import metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,8 @@ class DynamicPromptRouter:
         Returns:
             Tuple[PromptTemplate, confidence_score]
         """
+        start_time = time.time()
+        
         # Извлекаем признаки контекста
         features = self.context_features.extract(context)
         
@@ -108,6 +112,15 @@ class DynamicPromptRouter:
         
         logger.info(f"Выбран промпт {selected_name} с уверенностью {confidence:.3f}")
         
+        # Записываем метрики
+        duration = time.time() - start_time
+        metrics_collector.record_selection(
+            selected_name,
+            environment,
+            confidence,
+            duration
+        )
+        
         return selected_prompt, confidence
     
     async def update_reward(self, 
@@ -129,6 +142,9 @@ class DynamicPromptRouter:
             environment="production",
             metrics={"reward": reward}
         )
+        
+        # Записываем метрику награды
+        metrics_collector.record_reward(prompt_name, reward)
     
     def _calculate_cost_factor(self, 
                              prompt: PromptTemplate,
@@ -192,21 +208,30 @@ class LinUCBArm:
         self.b = np.zeros(feature_dim)     # Вектор наград
         self.theta = None                   # Оценка параметров
         
+        # Кеш для обратной матрицы
+        self._A_inv = np.identity(feature_dim)
+        self._A_inv_valid = True
+        
         # Статистика
         self.num_selections = 0
         self.total_reward = 0.0
         
     def get_ucb(self, features: np.ndarray, alpha: float) -> float:
-        """Вычисление Upper Confidence Bound"""
-        # Решаем систему A * theta = b
-        self.theta = np.linalg.solve(self.A, self.b)
+        """Вычисление Upper Confidence Bound с кешированием"""
+        # Вычисляем обратную матрицу если нужно
+        if not self._A_inv_valid:
+            self._A_inv = np.linalg.inv(self.A)
+            self._A_inv_valid = True
+        
+        # Решаем систему используя кешированную обратную матрицу
+        self.theta = self._A_inv.dot(self.b)
         
         # Предсказанная награда
         predicted_reward = features.dot(self.theta)
         
         # Бонус за исследование
         exploration_bonus = alpha * np.sqrt(
-            features.dot(np.linalg.solve(self.A, features))
+            features.dot(self._A_inv.dot(features))
         )
         
         return predicted_reward + exploration_bonus
@@ -217,6 +242,9 @@ class LinUCBArm:
         self.b += features * reward
         self.num_selections += 1
         self.total_reward += reward
+        
+        # Инвалидируем кеш обратной матрицы
+        self._A_inv_valid = False
     
     def get_average_reward(self) -> float:
         """Средняя награда"""

@@ -6,8 +6,10 @@
 from typing import Dict, List, Optional, Any, Tuple
 import logging
 from enum import IntEnum
+import time
 
 from .base import PromptTemplate, PromptComponent, PromptLayer
+from .metrics import metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,8 @@ class ContextArchitect:
         Returns:
             Tuple[оптимизированный_контекст, метрики]
         """
+        start_time = time.time()
+        
         # Собираем компоненты по позициям
         positioned_components = self._position_components(template)
         
@@ -112,6 +116,17 @@ class ContextArchitect:
         
         # Собираем метрики
         metrics = self._calculate_metrics(final_context, positioned_components)
+        
+        # Записываем метрики производительности
+        duration = time.time() - start_time
+        metrics_collector.record_optimization_time(duration)
+        
+        # Обновляем метрику использования контекста
+        if hasattr(template, 'name'):
+            metrics_collector.update_context_utilization(
+                template.name,
+                metrics.get("utilization", 0)
+            )
         
         return final_context, metrics
     
