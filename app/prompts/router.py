@@ -40,6 +40,7 @@ class DynamicPromptRouter:
         
         # История выборов
         self.selection_history: List[Dict[str, Any]] = []
+        self.max_history_size = 1000  # Ограничение размера истории
         
         # Контекстные признаки
         self.context_features = ContextFeatureExtractor()
@@ -68,7 +69,12 @@ class DynamicPromptRouter:
             candidates = [p["name"] for p in all_prompts if p["active_version"]]
         
         if not candidates:
-            raise ValueError("Нет доступных промптов")
+            # Создаем дефолтный промпт если нет других
+            logger.warning("Нет доступных промптов, создаю дефолтный")
+            from .templates.mark_base import create_mark_base_prompt
+            default_prompt = create_mark_base_prompt()
+            await self.prompt_manager.save_prompt(default_prompt)
+            candidates = [default_prompt.name]
         
         # Инициализируем arms для новых промптов
         for name in candidates:
@@ -109,6 +115,10 @@ class DynamicPromptRouter:
             "confidence": confidence,
             "candidates": ucb_scores
         })
+        
+        # Ограничиваем размер истории
+        if len(self.selection_history) > self.max_history_size:
+            self.selection_history = self.selection_history[-self.max_history_size:]
         
         logger.info(f"Выбран промпт {selected_name} с уверенностью {confidence:.3f}")
         

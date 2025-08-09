@@ -335,3 +335,41 @@ class PromptManager:
         if self.redis:
             # Здесь можно добавить логику очистки Redis
             logger.info("Кеш промптов очищен")
+    
+    async def cleanup_old_versions(self, keep_versions: int = 10):
+        """Очистка старых версий промптов, оставляя только последние N версий"""
+        cleaned_count = 0
+        
+        for key, versions in list(self._templates.items()):
+            if len(versions) > keep_versions:
+                # Сортируем версии по времени создания
+                sorted_versions = sorted(
+                    versions.items(),
+                    key=lambda x: x[1].metadata.created_at,
+                    reverse=True
+                )
+                
+                # Оставляем только последние keep_versions
+                versions_to_keep = dict(sorted_versions[:keep_versions])
+                versions_to_remove = sorted_versions[keep_versions:]
+                
+                # Удаляем старые версии
+                for version, template in versions_to_remove:
+                    # Удаляем из индексов
+                    version_key = f"{key}:{version}"
+                    if version_key in self._version_index:
+                        del self._version_index[version_key]
+                    
+                    # Удаляем файл
+                    env = template.metadata.environment
+                    filename = f"{template.name}_{version}.json"
+                    filepath = self.storage_path / env / filename
+                    if filepath.exists():
+                        filepath.unlink()
+                        cleaned_count += 1
+                
+                # Обновляем хранилище
+                self._templates[key] = versions_to_keep
+        
+        logger.info(f"Очищено {cleaned_count} старых версий промптов")
+        return cleaned_count

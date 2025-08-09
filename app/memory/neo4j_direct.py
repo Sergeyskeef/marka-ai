@@ -42,7 +42,11 @@ class Neo4jDirectClient:
                 try:
                     self.driver = AsyncGraphDatabase.driver(
                         self.uri,
-                        auth=(self.username, self.password)
+                        auth=(self.username, self.password),
+                        connection_timeout=10.0,  # 10 секунд на подключение
+                        max_connection_lifetime=3600,  # 1 час максимум жизни соединения
+                        max_connection_pool_size=50,
+                        connection_acquisition_timeout=60.0  # 60 секунд на получение соединения из пула
                     )
                     # Проверяем подключение
                     async with self.driver.session() as session:

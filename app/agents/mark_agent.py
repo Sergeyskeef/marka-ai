@@ -29,14 +29,14 @@ class MarkAgent:
     - Прямое использование OpenAI API без абстракций
     - Встроенная поддержка инструментов (tools)
     - Интеграция с Graphiti памятью
-    - Модель gpt-4.1-mini по умолчанию
+    - Модель gpt-4o-mini по умолчанию
     - Продвинутая система управления промптами
     """
     
     def __init__(
         self, 
         client: AsyncOpenAI,
-        model: str = "gpt-4.1-mini",
+        model: str = "gpt-4o-mini",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,

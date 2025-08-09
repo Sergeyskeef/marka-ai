@@ -37,8 +37,8 @@ FORBIDDEN_PATTERNS = [
 def is_safe_path(path: str) -> bool:
     """Проверка безопасности пути"""
     try:
-        # Преобразуем в абсолютный путь
-        abs_path = os.path.abspath(path)
+        # Преобразуем в абсолютный путь и резолвим симлинки
+        abs_path = os.path.realpath(os.path.abspath(path))
         
         # Проверяем, что путь в безопасных директориях
         is_in_safe_dir = any(

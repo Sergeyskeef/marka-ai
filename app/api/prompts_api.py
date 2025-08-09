@@ -144,13 +144,29 @@ async def create_prompt(request: PromptCreateRequest):
         # Создаем компоненты
         components = {}
         for layer_name, component_list in request.components.items():
-            layer = PromptLayer[layer_name]
+            # Валидация имени слоя
+            try:
+                layer = PromptLayer[layer_name]
+            except KeyError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Неизвестный слой: {layer_name}. Доступные: {[l.name for l in PromptLayer]}"
+                )
+            
             components[layer] = []
             
             for comp_data in component_list:
+                # Валидация размера контента
+                content = comp_data.get("content", "")
+                if len(content) > 10000:  # Максимум 10К символов
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Контент слишком большой: {len(content)} символов (максимум 10000)"
+                    )
+                
                 component = PromptComponent(
                     layer=layer,
-                    content=comp_data["content"],
+                    content=content,
                     priority=comp_data.get("priority", 5),
                     dynamic=comp_data.get("dynamic", False)
                 )

@@ -146,6 +146,16 @@ class PromptEvolution:
                 break
             except Exception as e:
                 logger.error(f"Ошибка мониторинга {prompt_name}: {e}")
+                # Увеличиваем счетчик ошибок
+                if not hasattr(self, '_error_counts'):
+                    self._error_counts = {}
+                self._error_counts[prompt_name] = self._error_counts.get(prompt_name, 0) + 1
+                
+                # Если слишком много ошибок - останавливаем мониторинг
+                if self._error_counts[prompt_name] >= 5:
+                    logger.error(f"Слишком много ошибок для {prompt_name}, останавливаю мониторинг")
+                    break
+                
                 await asyncio.sleep(300)  # Ждем 5 минут при ошибке
     
     async def _collect_prompt_stats(self, 
