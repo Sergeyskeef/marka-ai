@@ -1,19 +1,28 @@
 FROM python:3.10-slim
-WORKDIR /bot
 
-# Копируем весь проект
-COPY . /bot/langchain_api/
+WORKDIR /app
 
-# Устанавливаем зависимости
-WORKDIR /bot/langchain_api
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
+# Install system dependencies if needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем PYTHONPATH для импорта модулей app
-ENV PYTHONPATH=/bot/langchain_api
+# Copy only requirements first for better caching
+COPY requirements.txt telegram_bot/requirements.txt* ./
+COPY telegram_bot/requirements.txt* ./telegram_bot/
 
-# Переходим в директорию бота
-WORKDIR /bot/langchain_api/telegram_bot
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
 
-# Запускаем новый main.py
+# Copy the rest of the application
+COPY . .
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Set working directory to telegram_bot
+WORKDIR /app/telegram_bot
+
+# Run the bot
 CMD ["python", "main.py"]

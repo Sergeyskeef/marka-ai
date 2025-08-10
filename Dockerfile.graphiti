@@ -2,12 +2,12 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка Python зависимостей
+# Install Python dependencies first for better caching
 RUN pip install --no-cache-dir \
     graphiti-core==0.3.0 \
     fastapi \
@@ -15,15 +15,20 @@ RUN pip install --no-cache-dir \
     neo4j \
     requests
 
-# Копирование файлов приложения
+# Create user for security
+RUN useradd -m -u 1000 graphiti
+
+# Copy application files
 COPY graphiti_service/ /app/
 
-# Создание пользователя для безопасности
-RUN useradd -m -u 1000 graphiti && chown -R graphiti:graphiti /app
+# Change ownership
+RUN chown -R graphiti:graphiti /app
+
+# Switch to non-root user
 USER graphiti
 
-# Открытие порта
+# Expose port
 EXPOSE 7878
 
-# Команда запуска с инициализацией Neo4j
+# Run command with Neo4j initialization
 CMD ["sh", "-c", "python /app/neo4j_init.py && uvicorn main:app --host 0.0.0.0 --port 7878"] 
