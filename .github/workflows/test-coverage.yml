@@ -53,10 +53,11 @@ jobs:
         NEO4J_URL: bolt://localhost:7687
         NEO4J_USER: neo4j
         NEO4J_PASSWORD: testpassword
-        PYTHONPATH: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}
-      run: |
-        # Запускаем тесты с измерением покрытия
-        pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-report=html -v || true
+                 PYTHONPATH: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}
+       run: |
+         cd LongChainAPI
+         # Запускаем тесты с измерением покрытия
+         pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-report=html -v || true
         
         # Получаем процент покрытия
         coverage report | grep TOTAL | awk '{print $4}' | sed 's/%//' > coverage_percent.txt

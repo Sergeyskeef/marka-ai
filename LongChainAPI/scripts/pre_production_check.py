@@ -136,7 +136,7 @@ class PreProductionChecker:
         
         # Проверка docker-compose файла
         compose_valid = self.run_command(
-            "docker compose -f langchain_api/docker-compose.yml config",
+            "docker compose -f LongChainAPI/docker-compose.yml config",
             "Валидация docker-compose.yml"
         )
         
@@ -144,7 +144,7 @@ class PreProductionChecker:
         build_success = False
         if compose_valid:
             build_success = self.run_command(
-                "docker compose -f langchain_api/docker-compose.yml build --no-cache",
+                "docker compose -f LongChainAPI/docker-compose.yml build --no-cache",
                 "Сборка Docker образов"
             )
         
