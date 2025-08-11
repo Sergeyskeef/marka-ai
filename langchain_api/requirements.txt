@@ -28,6 +28,7 @@ python-dotenv
 
 # Telegram Bot
 python-telegram-bot==21.0
+nest-asyncio==1.5.8
 
 # Тестирование
 pytest>=6.2.5

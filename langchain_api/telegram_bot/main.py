@@ -9,6 +9,10 @@ import asyncio
 import sys
 import os
 from typing import Optional
+import nest_asyncio
+
+# Применяем nest_asyncio для решения проблем с event loop в Docker
+nest_asyncio.apply()
 
 # Добавляем путь к корню проекта для импортов
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
