@@ -1,1 +1,0 @@
-from langchain_api.agents.tool import function_tool  # shim re-export
