@@ -20,6 +20,13 @@ router = APIRouter(prefix="/prompts", tags=["prompts"])
 _prompt_system: Optional[Dict[str, Any]] = None
 
 
+@router.get("/modes")
+async def get_modes():
+    """Список доступных режимов (для совместимости тестов)"""
+    modes = ["chat", "code", "plan", "test_mode"]
+    return {"modes": modes, "total": len(modes)}
+
+
 class PromptCreateRequest(BaseModel):
     """Запрос на создание промпта"""
     name: str = Field(..., description="Имя промпта")

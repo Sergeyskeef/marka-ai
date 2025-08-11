@@ -40,35 +40,58 @@
 - 📈 **Prometheus метрики** - полный мониторинг системы
 - 🔐 **Security-first** - встроенные проверки безопасности
 - 🚀 **Production-ready** - автоматизированный деплой
+- 🤖 **Автономная разработка** - способность самостоятельно писать код, тесты и документацию
+- 📋 **Планирование проектов** - декомпозиция задач с оценкой времени
+- 🧪 **Автоматическое тестирование** - запуск и анализ тестов в песочнице
 
 ## 📁 Структура проекта
 
 ```
 workspace/
-├── app/                    # Новые модули (OpenAI SDK)
-│   ├── agents/            # Агенты и инструменты
-│   │   ├── mark_agent.py  # Главный агент
-│   │   └── *_tools.py     # 25+ инструментов
-│   ├── memory/            # Продвинутая память
-│   │   ├── neo4j_direct.py
-│   │   └── advanced_memory_adapter.py
-│   └── learning/          # REAP самообучение
-├── core/                  # Ядро системы
-│   └── memory/           # Базовая память (Graphiti)
-├── telegram_bot/          # Модульный бот (7 команд)
-│   ├── handlers/         # start, chat, memory
-│   ├── services/         # API интеграция  
-│   ├── keyboards/        # Упрощенный UI
-│   └── middleware/       # Rate limiting, auth
-├── sandbox/              # Безопасное выполнение
-├── graphiti_service/     # Сервис памяти
-├── tests/                # Тесты
-├── scripts/              # Утилиты
-├── main.py              # FastAPI (1643 строк)
-└── docker-compose.yml   # 6 сервисов
+├── langchain_api/         # Основная папка проекта
+│   ├── app/              # Новые модули (OpenAI SDK)
+│   │   ├── agents/       # Агенты и инструменты
+│   │   │   ├── mark_agent.py  # Главный агент
+│   │   │   └── *_tools.py     # 25+ инструментов
+│   │   ├── autonomy/     # Модули автономности
+│   │   │   ├── autonomous_agent.py
+│   │   │   ├── task_planner.py
+│   │   │   ├── code_generator.py
+│   │   │   └── test_runner.py
+│   │   ├── memory/       # Продвинутая память
+│   │   │   ├── neo4j_direct.py
+│   │   │   └── advanced_memory_adapter.py
+│   │   └── learning/     # REAP самообучение
+│   ├── core/             # Ядро системы
+│   │   └── memory/       # Базовая память (Graphiti)
+│   ├── telegram_bot/     # Модульный бот (7 команд)
+│   │   ├── handlers/     # start, chat, memory
+│   │   ├── services/     # API интеграция  
+│   │   ├── keyboards/    # Упрощенный UI
+│   │   └── middleware/   # Rate limiting, auth
+│   ├── sandbox/          # Безопасное выполнение
+│   ├── graphiti_service/ # Сервис памяти
+│   ├── tests/            # Тесты
+│   ├── scripts/          # Утилиты
+│   └── main.py           # FastAPI
+├── docker-compose.yml    # 6 сервисов
+└── docs/                 # Документация
 ```
 
 ## 🎨 Новые возможности (август 2025)
+
+### 🤖 Автономная разработка
+
+Марк теперь способен самостоятельно разрабатывать проекты:
+
+- **Планирование проектов** - декомпозиция на задачи с оценкой времени
+- **Генерация кода** - написание функций, классов и модулей по описанию  
+- **Рефакторинг** - улучшение существующего кода
+- **Создание тестов** - автоматическая генерация unit и интеграционных тестов
+- **Документирование** - создание README, docstrings и API документации
+- **Самообучение** - анализ результатов и улучшение подходов
+
+Подробнее: [AUTONOMY_FEATURES.md](AUTONOMY_FEATURES.md)
 
 ### 📝 Динамическая система промптов
 
@@ -160,6 +183,17 @@ python scripts/load_test.py --users 50 --time 300
 | POST | `/api/prompts` | Создать новый промпт |
 | PUT | `/api/prompts/{name}` | Обновить промпт |
 | POST | `/api/prompts/select` | Выбрать оптимальный промпт |
+
+### Endpoints автономности
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| **POST** | **`/api/autonomy/start_project`** | **Запустить автономную разработку проекта** |
+| POST | `/api/autonomy/execute_task` | Выполнить отдельную задачу |
+| GET | `/api/autonomy/status` | Текущий статус автономного агента |
+| POST | `/api/autonomy/stop` | Остановить автономный режим |
+| POST | `/api/autonomy/set_autonomy_level/{level}` | Изменить уровень автономности |
+| GET | `/api/autonomy/capabilities` | Список возможностей агента |
 
 ## 🤖 Telegram бот
 

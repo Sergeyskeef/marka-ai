@@ -30,6 +30,15 @@ try:
     app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 except Exception as e:  # noqa: BLE001
     logging.getLogger(__name__).warning(f"Memory API disabled: {e}")
+
+# Автономность - новые роуты
+try:
+    from app.api.autonomy_routes import router as autonomy_router
+    app.include_router(autonomy_router, prefix="/api", tags=["autonomy"])
+    logging.getLogger(__name__).info("✅ Autonomy API enabled")
+except Exception as e:
+    logging.getLogger(__name__).warning(f"Autonomy API disabled: {e}")
+
 register_prompts_api(app)
 
 @app.get("/health")

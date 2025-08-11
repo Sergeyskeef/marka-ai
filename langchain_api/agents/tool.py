@@ -1,0 +1,1 @@
+from app.agents import function_tool  # re-export for compatibility
