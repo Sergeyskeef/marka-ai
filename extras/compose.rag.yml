@@ -1,8 +1,0 @@
-# Расширяет базовый docker-compose.yml, добавляя ENV-флаг RAG_MODE
-services:
-  app:
-    environment:
-      - RAG_MODE=v2          # приложение переключится на retriever V2
-    # при желании можно монтировать дополнительные тома, напр.:
-    # volumes:
-    #   - ./data/memory:/data/memory

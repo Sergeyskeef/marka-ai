@@ -1,0 +1,12 @@
+[
+  {
+    "id": "479bc6b3-6cc5-4247-9e76-e916d63c0349",
+    "timestamp": "2025-06-11T19:07:48.920387",
+    "text": "Автотест: создать задачу по улучшению.",
+    "source": "self_analysis",
+    "status": "accepted",
+    "history": [
+      "test-task-id"
+    ]
+  }
+]
