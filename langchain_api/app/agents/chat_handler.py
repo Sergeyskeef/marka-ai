@@ -50,7 +50,7 @@ async def get_agent() -> MarkAgent:
                     # Пытаемся подключиться к Redis если настроен
                     if settings.REDIS_URL:
                         try:
-                            redis_client = Redis.from_url(settings.REDIS_URL)
+                            redis_client = Redis.from_url(settings.redis_url_with_auth)
                             await redis_client.ping()
                             logger.info("✅ Подключен к Redis для системы промптов")
                         except Exception as e:
