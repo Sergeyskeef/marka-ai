@@ -3,6 +3,19 @@
 # Скрипт для исправления конфликта с Docker контейнерами
 
 echo "🔧 Исправление конфликта с Docker контейнерами..."
+echo "📍 Запускать из корня проекта (где находится docker-compose.yml)"
+echo ""
+
+# Проверяем, что мы в правильной директории
+if [ ! -f "docker-compose.yml" ]; then
+    echo "❌ Ошибка: docker-compose.yml не найден в текущей директории"
+    echo "📂 Пожалуйста, перейдите в корень проекта (не в langchain_api)"
+    echo ""
+    echo "Пример:"
+    echo "  cd ~/marka"
+    echo "  ./fix_docker_conflict.sh"
+    exit 1
+fi
 
 # Проверяем, запущен ли конфликтующий контейнер
 if docker ps -a | grep -q "graphiti-neo4j"; then
@@ -22,7 +35,7 @@ else
 fi
 
 # Проверяем другие потенциально конфликтующие контейнеры
-containers=("app" "bot" "sandbox" "marka-redis")
+containers=("app" "bot" "sandbox" "marka-redis" "graphiti")
 
 for container in "${containers[@]}"; do
     if docker ps -a | grep -q "$container"; then
@@ -35,6 +48,12 @@ done
 echo ""
 echo "✨ Все конфликты устранены!"
 echo ""
-echo "Теперь можно запустить:"
+echo "Теперь можно запустить из текущей директории:"
+echo "  docker compose down"
 echo "  docker compose build"
 echo "  docker compose up -d"
+echo ""
+echo "Или если у вас старая версия Docker Compose:"
+echo "  docker-compose down"
+echo "  docker-compose build" 
+echo "  docker-compose up -d"
