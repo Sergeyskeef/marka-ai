@@ -11,7 +11,7 @@ volumes:
 services:
   app:
     build:
-      context: .
+      context: ./langchain_api
       dockerfile: Dockerfile
     container_name: app
     restart: always
@@ -102,7 +102,7 @@ services:
   # --- GraphitiMemory validation service ---
   graphiti:
     build:
-      context: .
+      context: ./langchain_api
       dockerfile: Dockerfile.graphiti
     container_name: graphiti
     restart: unless-stopped
