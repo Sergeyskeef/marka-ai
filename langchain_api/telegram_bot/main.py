@@ -6,7 +6,12 @@ Telegram Bot - Марк v3.0
 
 import logging
 import asyncio
+import sys
+import os
 from typing import Optional
+
+# Добавляем путь к корню проекта для импортов
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telegram import Update, BotCommand
 from telegram.ext import (
@@ -19,15 +24,16 @@ from telegram.ext import (
     filters,
 )
 
-from config import bot_config
-from middleware import RateLimiter, log_message
-from handlers.start import start_command
-from handlers.chat import handle_text_message, handle_chat_mode_callback
-from handlers.memory import (
+# Используем абсолютные импорты
+from telegram_bot.config import bot_config
+from telegram_bot.middleware import RateLimiter, log_message
+from telegram_bot.handlers.start import start_command
+from telegram_bot.handlers.chat import handle_text_message, handle_chat_mode_callback
+from telegram_bot.handlers.memory import (
     handle_memory_menu, handle_memory_search, 
     handle_memory_add, handle_memory_stats
 )
-from services import ChatService
+from telegram_bot.services import ChatService
 
 # Настройка логирования
 logging.basicConfig(
@@ -98,135 +104,86 @@ class MarkBot:
         
         # Текстовые сообщения (основной чат)
         self.app.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
-                self._rate_limited_handler(handle_text_message)
-            )
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)
         )
         
-        # Callback queries
-        self.app.add_handler(
-            CallbackQueryHandler(
-                handle_chat_mode_callback,
-                pattern="^chat:mode:"
-            )
-        )
+        # Callback queries (кнопки)
+        self.app.add_handler(CallbackQueryHandler(handle_memory_menu, pattern="^memory:"))
+        self.app.add_handler(CallbackQueryHandler(handle_memory_search, pattern="^search:"))
+        self.app.add_handler(CallbackQueryHandler(handle_memory_add, pattern="^add_memory:"))
+        self.app.add_handler(CallbackQueryHandler(handle_memory_stats, pattern="^stats:"))
+        self.app.add_handler(CallbackQueryHandler(handle_chat_mode_callback, pattern="^mode:"))
         
-        # Memory callbacks
-        self.app.add_handler(
-            CallbackQueryHandler(handle_memory_menu, pattern="^menu:memory$")
-        )
-        self.app.add_handler(
-            CallbackQueryHandler(handle_memory_search, pattern="^memory:search$")
-        )
-        self.app.add_handler(
-            CallbackQueryHandler(handle_memory_add, pattern="^memory:add$")
-        )
-        self.app.add_handler(
-            CallbackQueryHandler(handle_memory_stats, pattern="^memory:stats$")
-        )
-        
-        # Обработчик ошибок
-        self.app.add_error_handler(self._error_handler)
-        
-        logger.info("📋 Handlers registered")
-    
-    def _rate_limited_handler(self, handler):
-        """Обертка для добавления rate limiting к обработчику"""
-        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            # Проверяем rate limit
-            if await self.rate_limiter(update, context):
-                # Если проверка пройдена, вызываем обработчик
-                await handler(update, context)
-        
-        return wrapper
+        logger.info("📝 Handlers registered")
     
     async def _set_bot_commands(self):
-        """Установка команд бота в UI Telegram"""
+        """Установка команд бота в меню"""
         commands = [
-            BotCommand("start", "🚀 Начать работу с ботом"),
-            BotCommand("help", "❓ Показать справку"),
-            BotCommand("chat", "💬 Начать новый диалог"),
+            BotCommand("start", "🏠 Главное меню"),
+            BotCommand("help", "❓ Справка"),
+            BotCommand("chat", "💬 Начать диалог"),
             BotCommand("memory", "🧠 Управление памятью"),
             BotCommand("learn", "📚 Запустить обучение"),
             BotCommand("settings", "⚙️ Настройки"),
-            BotCommand("cancel", "❌ Отменить текущее действие"),
+            BotCommand("cancel", "❌ Отменить действие"),
         ]
         
         await self.app.bot.set_my_commands(commands)
-        logger.info("✅ Bot commands set")
+        logger.info("📋 Bot commands set")
     
     async def _help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /help"""
         help_text = """
-📖 *Справка по боту*
+🤖 **Марк - AI Ассистент**
 
-*Основные команды:*
-• /start - начать работу с ботом
-• /help - показать эту справку
-• /chat - начать новый диалог
-• /memory - управление памятью
-• /learn - запустить обучение
-• /settings - настройки бота
+**Основные команды:**
+• /start - Главное меню
+• /help - Эта справка
+• /chat - Начать новый диалог
+• /memory - Работа с памятью
+• /learn - Запустить обучение
+• /settings - Настройки
+• /cancel - Отменить текущее действие
 
-*Как использовать:*
-1. Просто отправьте мне сообщение, и я отвечу
-2. Используйте кнопки меню для навигации
-3. Выберите режим чата для разных задач
-
-*Режимы чата:*
-• 💬 Обычный - дружеская беседа
-• 📋 Задачи - помощь в выполнении задач
+**Режимы чата:**
+• 💬 Обычный - стандартный диалог
+• 📝 Задачи - планирование и выполнение
 • 🔍 Анализ - глубокий анализ темы
 
-*Обратная связь:*
-Используйте кнопки 👍/👎 под ответами, чтобы помочь мне улучшаться!
-"""
+**Возможности:**
+• 🧠 Долговременная память
+• 🎯 25+ инструментов
+• 📚 Самообучение (REAP)
+• 🔄 Контекстные диалоги
+
+Просто отправьте сообщение для начала диалога!
+        """
         
         await update.message.reply_text(
             help_text,
             parse_mode="Markdown"
         )
     
-    async def _error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Глобальный обработчик ошибок"""
-        logger.error(f"Exception while handling an update: {context.error}")
-        
-        # Отправляем сообщение пользователю
-        if update and update.effective_message:
-            await update.effective_message.reply_text(
-                "😔 Произошла ошибка при обработке вашего запроса.\n"
-                "Попробуйте позже или обратитесь к администратору."
-            )
-    
     async def run(self):
         """Запуск бота"""
         if not self.app:
             await self.setup()
         
-        logger.info("🚀 Starting bot...")
-        
         # Запускаем polling
+        logger.info("🚀 Starting bot polling...")
         await self.app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
         )
     
-    async def shutdown(self):
-        """Корректное завершение работы"""
-        logger.info("🛑 Shutting down bot...")
-        
-        # Закрываем сервисы
-        if self.chat_service:
-            await self.chat_service.close()
-        
-        # Останавливаем приложение
+    async def stop(self):
+        """Остановка бота"""
         if self.app:
-            await self.app.shutdown()
-        
-        logger.info("✅ Bot shutdown complete")
+            await self.app.stop()
+            logger.info("🛑 Bot stopped")
 
 
+# Точка входа
 async def main():
     """Главная функция"""
     bot = MarkBot()
@@ -234,12 +191,16 @@ async def main():
     try:
         await bot.run()
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("⌨️ Keyboard interrupt received")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"❌ Fatal error: {e}", exc_info=True)
     finally:
-        await bot.shutdown()
+        await bot.stop()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Запускаем event loop
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
