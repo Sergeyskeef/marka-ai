@@ -3,8 +3,18 @@
 """
 
 import os
+import sys
 from typing import Optional, List
-from app.config import settings as app_settings
+
+# Добавляем путь к корню проекта для импортов
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from app.config import settings as app_settings
+except ImportError:
+    # Если не можем импортировать, используем значения по умолчанию
+    class app_settings:
+        USE_DIRECT_NEO4J = True
 
 
 class BotConfig:
@@ -54,7 +64,7 @@ class BotConfig:
     
     # Интеграция с основным приложением
     USE_ENHANCED_CHAT: bool = True
-    USE_ADVANCED_MEMORY: bool = app_settings.USE_DIRECT_NEO4J
+    USE_ADVANCED_MEMORY: bool = app_settings.USE_DIRECT_NEO4J if hasattr(app_settings, 'USE_DIRECT_NEO4J') else True
     USE_LEARNING_SYSTEM: bool = True
     
     # Режим разработки
