@@ -37,3 +37,4 @@ secrets.yml
 
 # Docker local overrides
 docker-compose.override.yml
+cursor_memory/
