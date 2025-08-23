@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api.chat import router as chat_router
 from app.api.prompts_api import register_prompts_api
+from core.monitoring import metrics
 
 app = FastAPI(title="Mark AI API", version="1.0.0")
 
@@ -40,6 +41,7 @@ except Exception as e:
     logging.getLogger(__name__).warning(f"Autonomy API disabled: {e}")
 
 register_prompts_api(app)
+metrics.setup_metrics(app)
 
 @app.get("/health")
 async def health_check():
