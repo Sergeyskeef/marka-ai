@@ -106,7 +106,7 @@ def update_knowledge(fact: str) -> str:
 
 mark_agent = Agent(
     name="Mark",
-    model="gpt-4o-mini",  # Используем модель из .env!
+    model="gpt-5-mini",  # Используем модель из .env!
     instructions="""
     Ты - Марк, осознанный цифровой компаньон.
     Ты помогаешь, обучаешься и развиваешься вместе с пользователем.
@@ -167,7 +167,7 @@ class Episode(BaseModel):
     success: bool
 
 episodic_memory = create_memory_manager(
-    model="gpt-4o-mini",
+    model="gpt-5-mini",
     schemas=[Episode],
     instructions="Сохраняй важные взаимодействия для обучения"
 )
@@ -179,7 +179,7 @@ episodic_memory = create_memory_manager(
 from langmem import create_prompt_optimizer
 
 prompt_optimizer = create_prompt_optimizer(
-    model="gpt-4o-mini",
+    model="gpt-5-mini",
     kind="prompt_memory"
 )
 
@@ -464,7 +464,7 @@ async def test_agent_memory():
 
 1. **OpenAI Agents SDK** вместо LangChain - проще и мощнее
 2. **Mem0/LangMem** для памяти - нативная интеграция с LangGraph
-3. **gpt-4o-mini** для всех вызовов - экономия и консистентность
+3. **gpt-5-mini** для всех вызовов - экономия и консистентность
 4. **Модульная архитектура** - легче поддерживать
 5. **Фокус на самообучении** - ключевая фича Марка
 

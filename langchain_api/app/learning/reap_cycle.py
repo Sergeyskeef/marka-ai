@@ -248,8 +248,9 @@ class REAPLearningCycle:
             """
             
             try:
+                from app.config import settings
                 response = await self.openai.chat.completions.create(
-                    model="gpt-4.1-mini",
+                    model=settings.OPENAI_MODEL or "gpt-5-mini",
                     messages=[{"role": "system", "content": prompt}],
                     temperature=0.3
                 )
@@ -625,8 +626,9 @@ class REAPLearningCycle:
         """
         
         try:
+            from app.config import settings
             response = await self.openai.chat.completions.create(
-                model="gpt-4.1-mini",
+                model=settings.OPENAI_MODEL or "gpt-5-mini",
                 messages=[{"role": "system", "content": prompt}],
                 temperature=0.7
             )
