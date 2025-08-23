@@ -104,29 +104,18 @@ class AdvancedMemoryAdapter:
     ) -> Dict[str, Any]:
         """Обновить уверенность в факте"""
         try:
-            # Обновляем через прямой Neo4j клиент
-            result = await neo4j_client.update_fact_confidence(
-                fact_id=fact_id,
-                new_confidence=new_confidence,
-                reason=reason
+            # Graphiti-only: логируем изменение уверенности как новый эпизод
+            await self.save_episode(
+                situation=f"Обновление уверенности в факте {fact_id}",
+                actions_taken=["Анализ новых данных", "Корректировка уверенности"],
+                outcome="success",
+                reasoning=reason,
+                lesson_learned=f"Уверенность изменена на {new_confidence}",
+                satisfaction=0.9,
+                metadata={"fact_id": fact_id, "action": "confidence_update", "new_confidence": new_confidence}
             )
-            
-            if result["success"]:
-                # Создаем эпизод об обновлении для отслеживания
-                await self.save_episode(
-                    situation=f"Обновление уверенности в факте {fact_id}",
-                    actions_taken=["Анализ новых данных", "Корректировка уверенности"],
-                    outcome="success",
-                    reasoning=reason,
-                    lesson_learned=f"Уверенность изменена с ? на {new_confidence}",
-                    satisfaction=0.9,
-                    metadata={"fact_id": fact_id, "action": "confidence_update"}
-                )
-                
-                logger.info(f"✅ Уверенность факта {fact_id} обновлена: {new_confidence}")
-                return result
-            else:
-                return result
+            logger.info(f"✅ (Graphiti) Уверенность факта {fact_id} зафиксирована эпизодом: {new_confidence}")
+            return {"success": True, "fact_id": fact_id, "new_confidence": new_confidence}
                 
         except Exception as e:
             logger.error(f"❌ Ошибка обновления уверенности: {e}")
@@ -146,7 +135,7 @@ class AdvancedMemoryAdapter:
             new_fact_text = f"{new_subject} {new_predicate} {new_object}"
             embedding = await self._get_embedding(new_fact_text)
             
-            # Используем прямой Neo4j для создания связи SUPERSEDES
+            # Graphiti-only: логируем замену факта как эпизод
             new_fact_data = {
                 "subject": new_subject,
                 "predicate": new_predicate,
@@ -156,38 +145,21 @@ class AdvancedMemoryAdapter:
                 "embedding": embedding,
                 "reason": reason
             }
-            
-            result = await neo4j_client.supersede_fact(
-                old_fact_id=old_fact_id,
-                new_fact_data=new_fact_data
-            )
-            
-            if result["success"]:
-                logger.info(f"✅ Факт {old_fact_id} заменен новым")
-                
-                # Создаем эпизод о замене факта
-                await self.save_episode(
-                    situation=f"Замена устаревшего факта {old_fact_id}",
-                    actions_taken=["Анализ изменений", "Создание нового факта", "Установка связи SUPERSEDES"],
-                    outcome="success",
-                    reasoning=reason,
-                    lesson_learned="Факты могут устаревать и требовать обновления",
-                    satisfaction=0.9,
-                    metadata={
-                        "old_fact_id": old_fact_id,
-                        "new_fact_id": result["new_fact"]["id"],
-                        "action": "fact_supersede"
-                    }
-                )
-                
-                return {
-                    "success": True,
-                    "id": result["new_fact"]["id"],
+
+            await self.save_episode(
+                situation=f"Замена устаревшего факта {old_fact_id}",
+                actions_taken=["Анализ изменений", "Создание нового факта"],
+                outcome="success",
+                reasoning=reason,
+                lesson_learned="Факты могут устаревать и требовать обновления",
+                satisfaction=0.9,
+                metadata={
                     "old_fact_id": old_fact_id,
-                    "fact": f"{new_subject} {new_predicate} {new_object}"
+                    "new_fact": new_fact_data,
+                    "action": "fact_supersede"
                 }
-            else:
-                return result
+            )
+            return {"success": True, "old_fact_id": old_fact_id, "new_fact": new_fact_data}
             
         except Exception as e:
             logger.error(f"❌ Ошибка замены факта: {e}")

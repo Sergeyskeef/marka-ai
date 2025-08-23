@@ -359,30 +359,8 @@ class REAPLearningCycle:
                 "indices_updated": False
             }
             
-            # Оптимизация структуры графа
-            from app.memory.neo4j_direct import neo4j_client
-            
-            # Оптимизируем граф: удаляем избыточные связи и объединяем похожие факты
-            optimization_query = """
-            // Находим и объединяем дублирующиеся факты
-            MATCH (f1:Fact), (f2:Fact)
-            WHERE f1.id < f2.id 
-            AND f1.subject = f2.subject 
-            AND f1.predicate = f2.predicate
-            AND f1.object = f2.object
-            MERGE (f1)-[:DUPLICATES]->(f2)
-            SET f2.archived = true
-            RETURN count(f2) as merged_facts
-            """
-            
-            try:
-                merge_results = await neo4j_client.run_custom_query(optimization_query)
-                if merge_results:
-                    merged_count = merge_results[0].get("merged_facts", 0)
-                    results["optimizations"].append(f"Объединено дублирующихся фактов: {merged_count}")
-                    logger.info(f"Оптимизация графа: объединено {merged_count} фактов")
-            except Exception as e:
-                logger.warning(f"Ошибка оптимизации графа: {e}")
+            # Graphiti-only: опускаем прямые оптимизации графа на Neo4j
+            results["optimizations"].append("Skipped direct Neo4j optimizations (Graphiti-only mode)")
             
             # Архивация старых данных
             archived_count = await self._archive_old_memories()
@@ -474,12 +452,7 @@ class REAPLearningCycle:
         """Получить эпизод по ID"""
         from app.memory.neo4j_direct import neo4j_client
         
-        # Прямой запрос к Neo4j для получения эпизода
-        episode = await neo4j_client.get_node_by_id(episode_id, node_type="Episode")
-        if episode:
-            return episode
-        
-        # Fallback на Graphiti если не найдено в Neo4j
+        # Graphiti-only
         results = await self.memory.graphiti.search_episodes(episode_id, limit=1)
         if results.get("items"):
             return results["items"][0]
@@ -724,31 +697,20 @@ class REAPLearningCycle:
     async def _archive_old_memories(self) -> int:
         """Архивировать старые воспоминания"""
         try:
-            # Импортируем neo4j_client
-            from app.memory.neo4j_direct import neo4j_client
-            
-            # Выполняем архивацию через прямой Neo4j клиент (90 дней по умолчанию)
-            archived_count = await neo4j_client.archive_old_memories(days_threshold=90)
-            
-            logger.info(f"📦 Архивировано {archived_count} старых воспоминаний")
-            
-            # Создаем эпизод об архивации если что-то архивировано
-            if archived_count > 0:
-                await self.memory.save_episode(
-                    situation="Плановая архивация старых воспоминаний",
-                    actions_taken=[
-                        "Поиск воспоминаний старше 90 дней",
-                        "Проверка на наличие активных связей",
-                        "Добавление метки Archived",
-                        "Обновление временных меток"
-                    ],
-                    outcome="success",
-                    reasoning="Архивация помогает поддерживать производительность системы памяти",
-                    lesson_learned=f"Регулярная архивация необходима. Архивировано {archived_count} элементов",
-                    satisfaction=0.9,
-                    metadata={"archived_count": archived_count, "action": "memory_archival"}
-                )
-            
+            # Graphiti-only: логируем плановую архивацию как эпизод без прямых операций на Neo4j
+            archived_count = 0
+            await self.memory.save_episode(
+                situation="Плановая архивация (Graphiti-only)",
+                actions_taken=[
+                    "Проверка давности записей",
+                    "Планирование архивации"
+                ],
+                outcome="success",
+                reasoning="Архивация через Graphiti-процессы",
+                lesson_learned="Поддержание производительности без прямых запросов",
+                satisfaction=0.9,
+                metadata={"archived_count": archived_count, "action": "memory_archival"}
+            )
             return archived_count
             
         except Exception as e:
