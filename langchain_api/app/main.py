@@ -47,14 +47,14 @@ metrics.setup_metrics(app)
 
 @app.on_event("startup")
 async def _start_metrics_bg_task():
-	async def _bg():
-		while True:
-			try:
-				update_memory_usage()
-			except Exception:
-				pass
-			await asyncio.sleep(10)
-	asyncio.create_task(_bg())
+    async def _bg():
+        while True:
+            try:
+                update_memory_usage()
+            except Exception:
+                pass
+            await asyncio.sleep(10)
+    asyncio.create_task(_bg())
 
 @app.get("/health")
 async def health_check():
