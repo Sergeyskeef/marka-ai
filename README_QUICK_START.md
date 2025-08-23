@@ -27,6 +27,7 @@ cp .env.example .env
 ```bash
 # OpenAI API
 OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-5-mini
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
@@ -50,10 +51,11 @@ docker compose up -d
 # Быстрая проверка (smoke test)
 ./scripts/smoke.sh
 
-# Или проверка отдельных сервисов
-curl http://localhost:8000/health
-curl http://localhost:8001/health
-curl http://localhost:7878/health
+# Метрики Prometheus
+curl http://localhost:8000/metrics | head -n 20
+
+# Проверка памяти/CPU процесса (в контейнере app)
+docker compose exec app python /app/langchain_api/scripts/profile_resources.py --seconds 30 --out /app/langchain_api/docs/metrics
 ```
 
 ## 🤖 Использование Telegram бота
