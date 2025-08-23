@@ -50,14 +50,14 @@ services:
     restart: always
     depends_on:
       - app
-    working_dir: /bot/langchain_api/telegram_bot
-    command: ["python", "main.py"]
+    working_dir: /app/langchain_api
+    command: ["python", "-m", "telegram_bot.main"]
     env_file:
       - .env
     networks:
       - marka_net
     volumes:
-      - ./langchain_api:/bot/langchain_api
+      - ./langchain_api:/app/langchain_api
     deploy:
       resources:
         limits:
