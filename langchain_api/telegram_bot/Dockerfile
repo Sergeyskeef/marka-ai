@@ -1,19 +1,17 @@
 FROM python:3.10-slim
-WORKDIR /bot
+WORKDIR /app
 
-# Копируем весь проект
-COPY . /bot/langchain_api/
+# Копируем весь проект langchain_api
+COPY . /app/langchain_api/
 
 # Устанавливаем зависимости
-WORKDIR /bot/langchain_api
+WORKDIR /app/langchain_api
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir python-telegram-bot==21.0 aiohttp[speedups]
 
-# Устанавливаем PYTHONPATH для импорта модулей app
-ENV PYTHONPATH=/bot/langchain_api
+# Устанавливаем PYTHONPATH для корректных импортов
+ENV PYTHONPATH=/app/langchain_api
 
-# Переходим в директорию бота
-WORKDIR /bot/langchain_api/telegram_bot
-
-# Запускаем новый main.py
-CMD ["python", "main.py"]
+# Запускаем бота как модуль Python
+WORKDIR /app/langchain_api
+CMD ["python", "-m", "telegram_bot.main"]

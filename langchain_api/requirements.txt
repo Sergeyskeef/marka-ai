@@ -28,6 +28,7 @@ python-dotenv
 
 # Telegram Bot
 python-telegram-bot==21.0
+nest-asyncio==1.5.8
 
 # Тестирование
 pytest>=6.2.5
@@ -65,7 +66,7 @@ numpy>=1.21.0
 
 
 # Graphiti и Neo4j
-neo4j==5.11.0
+neo4j>=5.23.0
 graphiti==0.1.0
 
 # Redis для сессий

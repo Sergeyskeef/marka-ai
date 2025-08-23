@@ -44,6 +44,10 @@ ERROR_COUNT = get_or_create_metric(
     Counter, 'langchain_api_errors_total', 'Total number of errors', ['endpoint', 'error_type']
 )
 
+CPU_USAGE = get_or_create_metric(
+    Gauge, 'langchain_api_cpu_usage_percent', 'Process CPU usage percent'
+)
+
 class MetricsManager:
     """Менеджер метрик для FastAPI приложения"""
 
@@ -92,7 +96,11 @@ def track_request(endpoint):
     return decorator
 
 def update_memory_usage():
-    """Обновление метрики использования памяти"""
+    """Обновление метрики использования памяти (и CPU)"""
     import psutil
     process = psutil.Process()
     MEMORY_USAGE.set(process.memory_info().rss)
+    try:
+        CPU_USAGE.set(process.cpu_percent(interval=None))
+    except Exception:
+        pass

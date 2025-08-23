@@ -51,20 +51,25 @@ class ChatService:
             Ответ от API
         """
         try:
-            # Подготавливаем данные
-            payload = {
-                "question": question,
-                "user_id": str(user_id),
-                "mode": mode
-            }
-            
-            if chat_id is not None:
-                payload["chat_id"] = chat_id
-            
-            # Используем новый endpoint если включен enhanced_chat
+            # Подготавливаем данные в зависимости от endpoint
             if bot_config.USE_ENHANCED_CHAT:
-                endpoint = "/chat/enhanced"
+                # Формат для /api/chat
+                payload = {
+                    "message": question,  # используем message, не question
+                    "user_id": str(user_id),
+                    "session_id": f"telegram_{user_id}_{chat_id}" if chat_id else f"telegram_{user_id}",
+                    "context": {"mode": mode}
+                }
+                endpoint = "/api/chat"
             else:
+                # Формат для legacy /chat/ask
+                payload = {
+                    "question": question,
+                    "user_id": str(user_id),
+                    "mode": mode
+                }
+                if chat_id is not None:
+                    payload["chat_id"] = chat_id
                 endpoint = "/chat/ask"
             
             logger.info(f"Sending request to {endpoint}: user={user_id}, mode={mode}")
@@ -127,8 +132,8 @@ class ChatService:
         if response.get("error"):
             return response.get("content", "Произошла ошибка")
         
-        # Основной ответ
-        content = response.get("content", response.get("answer", ""))
+        # Основной ответ - проверяем все возможные форматы
+        content = response.get("content", response.get("answer", response.get("response", "")))
         
         # Добавляем информацию об использованных инструментах
         if response.get("tool_calls") and len(response["tool_calls"]) > 0:
