@@ -6,6 +6,7 @@ import os
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -26,13 +27,13 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-5-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: Optional[int] = None
     
     # Memory System
-    USE_DIRECT_NEO4J: bool = True
+    USE_DIRECT_NEO4J: bool = False
     SYNC_TO_GRAPHITI: bool = False
     
     # Neo4j
