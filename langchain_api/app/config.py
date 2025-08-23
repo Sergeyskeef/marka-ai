@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: Optional[int] = None
@@ -43,7 +43,18 @@ class Settings(BaseSettings):
     GRAPHITI_URL: str = "http://graphiti:8001"
     
     # Redis
-    REDIS_URL: str = "redis://redis:6379"
+    REDIS_URL: str = Field(
+        default="redis://redis:6379",
+        description="Redis URL - will be constructed with password if REDIS_PASSWORD is set"
+    )
+    REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
+    
+    @property
+    def redis_url_with_auth(self) -> str:
+        """Get Redis URL with authentication if password is set"""
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@redis:6379"
+        return self.REDIS_URL
     
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: str = ""
