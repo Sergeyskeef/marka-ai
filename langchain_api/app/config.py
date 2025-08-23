@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     OPENAI_MAX_TOKENS: Optional[int] = None
     
     # Memory System
-    USE_DIRECT_NEO4J: bool = True
+    USE_DIRECT_NEO4J: bool = False
     SYNC_TO_GRAPHITI: bool = False
     
     # Neo4j
