@@ -21,7 +21,7 @@ class BotConfig:
     """Настройки Telegram бота"""
     
     # Telegram
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     
     # API endpoints
     APP_HOST: str = os.getenv("APP_HOST", "http://app:8000")

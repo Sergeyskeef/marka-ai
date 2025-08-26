@@ -9,7 +9,7 @@ from datetime import datetime
 import asyncio
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCall
+from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCallUnion
 from openai.types.chat.chat_completion import ChatCompletion
 
 from ..prompts import (
@@ -242,7 +242,7 @@ class MarkAgent:
     
     async def _execute_tools(
         self, 
-        tool_calls: List[ChatCompletionMessageToolCall]
+        tool_calls: List[ChatCompletionMessageToolCallUnion]
     ) -> List[Any]:
         """Выполнение вызовов инструментов"""
         results = []
