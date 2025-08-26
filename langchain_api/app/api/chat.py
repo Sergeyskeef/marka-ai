@@ -4,7 +4,7 @@ Chat API endpoints
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 
 from openai import AsyncOpenAI
@@ -27,6 +27,7 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
     metadata: Optional[Dict[str, Any]] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
@@ -49,7 +50,8 @@ async def chat(
         return ChatResponse(
             response=result.get("content", ""),
             session_id=request.session_id or "default",
-            metadata=result.get("metadata")
+            metadata=result.get("metadata"),
+            tool_calls=result.get("tool_calls")
         )
         
     except Exception as e:
