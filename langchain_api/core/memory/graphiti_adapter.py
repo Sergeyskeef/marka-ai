@@ -74,6 +74,7 @@ class GraphitiMemoryAdapter:
     async def _get_retry_client(self) -> RetryableHTTPClient:
         """Получает клиент с retry логикой"""
         if self._retry_client is None:
+            # Важно передавать base_url, а RetryableHTTPClient теперь лениво инициализирует httpx клиент
             self._retry_client = RetryableHTTPClient(
                 base_url=self.base_url,
                 timeout=30.0,

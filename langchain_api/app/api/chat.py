@@ -10,6 +10,7 @@ import logging
 from openai import AsyncOpenAI
 from app.agents.mark_agent import MarkAgent
 from app.config import settings
+from app.agents.chat_handler import enhanced_chat
 
 logger = logging.getLogger(__name__)
 
@@ -27,28 +28,9 @@ class ChatResponse(BaseModel):
     session_id: str
     metadata: Optional[Dict[str, Any]] = None
 
-# Global agent instance (in production, you might want to use dependency injection)
-agent = None
-
-async def get_agent():
-    """Get or create agent instance"""
-    global agent
-    if agent is None:
-        # Create OpenAI client
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        # Create agent with the client
-        agent = MarkAgent(
-            client=client,
-            model=settings.OPENAI_MODEL,
-            temperature=settings.OPENAI_TEMPERATURE,
-            max_tokens=settings.OPENAI_MAX_TOKENS
-        )
-    return agent
-
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    agent_instance: MarkAgent = Depends(get_agent)
 ):
     """
     Process a chat message
@@ -56,13 +38,12 @@ async def chat(
     try:
         logger.info(f"Processing chat request from user {request.user_id}")
         
-        # Process the message through the agent
-        result = await agent_instance.chat(
-            message=request.message,
+        # Route through enhanced_chat to ensure memory search + tool usage
+        result = await enhanced_chat(
+            question=request.message,
+            chat_id=None,
+            mode=str((request.context or {}).get("mode", "chat")),
             user_id=request.user_id,
-            chat_id=None,  # Could be mapped from session_id if needed
-            context=None,  # Could be built from request.context
-            use_tools=True
         )
         
         return ChatResponse(

@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "password"
     
     # Graphiti
-    GRAPHITI_URL: str = "http://graphiti:8001"
+    GRAPHITI_URL: str = "http://graphiti:7878"
     
     # Redis
     REDIS_URL: str = Field(

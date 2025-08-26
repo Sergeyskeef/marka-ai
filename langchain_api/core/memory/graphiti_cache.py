@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import redis.asyncio as redis
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,12 @@ class GraphitiCache:
         Args:
             redis_url: URL подключения к Redis
         """
-        self.redis_url = redis_url
+        # Поддержка REDIS_PASSWORD из окружения и docker-compose сервиса 'redis'
+        env_url = os.getenv("REDIS_URL")
+        env_pass = os.getenv("REDIS_PASSWORD")
+        if env_pass and not env_url:
+            env_url = f"redis://:{env_pass}@redis:6379"
+        self.redis_url = env_url or redis_url
         self._redis: Optional[redis.Redis] = None
         self.default_ttl = 3600  # 1 час
         self.user_cache_ttl = 1800  # 30 минут для пользовательских данных
