@@ -142,8 +142,11 @@ class MarkAgent:
             api_params = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": self.temperature
             }
+            # Некоторые модели (например, семейство mini) не поддерживают произвольную температуру
+            # В таких случаях используем значение по умолчанию, просто не передавая параметр
+            if self.temperature is not None and float(self.temperature) != 1.0:
+                api_params["temperature"] = self.temperature
             
             if self.max_tokens:
                 api_params["max_tokens"] = self.max_tokens
@@ -155,7 +158,17 @@ class MarkAgent:
             
             # Вызываем OpenAI API
             logger.info(f"🤖 Отправка запроса к {self.model}")
-            response = await self.client.chat.completions.create(**api_params)
+            try:
+                response = await self.client.chat.completions.create(**api_params)
+            except Exception as e:
+                err_text = str(e).lower()
+                # Авто-ретрай без temperature, если модель не поддерживает переопределение
+                if "temperature" in err_text and ("unsupported" in err_text or "unsupported_value" in err_text):
+                    logger.warning("🔁 Повтор запроса без temperature из-за ограничений модели")
+                    api_params.pop("temperature", None)
+                    response = await self.client.chat.completions.create(**api_params)
+                else:
+                    raise
             
             # Обрабатываем ответ
             result = await self._process_response(response, messages)
@@ -305,15 +318,29 @@ class MarkAgent:
         Returns:
             Сгенерированный текст
         """
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
+        params = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            temperature=kwargs.get("temperature", self.temperature),
-            max_tokens=kwargs.get("max_tokens", self.max_tokens)
-        )
+        }
+        req_temperature = kwargs.get("temperature", self.temperature)
+        if req_temperature is not None and float(req_temperature) != 1.0:
+            params["temperature"] = req_temperature
+        if kwargs.get("max_tokens", self.max_tokens):
+            params["max_tokens"] = kwargs.get("max_tokens", self.max_tokens)
+
+        try:
+            response = await self.client.chat.completions.create(**params)
+        except Exception as e:
+            err_text = str(e).lower()
+            if "temperature" in err_text and ("unsupported" in err_text or "unsupported_value" in err_text):
+                logger.warning("🔁 Повтор get_completion без temperature из-за ограничений модели")
+                params.pop("temperature", None)
+                response = await self.client.chat.completions.create(**params)
+            else:
+                raise
         
         return response.choices[0].message.content
 

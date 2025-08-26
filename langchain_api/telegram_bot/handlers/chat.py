@@ -12,6 +12,7 @@ from .base import BaseHandler
 from ..keyboards import get_feedback_keyboard
 from ..services import ChatService
 from ..middleware.logging import log_error
+from telegram.helpers import escape_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,12 @@ class ChatHandler(BaseHandler):
         
         # Форматируем ответ
         formatted_response = self.chat_service.format_response(response)
+        # Экранируем Markdown для предотвращения BadRequest: Can't parse entities
+        # Используем MarkdownV2 как более строгий вариант
+        safe_response = escape_markdown(formatted_response, version=2)
         
         # Разбиваем длинный ответ на части
-        message_parts = self.split_long_message(formatted_response)
+        message_parts = self.split_long_message(safe_response)
         
         # Отправляем ответ
         sent_messages = []
@@ -64,13 +68,13 @@ class ChatHandler(BaseHandler):
             if i == len(message_parts) - 1:
                 sent_message = await message.reply_text(
                     part,
-                    parse_mode="Markdown",
+                    parse_mode="MarkdownV2",
                     reply_markup=get_feedback_keyboard(message.message_id)
                 )
             else:
                 sent_message = await message.reply_text(
                     part,
-                    parse_mode="Markdown"
+                    parse_mode="MarkdownV2"
                 )
             sent_messages.append(sent_message)
         

@@ -54,33 +54,66 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 def log_error(func):
     """
-    Декоратор для логирования ошибок в обработчиках
+    Декоратор для логирования ошибок в обработчиках.
+    Корректно работает как для функций, так и для методов класса
+    (первый аргумент может быть `self`).
     """
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+
+    async def wrapper(*args, **kwargs):
+        # Определяем `update` и `context` независимо от того, метод это или функция
+        update: Update | None = kwargs.get("update")  # type: ignore[assignment]
+        context: ContextTypes.DEFAULT_TYPE | None = kwargs.get("context")  # type: ignore[assignment]
+
+        # Поиск по позиционным аргументам
+        if update is None:
+            for arg in args:
+                if isinstance(arg, Update):
+                    update = arg
+                    break
+        if context is None:
+            for arg in args:
+                # У контекста как правило есть атрибуты `bot` и `application`
+                if hasattr(arg, "bot") and hasattr(arg, "application"):
+                    context = arg  # type: ignore[assignment]
+                    break
+
         try:
-            return await func(update, context, *args, **kwargs)
-        except Exception as e:
+            return await func(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            # Безопасно собираем дополнительные поля
+            user_id = None
+            chat_id = None
+            try:
+                if update is not None:
+                    user_id = update.effective_user.id if update.effective_user else None
+                    chat_id = update.effective_chat.id if update.effective_chat else None
+            except Exception:
+                pass
+
             logger.error(
                 f"Error in {func.__name__}: {str(e)}",
                 exc_info=True,
                 extra={
-                    "user_id": update.effective_user.id if update.effective_user else None,
-                    "chat_id": update.effective_chat.id if update.effective_chat else None,
-                }
+                    "user_id": user_id,
+                    "chat_id": chat_id,
+                },
             )
-            
-            # Отправляем пользователю сообщение об ошибке
-            error_message = (
-                "😔 Произошла ошибка при обработке вашего запроса.\n"
-                "Попробуйте еще раз или обратитесь к администратору."
-            )
-            
-            if update.message:
-                await update.message.reply_text(error_message)
-            elif update.callback_query:
-                await update.callback_query.answer(error_message, show_alert=True)
-            
-            # Перебрасываем ошибку для обработки выше
+
+            # Пытаемся уведомить пользователя, если это возможно
+            try:
+                error_message = (
+                    "😔 Произошла ошибка при обработке вашего запроса.\n"
+                    "Попробуйте еще раз или обратитесь к администратору."
+                )
+                if update and getattr(update, "message", None):
+                    await update.message.reply_text(error_message)  # type: ignore[union-attr]
+                elif update and getattr(update, "callback_query", None):
+                    await update.callback_query.answer(error_message, show_alert=True)  # type: ignore[union-attr]
+            except Exception:
+                # Игнорируем ошибки нотификации пользователя
+                pass
+
+            # Перебрасываем исключение дальше для глобальной обработки
             raise
-    
+
     return wrapper
