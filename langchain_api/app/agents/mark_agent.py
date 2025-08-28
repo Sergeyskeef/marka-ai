@@ -136,7 +136,14 @@ class MarkAgent:
         """
         try:
             # Подготавливаем сообщения
-            messages = self._prepare_messages(message, context, user_id)
+            if self.use_dynamic_prompts:
+                messages = await self._prepare_messages_dynamic(message, context, user_id)
+            else:
+                messages = []
+                messages.append({"role": "system", "content": self.system_prompt})
+                if context:
+                    messages.extend(context)
+                messages.append({"role": "user", "content": message})
             
             # Параметры для API
             api_params = {
@@ -460,40 +467,17 @@ class MarkAgent:
         return "\n".join(memory_parts)
     
     def _prepare_messages(
-        self, 
-        message: str, 
+        self,
+        message: str,
         context: Optional[List[Dict[str, str]]] = None,
         user_id: Optional[str] = None
     ) -> List[Dict[str, str]]:
-        """Подготовка сообщений для API"""
-        # Если используем динамические промпты, делегируем
-        if self.use_dynamic_prompts:
-            # Возвращаем синхронную обертку для обратной совместимости
-            import asyncio
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(
-                self._prepare_messages_dynamic(message, context, user_id)
-            )
-        
-        # Иначе используем статический промпт
-        messages = []
-        
-        # Системное сообщение
-        messages.append({
-            "role": "system",
-            "content": self.system_prompt
-        })
-        
-        # Добавляем контекст если есть
+        """Подготовка сообщений (устаревшая синхронная версия). Оставлена для совместимости."""
+        # Используем статический промпт для синхронного пути
+        messages: List[Dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
         if context:
             messages.extend(context)
-        
-        # Добавляем сообщение пользователя
-        messages.append({
-            "role": "user", 
-            "content": message
-        })
-        
+        messages.append({"role": "user", "content": message})
         return messages
 
     def _evaluate_response_quality(self, result: Dict[str, Any]) -> float:

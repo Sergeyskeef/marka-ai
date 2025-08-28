@@ -147,47 +147,71 @@ def handle_errors(func: Callable) -> Callable:
 
 
 class RetryableHTTPClient:
-    """HTTP клиент с встроенной retry логикой"""
+    """HTTP клиент с встроенной retry логикой.
+
+    Поддерживает optional base_url и ленивую инициализацию httpx.AsyncClient,
+    чтобы объект можно было использовать без контекстного менеджера.
+    """
     
-    def __init__(self, 
+    def __init__(self,
+                 base_url: str | None = None,
                  timeout: float = 30.0,
                  max_retries: int = 3,
                  retry_delay: float = 1.0,
                  backoff_factor: float = 2.0):
+        self.base_url = base_url
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.backoff_factor = backoff_factor
-        self.client = None
+        self.client: httpx.AsyncClient | None = None
+
+    async def _ensure_client(self):
+        """Создает httpx.AsyncClient при первом обращении."""
+        if self.client is None:
+            if self.base_url:
+                self.client = httpx.AsyncClient(
+                    base_url=self.base_url,
+                    timeout=httpx.Timeout(self.timeout),
+                    limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+                    http2=True,
+                )
+            else:
+                self.client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(self.timeout),
+                    limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+                    http2=True,
+                )
     
     async def __aenter__(self):
-        self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self.timeout),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-            http2=True
-        )
+        await self._ensure_client()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.client:
             await self.client.aclose()
+            self.client = None
     
     @retry_on_failure()
     async def get(self, url: str, **kwargs):
         """GET запрос с retry"""
+        await self._ensure_client()
         return await self.client.get(url, **kwargs)
     
     @retry_on_failure()
     async def post(self, url: str, **kwargs):
         """POST запрос с retry"""
+        await self._ensure_client()
         return await self.client.post(url, **kwargs)
     
     @retry_on_failure()
     async def put(self, url: str, **kwargs):
         """PUT запрос с retry"""
+        await self._ensure_client()
         return await self.client.put(url, **kwargs)
     
     @retry_on_failure()
     async def delete(self, url: str, **kwargs):
         """DELETE запрос с retry"""
+        await self._ensure_client()
         return await self.client.delete(url, **kwargs)
