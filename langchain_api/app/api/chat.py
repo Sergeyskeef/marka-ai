@@ -3,12 +3,14 @@ Chat API endpoints
 """
 
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
 
 from openai import AsyncOpenAI
 from app.agents.mark_agent import MarkAgent
+from app.agents.chat_handler import get_agent
 from app.config import settings
 from app.agents.chat_handler import enhanced_chat
 
@@ -84,4 +86,23 @@ async def clear_session(session_id: str):
         return {"status": "success", "message": f"Session {session_id} cleared"}
     except Exception as e:
         logger.error(f"Error clearing session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/debug/last")
+async def get_last_chat_debug():
+    """
+    Вернуть подробную отладочную трассировку последнего вызова LLM/инструментов.
+    """
+    try:
+        agent = await get_agent()
+        debug = getattr(agent, "_last_debug", None) or {}
+        # Гарантируем JSON-сериализацию
+        debug_encoded = jsonable_encoder(debug)
+        return {
+            "has_debug": bool(debug_encoded),
+            "debug": debug_encoded,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching last debug: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -33,6 +33,8 @@ class GraphitiCache:
         env_pass = os.getenv("REDIS_PASSWORD")
         if env_pass and not env_url:
             env_url = f"redis://:{env_pass}@redis:6379"
+        env = os.getenv("ENV", "dev")
+        self._env = env
         self.redis_url = env_url or redis_url
         self._redis: Optional[redis.Redis] = None
         self.default_ttl = 3600  # 1 час
@@ -70,7 +72,7 @@ class GraphitiCache:
         content = f"{query_type}:{sorted_params}"
         hash_key = hashlib.md5(content.encode()).hexdigest()
         
-        return f"graphiti:cache:{query_type}:{hash_key}"
+        return f"graphiti:{self._env}:cache:{query_type}:{hash_key}"
     
     async def get(
         self, 
@@ -183,7 +185,7 @@ class GraphitiCache:
             
         try:
             count = 0
-            async for key in self._redis.scan_iter(match=f"graphiti:cache:{pattern}"):
+            async for key in self._redis.scan_iter(match=f"graphiti:{self._env}:cache:{pattern}"):
                 await self._redis.delete(key)
                 count += 1
                 
@@ -225,7 +227,7 @@ class GraphitiCache:
             
             # Получаем общую статистику
             for metric in ["hits", "misses", "sets"]:
-                key = f"graphiti:stats:{metric}"
+                key = f"graphiti:{self._env}:stats:{metric}"
                 value = await self._redis.get(key)
                 stats[metric] = int(value) if value else 0
             
@@ -235,7 +237,7 @@ class GraphitiCache:
             
             # Получаем статистику по типам запросов
             stats["by_type"] = {}
-            async for key in self._redis.scan_iter(match="graphiti:stats:*:*"):
+            async for key in self._redis.scan_iter(match=f"graphiti:{self._env}:stats:*:*"):
                 parts = key.split(":")
                 if len(parts) >= 4:
                     metric_type = parts[2]
@@ -249,7 +251,7 @@ class GraphitiCache:
             
             # Размер кеша
             cache_size = 0
-            async for _ in self._redis.scan_iter(match="graphiti:cache:*"):
+            async for _ in self._redis.scan_iter(match=f"graphiti:{self._env}:cache:*"):
                 cache_size += 1
             stats["cache_size"] = cache_size
             
@@ -269,10 +271,10 @@ class GraphitiCache:
         """
         try:
             # Общий счетчик
-            await self._redis.incr(f"graphiti:stats:{metric}")
+            await self._redis.incr(f"graphiti:{self._env}:stats:{metric}")
             
             # Счетчик по типу запроса
-            await self._redis.incr(f"graphiti:stats:{metric}:{query_type}")
+            await self._redis.incr(f"graphiti:{self._env}:stats:{metric}:{query_type}")
             
         except Exception as e:
             logger.error(f"Ошибка при обновлении статистики: {e}")
@@ -284,7 +286,7 @@ class GraphitiCache:
             
         try:
             count = 0
-            async for key in self._redis.scan_iter(match="graphiti:cache:*"):
+            async for key in self._redis.scan_iter(match=f"graphiti:{self._env}:cache:*"):
                 await self._redis.delete(key)
                 count += 1
                 

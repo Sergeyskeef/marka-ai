@@ -22,7 +22,8 @@ def create_mark_base_prompt() -> PromptTemplate:
         updated_at=datetime.now(),
         author="system",
         tags=["base", "mark", "ai_assistant"],
-        environment="development"
+        # Создаем базовый промпт сразу в production, чтобы он был доступен в рантайме
+        environment="production"
     )
     
     # Компоненты промпта

@@ -83,9 +83,11 @@ class ChatHandler(BaseHandler):
             self.set_user_data(context, f"response_{message.message_id}", sent_messages[-1].message_id)
         
         # Логируем
+        tool_calls = response.get('tool_calls') if isinstance(response, dict) else None
+        tools_used_count = len(tool_calls) if isinstance(tool_calls, list) else 0
         logger.info(
             f"Chat response sent to user {user.id}: "
-            f"mode={chat_mode}, tools_used={len(response.get('tool_calls', []))}"
+            f"mode={chat_mode}, tools_used={tools_used_count}"
         )
     
     async def handle_mode_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -8,9 +8,11 @@ import shlex
 import os
 import ast
 import re
+import shutil
+from pathlib import Path
+from typing import Any, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 # Импортируем Event Bus
 try:
@@ -38,7 +40,7 @@ class Sandbox:
     """Конфигурация песочницы"""
     id: str
     working_dir: str
-    timeout: int = 30
+    timeout: int = 60
     max_output_size: int = 1024 * 1024  # 1MB
     allowed_commands: list[str] | None = None
     blocked_modules: list[str] | None = None
@@ -50,7 +52,7 @@ class SandboxManager:
     def __init__(self):
         self.sandboxes: dict[str, Sandbox] = {}
         self.command_history: list[CommandResult] = []
-        self.default_timeout = 30
+        self.default_timeout = 60
         self.default_max_output = 1024 * 1024  # 1MB
         
         # Белый список разрешенных shell команд
@@ -122,6 +124,161 @@ class SandboxManager:
         self.create_sandbox("default", sandbox_dir)
 
         logger.info("✅ SandboxManager инициализирован с улучшенной безопасностью")
+
+    def _resolve_sandbox_root(self) -> str:
+        """Возвращает корень рабочей директории песочницы."""
+        default = self.get_sandbox("default")
+        return default.working_dir if default else ("/sandbox" if os.path.exists("/sandbox") else "/workspace/sandbox_test")
+
+    def _detect_project_source(self, candidates: Iterable[str] | None = None) -> str | None:
+        """Определяет доступный путь к исходникам проекта для копирования.
+
+        Пытаемся найти директорию, где лежит проект. Предпочитаем корень,
+        содержащий папку langchain_api.
+        """
+        search = list(candidates or [])
+        if not search:
+            search = [
+                "/app",
+                "/app/langchain_api",
+                "/workspace/langchain_api",
+                "/workspace",
+                str(Path.cwd()),
+            ]
+
+        for base in search:
+            try:
+                if not base:
+                    continue
+                base_path = Path(base)
+                if base_path.is_dir():
+                    # Если это именно папка langchain_api — используем её родителя
+                    if base_path.name == "langchain_api" and (base_path / "__init__.py").exists() or (base_path / "app").exists():
+                        return str(base_path.parent)
+                    # Если внутри есть langchain_api — отлично
+                    if (base_path / "langchain_api").is_dir():
+                        return str(base_path)
+            except Exception:
+                continue
+        return None
+
+    def copy_project_to_sandbox(
+        self,
+        source_candidates: Iterable[str] | None = None,
+        dest_subdir: str = "app_copy",
+        exclude_patterns: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        """Копирует текущий проект в рабочую директорию песочницы безопасно (без shell).
+
+        Args:
+            source_candidates: Возможные исходные пути (корни проекта)
+            dest_subdir: Подкаталог внутри песочницы для копии
+            exclude_patterns: Паттерны для исключения файлов/директорий
+
+        Returns:
+            Словарь с результатом копирования
+        """
+        try:
+            sandbox_root = self._resolve_sandbox_root()
+            dest_root = Path(sandbox_root) / dest_subdir
+            # Определяем источник
+            source_root_str = self._detect_project_source(source_candidates)
+            if not source_root_str:
+                return {
+                    "success": False,
+                    "error": "Не удалось определить исходный путь проекта",
+                    "sandbox_root": str(sandbox_root),
+                }
+
+            source_root = Path(source_root_str)
+
+            # Эксклюды по умолчанию
+            default_exclude = [
+                ".git",
+                "__pycache__",
+                ".pytest_cache",
+                "logs",
+                "*.log",
+                "*.db",
+                "*.sqlite",
+                "*.parquet",
+                "*.ipynb",
+                "*.graphml",
+                "*.cache",
+            ]
+            patterns = list(exclude_patterns or []) or default_exclude
+
+            # Готовим целевой каталог
+            if dest_root.exists():
+                # Аккуратно очищаем предыдущую копию
+                shutil.rmtree(dest_root, ignore_errors=True)
+            dest_root.mkdir(parents=True, exist_ok=True)
+
+            def should_exclude(path: Path) -> bool:
+                from fnmatch import fnmatch
+                name = path.name
+                rel = str(path.relative_to(source_root)) if path.is_relative_to(source_root) else name
+                for pat in patterns:
+                    if fnmatch(name, pat) or fnmatch(rel, pat):
+                        return True
+                return False
+
+            files_copied = 0
+            # Копируем только папку langchain_api и связанные корневые файлы (pyproject/requirements/docker-compose)
+            items_to_copy = []
+            if (source_root / "langchain_api").is_dir():
+                items_to_copy.append((source_root / "langchain_api", dest_root / "langchain_api"))
+            else:
+                # fallback: копируем весь source_root
+                items_to_copy.append((source_root, dest_root))
+
+            important_root_files = [
+                "pyproject.toml", "requirements.txt", "docker-compose.yml", "README.md"
+            ]
+            for fn in important_root_files:
+                p = source_root / fn
+                if p.exists() and not should_exclude(p):
+                    (dest_root / fn).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(p, dest_root / fn)
+                    files_copied += 1
+
+            for src, dst in items_to_copy:
+                if src.is_file():
+                    if not should_exclude(src):
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
+                        files_copied += 1
+                    continue
+                for root, dirs, files in os.walk(src):
+                    root_path = Path(root)
+                    # Фильтруем директории на месте, чтобы не заходить в исключенные
+                    dirs[:] = [d for d in dirs if not should_exclude(root_path / d)]
+                    rel_dir = root_path.relative_to(src)
+                    target_dir = dst / rel_dir
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    for f in files:
+                        sp = root_path / f
+                        if should_exclude(sp):
+                            continue
+                        dp = target_dir / f
+                        try:
+                            shutil.copy2(sp, dp)
+                            files_copied += 1
+                        except Exception as ce:
+                            logger.warning(f"Не удалось скопировать {sp} -> {dp}: {ce}")
+
+            return {
+                "success": True,
+                "source": str(source_root),
+                "destination": str(dest_root),
+                "files_copied": files_copied,
+            }
+        except Exception as e:
+            logger.error(f"Ошибка копирования проекта в песочницу: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
 
     def _check_shell_command(self, command: str) -> str | None:
         """Проверка shell команд на безопасность"""

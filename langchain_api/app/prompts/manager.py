@@ -128,7 +128,8 @@ class PromptManager:
         filepath = env_path / filename
         
         async with aiofiles.open(filepath, 'w') as f:
-            await f.write(template.json(indent=2))
+            # Pydantic v2: используем model_dump_json вместо json()
+            await f.write(template.model_dump_json(indent=2))
         
         # Кешируем в Redis если доступен
         if self.redis:
@@ -136,7 +137,8 @@ class PromptManager:
             await self.redis.setex(
                 cache_key,
                 self.cache_ttl,
-                template.json()
+                # Сериализация совместимая с Pydantic v2
+                template.model_dump_json()
             )
         
         logger.info(f"Сохранен промпт {template.name} v{template.metadata.version}")
@@ -152,7 +154,12 @@ class PromptManager:
             cache_key = f"prompt:{environment}:{name}:{version}"
             cached = await self.redis.get(cache_key)
             if cached:
-                return PromptTemplate.parse_raw(cached)
+                try:
+                    # Pydantic v2: валидируем JSON через model_validate_json
+                    return PromptTemplate.model_validate_json(cached)
+                except Exception:
+                    # Если в кеше мусор/пусто — игнорируем
+                    logger.warning("Некорректные данные в кеше промптов, пропускаю")
         
         # Получаем из памяти
         key = f"{environment}:{name}"
@@ -261,7 +268,8 @@ class PromptManager:
         
         evolution_file = evolution_path / f"gen_{succession_package.evolution_record.generation}.json"
         async with aiofiles.open(evolution_file, 'w') as f:
-            await f.write(succession_package.json(indent=2))
+            # Pydantic v2 сериализация
+            await f.write(succession_package.model_dump_json(indent=2))
         
         # Сохраняем новый промпт
         await self.save_prompt(successor)

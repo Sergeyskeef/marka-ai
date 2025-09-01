@@ -3,6 +3,8 @@ Mark Agent - основной агент на базе OpenAI SDK
 """
 
 import json
+import re
+import inspect
 import logging
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
@@ -80,7 +82,12 @@ class MarkAgent:
         
         # История
         self.conversation_history: List[Dict[str, str]] = []
+        # История по пользователям, чтобы не смешивать диалоги
+        self.user_histories: Dict[str, List[Dict[str, str]]] = {}
+        self._max_history_per_user: int = 100  # ограничение роста in-memory истории
         self.total_tokens_used = 0
+        # Последняя подробная трассировка диалога для отладки
+        self._last_debug: Dict[str, Any] = {}
         
         logger.info(f"✅ MarkAgent инициализирован с моделью {model}")
     
@@ -135,6 +142,8 @@ class MarkAgent:
             Словарь с ответом и метаданными
         """
         try:
+            # Запоминаем текущего пользователя для контекста инструментов
+            self._current_user_id = user_id
             # Подготавливаем сообщения
             if self.use_dynamic_prompts:
                 messages = await self._prepare_messages_dynamic(message, context, user_id)
@@ -163,6 +172,32 @@ class MarkAgent:
                 api_params["tools"] = self.tools
                 api_params["tool_choice"] = "auto"
             
+            # Собираем отладочную информацию перед вызовом LLM
+            debug_trace: Dict[str, Any] = {
+                "stage": "before_llm",
+                "selected_prompt": getattr(self, "_last_prompt_name", None),
+                "router_context": getattr(self, "_last_router_context", None),
+                "system_prompt_preview": (messages[0].get("content", "") if messages and messages[0].get("role") == "system" else "")[:1200],
+                "messages_preview": [
+                    {"role": m.get("role"), "content": (m.get("content") or "")[:400]} for m in messages[-10:]
+                ],
+                "api_params_preview": {
+                    "model": self.model,
+                    "messages_len": len(messages),
+                    "has_tools": bool(self.tools),
+                    "tool_count": len(self.tools) if self.tools else 0,
+                    "tool_names": [
+                        (td.get("function", {}) or {}).get("name")
+                        for td in (self.tools or [])
+                        if isinstance(td, dict)
+                    ] or None,
+                    "temperature": self.temperature if (self.temperature is not None and float(self.temperature) != 1.0) else None,
+                    "max_tokens": self.max_tokens,
+                },
+            }
+            # Сохраняем отладочную информацию ДО вызова LLM, чтобы видеть контекст даже при таймауте
+            self._last_debug = debug_trace
+
             # Вызываем OpenAI API
             logger.info(f"🤖 Отправка запроса к {self.model}")
             try:
@@ -179,6 +214,28 @@ class MarkAgent:
             
             # Обрабатываем ответ
             result = await self._process_response(response, messages)
+
+            # Пополняем отладочную информацию
+            try:
+                usage = response.usage.model_dump() if response.usage else None
+            except Exception:
+                usage = None
+            first_msg = None
+            try:
+                first_msg_obj = response.choices[0].message
+                first_msg = first_msg_obj.model_dump() if hasattr(first_msg_obj, "model_dump") else {
+                    "role": getattr(first_msg_obj, "role", None),
+                    "content": getattr(first_msg_obj, "content", None),
+                }
+            except Exception:
+                first_msg = None
+
+            debug_trace.update({
+                "stage": "after_llm",
+                "usage": usage,
+                "first_model_message": first_msg,
+                "tool_calls_count": len(getattr(response.choices[0].message, "tool_calls", []) or []),
+            })
             
             # Добавляем метаданные
             result["metadata"] = {
@@ -189,9 +246,18 @@ class MarkAgent:
                 "tokens_used": response.usage.total_tokens if response.usage else None
             }
             
-            # Обновляем историю
+            # Обновляем историю (персонально для пользователя)
+            history_key = user_id or "anonymous"
+            user_hist = self.user_histories.setdefault(history_key, [])
+            user_hist.append({"role": "user", "content": message})
+            user_hist.append({"role": "assistant", "content": result.get("content", "")})
+            # Ограничение длины истории per-user
+            if len(user_hist) > self._max_history_per_user:
+                # Оставляем последние N записей
+                self.user_histories[history_key] = user_hist[-self._max_history_per_user:]
+            # Поддерживаем и общую историю для обратной совместимости
             self.conversation_history.append({"role": "user", "content": message})
-            self.conversation_history.append({"role": "assistant", "content": result["content"]})
+            self.conversation_history.append({"role": "assistant", "content": result.get("content", "")})
             
             # Обновляем награду в роутере если используем динамические промпты
             if self.use_dynamic_prompts and hasattr(self, '_last_prompt_name'):
@@ -201,6 +267,19 @@ class MarkAgent:
                     self._last_router_context,
                     quality
                 )
+
+            # Финальный блок отладки
+            debug_trace.update({
+                "final_result": {
+                    "content_preview": (result.get("content") or "")[:1200],
+                    "tool_calls": result.get("tool_calls"),
+                    "metadata": result.get("metadata"),
+                },
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "timestamp": datetime.now().isoformat(),
+            })
+            self._last_debug = debug_trace
             
             return result
             
@@ -230,8 +309,8 @@ class MarkAgent:
             for tool_call, result in zip(message.tool_calls, tool_results):
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result, ensure_ascii=False)
+                    "tool_call_id": getattr(tool_call, "id", None),
+                    "content": json.dumps(result, ensure_ascii=False, default=str)
                 })
             
             # Получаем финальный ответ
@@ -246,8 +325,8 @@ class MarkAgent:
                 "content": final_message.content,
                 "tool_calls": [
                     {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        "name": getattr(getattr(tc, "function", None), "name", "unknown"),
+                        "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
                         "result": result
                     }
                     for tc, result in zip(message.tool_calls, tool_results)
@@ -256,7 +335,7 @@ class MarkAgent:
         
         # Простой ответ без инструментов
         return {
-            "content": message.content,
+            "content": getattr(message, "content", ""),
             "tool_calls": []
         }
     
@@ -268,7 +347,14 @@ class MarkAgent:
         results = []
         
         for tool_call in tool_calls:
-            tool_name = tool_call.function.name
+            tool_fn = getattr(tool_call, "function", None)
+            tool_name = getattr(tool_fn, "name", None)
+            if not tool_fn or not tool_name:
+                logger.error("❌ Некорректный вызов инструмента: отсутствует function/name")
+                results.append({
+                    "error": "Invalid tool call: missing function/name"
+                })
+                continue
             
             if tool_name not in self.tool_functions:
                 logger.error(f"❌ Инструмент не найден: {tool_name}")
@@ -279,20 +365,47 @@ class MarkAgent:
             
             try:
                 # Парсим аргументы
-                args = json.loads(tool_call.function.arguments)
+                raw_args = getattr(tool_fn, "arguments", "{}")
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except Exception:
+                    args = {}
                 
                 # Выполняем функцию
                 logger.info(f"🔧 Выполнение инструмента: {tool_name}")
                 function = self.tool_functions[tool_name]
                 
-                # Проверяем, асинхронная ли функция
-                if hasattr(function, '__call__'):
-                    if hasattr(function, '__aiter__') or hasattr(function, '__await__'):
-                        result = await function(**args)
-                    else:
-                        result = function(**args)
+                # Корректно обрабатываем async/sync
+                # Фильтруем неожиданные аргументы по сигнатуре функции
+                try:
+                    signature = inspect.signature(function)
+                    allowed = set(signature.parameters.keys())
+                    filtered_args = {k: v for k, v in (args or {}).items() if k in allowed}
+                    dropped = set((args or {}).keys()) - allowed
+                    if dropped:
+                        logger.warning(f"🔎 Игнорирую неподдерживаемые аргументы для {tool_name}: {sorted(dropped)}")
+                    # Инъекция owner_id/user_id в метаданные, если поддерживается
+                    if 'metadata' in signature.parameters:
+                        md = filtered_args.get('metadata') or {}
+                        if not isinstance(md, dict):
+                            md = {}
+                        if getattr(self, '_current_user_id', None):
+                            md.setdefault('owner_id', self._current_user_id)
+                            md.setdefault('user_id', self._current_user_id)
+                        # Гарантируем целочисленный timestamp, если нет
+                        md.setdefault('timestamp', int(__import__('time').time()))
+                        filtered_args['metadata'] = md
+                except Exception:
+                    filtered_args = args or {}
+
+                if inspect.iscoroutinefunction(function):
+                    result = await function(**filtered_args)
                 else:
-                    result = function(**args)
+                    res = function(**filtered_args)
+                    if inspect.iscoroutine(res):
+                        result = await res
+                    else:
+                        result = res
                 
                 results.append(result)
                 
@@ -374,6 +487,10 @@ class MarkAgent:
     ) -> List[Dict[str, str]]:
         """Подготовка сообщений с динамическим промптом"""
         # Подготавливаем контекст для роутера
+        # Персональная длина диалога
+        history_key = user_id or "anonymous"
+        per_user_hist = self.user_histories.get(history_key, [])
+
         router_context = {
             "query": message,
             "user_id": user_id or "unknown",
@@ -381,19 +498,52 @@ class MarkAgent:
             "domain": self._classify_domain(message),
             "requires_memory": "помни" in message.lower() or "запомни" in message.lower(),
             "requires_tools": any(kw in message.lower() for kw in ["файл", "код", "тест", "анализ"]),
-            "conversation_length": len(self.conversation_history)
+            "conversation_length": len(per_user_hist)
         }
         
         # Выбираем оптимальный промпт
-        prompt_template, confidence = await self.prompt_router.select_prompt(router_context)
-        logger.info(f"Выбран промпт: {prompt_template.name} (уверенность: {confidence:.2f})")
+        prompt_template = None
+        confidence = 0.0
+        try:
+            if hasattr(self, "prompt_router") and self.prompt_router is not None:
+                prompt_template, confidence = await self.prompt_router.select_prompt(router_context)
+        except Exception as e:
+            logger.warning(f"Не удалось выбрать промпт динамической системой: {e}")
+
+        # Фолбэк: если промпт не найден — используем системный
+        if prompt_template is None:
+            logger.warning("Промпт не найден, использую системный промпт по умолчанию")
+            optimized_context = self.system_prompt
+            # Удаляем незаполненные плейсхолдеры вида {var}
+            optimized_context = self._remove_unfilled_placeholders(optimized_context)
+            messages = [{"role": "system", "content": optimized_context}]
+            if context:
+                # Нормализуем: системные блоки объединяем в один system-промпт
+                extra_system_parts = []
+                non_system_messages = []
+                for ctx_msg in context:
+                    role = ctx_msg.get("role")
+                    content = ctx_msg.get("content") or ""
+                    if role == "system" and content:
+                        extra_system_parts.append(content)
+                    else:
+                        non_system_messages.append(ctx_msg)
+                if extra_system_parts:
+                    merged = (messages[0]["content"].rstrip() + "\n\n" + "\n\n".join(extra_system_parts)).strip()
+                    # Дедупликация повторяющихся абзацев/строк
+                    messages[0]["content"] = self._deduplicate_system_prompt(merged)
+                messages.extend(non_system_messages)
+            messages.append({"role": "user", "content": message})
+            self._last_prompt_name = "default_system"
+            self._last_router_context = router_context
+            return messages
         
         # Подготавливаем данные для контекста
         context_data = {
             "model_name": self.model,
             "user_id": user_id or "",
             "user_query": message,
-            "interaction_count": len(self.conversation_history),
+            "interaction_count": len(per_user_hist),
             "working_memory": self._get_working_memory()
         }
         
@@ -403,6 +553,8 @@ class MarkAgent:
             context_data=context_data,
             optimization_mode="balanced"
         )
+        # Удаляем незаполненные плейсхолдеры вида {var}
+        optimized_context = self._remove_unfilled_placeholders(optimized_context)
         
         logger.debug(f"Метрики контекста: {metrics}")
         
@@ -410,16 +562,101 @@ class MarkAgent:
         messages = [{"role": "system", "content": optimized_context}]
         
         # Добавляем историю
+        # 1) Внешний контекст (например, RAG). Системные блоки объединяем в один
         if context:
-            messages.extend(context)
+            extra_system_parts = []
+            non_system_messages = []
+            for ctx_msg in context:
+                role = ctx_msg.get("role")
+                content = ctx_msg.get("content") or ""
+                if role == "system" and content:
+                    extra_system_parts.append(content)
+                else:
+                    non_system_messages.append(ctx_msg)
+            if extra_system_parts:
+                merged = (messages[0]["content"].rstrip() + "\n\n" + "\n\n".join(extra_system_parts)).strip()
+                messages[0]["content"] = self._deduplicate_system_prompt(merged)
+            messages.extend(non_system_messages)
+        # 2) Персональная история пользователя (последние 12 сообщений)
+        user_hist = per_user_hist
+        if user_hist:
+            messages.extend(user_hist[-12:])
         
         messages.append({"role": "user", "content": message})
         
         # Сохраняем информацию для оценки качества
-        self._last_prompt_name = prompt_template.name
+        self._last_prompt_name = getattr(prompt_template, "name", "unknown")
         self._last_router_context = router_context
         
         return messages
+
+    def _remove_unfilled_placeholders(self, text: str) -> str:
+        """Удалить строки с незаполненными плейсхолдерами вида {variable}.
+        Полезно, когда в шаблоне остались переменные без значений.
+        """
+        try:
+            lines = text.splitlines()
+            cleaned = []
+            placeholder_re = re.compile(r"\{[^\}]+\}")
+            for line in lines:
+                # Если есть явный плейсхолдер — пропускаем строку
+                if placeholder_re.search(line):
+                    continue
+                cleaned.append(line)
+            # Убираем лишние пустые строки по краям и последовательные пустые строки
+            out = []
+            previous_blank = False
+            for line in cleaned:
+                is_blank = not line.strip()
+                if is_blank and previous_blank:
+                    continue
+                out.append(line)
+                previous_blank = is_blank
+            return "\n".join(out).strip()
+        except Exception:
+            return text
+
+    def _deduplicate_system_prompt(self, text: str) -> str:
+        """Удалить повторяющиеся абзацы и строки, сохраняя порядок.
+        Нормализация: тримминг, схлопывание множественных пробелов, регистрозависимо.
+        """
+        try:
+            # Разбиваем на абзацы по пустым строкам
+            paragraphs = []
+            current: list[str] = []
+            for line in text.splitlines():
+                if line.strip() == "":
+                    if current:
+                        paragraphs.append("\n".join(current))
+                        current = []
+                else:
+                    current.append(line)
+            if current:
+                paragraphs.append("\n".join(current))
+            
+            seen = set()
+            unique_paragraphs = []
+            for p in paragraphs:
+                norm_p = " ".join(p.strip().split())
+                if norm_p in seen:
+                    continue
+                seen.add(norm_p)
+                # Дополнительно удаляем дубли строк внутри абзаца
+                lines_seen = set()
+                dedup_lines = []
+                for ln in p.splitlines():
+                    norm_ln = " ".join(ln.strip().split())
+                    if norm_ln in lines_seen:
+                        continue
+                    lines_seen.add(norm_ln)
+                    dedup_lines.append(ln)
+                unique_paragraphs.append("\n".join(dedup_lines))
+            
+            # Схлопываем последовательные пустые строки между абзацами
+            result = "\n\n".join(up.strip() for up in unique_paragraphs if up.strip())
+            return result.strip()
+        except Exception:
+            return text
     
     def _estimate_complexity(self, message: str) -> float:
         """Оценка сложности запроса"""

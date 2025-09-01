@@ -60,6 +60,12 @@ def create_openai_tool(func: Callable) -> Dict[str, Any]:
         # Для enum типов
         if hasattr(param_type, '__members__'):
             param_info["enum"] = list(param_type.__members__.keys())
+
+        # Для массивов необходимо указать схему элементов
+        if json_type == "array":
+            items_schema = _get_array_items_schema(param_type)
+            if items_schema:
+                param_info["items"] = items_schema
             
         properties[param_name] = param_info
         
@@ -122,6 +128,36 @@ def _python_type_to_json_type(python_type) -> str:
     
     # По умолчанию
     return "string"
+
+
+def _unwrap_optional(python_type):
+    """Возвращает базовый тип для Optional[T] (Union[T, None])."""
+    origin = get_origin(python_type)
+    if origin is Union:
+        args = [t for t in get_args(python_type) if t is not type(None)]  # noqa: E721
+        if len(args) == 1:
+            return args[0]
+    return python_type
+
+
+def _get_array_items_schema(python_type) -> Dict[str, Any] | None:
+    """Построить JSON Schema для элементов массива на основе аннотации типа.
+    Примеры:
+      - List[str]      -> {"type": "string"}
+      - list[int]      -> {"type": "integer"}
+      - List[Dict]     -> {"type": "object"}
+      - Без указания   -> {"type": "string"} (безопасный дефолт)
+    """
+    base = _unwrap_optional(python_type)
+    origin = get_origin(base)
+    if origin in (list, List):
+        args = get_args(base)
+        if args:
+            inner = args[0]
+            return {"type": _python_type_to_json_type(inner)}
+        # Не указан тип элементов — используем безопасный дефолт
+        return {"type": "string"}
+    return None
 
 
 def _extract_param_description(docstring: str, param_name: str) -> str:

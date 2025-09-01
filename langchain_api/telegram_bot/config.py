@@ -27,7 +27,7 @@ class BotConfig:
     APP_HOST: str = os.getenv("APP_HOST", "http://app:8000")
     
     # Timeouts
-    REQUEST_TIMEOUT: int = int(os.getenv("BOT_TIMEOUT", "60"))
+    REQUEST_TIMEOUT: int = int(os.getenv("BOT_TIMEOUT", "180"))
     POLL_TIMEOUT: int = 30
     
     # Rate limiting

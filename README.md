@@ -287,6 +287,13 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 }
 ```
 
+### Обновления (август 2025)
+
+- Персистентная чат-история в графе: создаются узлы `Session` и `Message` для каждого диалога
+- Гибридный поиск: keyword-кандидаты + rerank по эмбеддингам (cosine)
+- Кеш Graphiti с namespace по окружению и инвалидацией при записи
+- Ограничение роста in-memory истории диалогов агента (per-user)
+
 ## 📋 Система планирования
 
 Марк умеет декомпозировать сложные задачи и создавать пошаговые планы:
@@ -335,8 +342,21 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 - ✅ **Ограничения ресурсов**:
   - CPU: 50% (0.5 ядра)
   - Память: 512MB
-  - Timeout: 30 секунд
+  - Timeout: 60 секунд
+  - Разрешённые директории для файловых операций: `/app` (и `settings.FILE_TOOLS_BASE_DIR`, по умолчанию `/app`), `/sandbox`
+  - Рабочая директория песочницы: `/sandbox` (если отсутствует — `/workspace/sandbox_test`)
 - ✅ **Docker изоляция** с ограниченными правами
+
+#### Инструменты песочницы (через агента)
+
+Агент Марк может выполнять код в изолированной среде с помощью инструментов:
+
+- `run_in_sandbox(command, timeout=60)`: выполнить команду (например, `python3 /sandbox/hello.py`)
+- `run_python_snippet(code, filename="snippet.py", timeout=60)`: сохранить код в `/sandbox/<filename>` и запустить
+
+Возвращаются: `success`, `stdout`, `stderr`, `return_code`, `execution_time`.
+
+Ограничения: сетевые операции и опасные команды блокируются, вывод ограничен 1 МБ, таймаут 60с.
 
 ### Защита API
 - 🔐 **Rate limiting** на всех endpoints
@@ -432,31 +452,40 @@ cd mark-ai
 
 ### 2. Настройка окружения
 ```bash
-# Создаем .env файлы
+# Создаем .env на основе примера
 cp .env.example .env
-cp telegram_bot/.env.dev telegram_bot/.env
 
-# Редактируем токены
-# В .env: OPENAI_API_KEY=your-key
-# В telegram_bot/.env: BOT_TOKEN=your-bot-token
+# Обязательные переменные в КОРНЕВОМ .env
+# OPENAI_API_KEY=sk-...                # ключ OpenAI
+# TELEGRAM_BOT_TOKEN=123456:ABC...     # токен Telegram бота
+
+# Опционально:
+# OPENAI_MODEL=gpt-5-mini              # по умолчанию уже gpt-5-mini
+# OPENAI_TEMPERATURE=0.7               # для mini может игнорироваться (см. примечание ниже)
 ```
+
+> Примечание по модели: для `gpt-5-mini` кастомные значения `temperature` могут не поддерживаться
+> (модель принимает значение по умолчанию = 1). В коде агента реализован
+> автоматический повтор запроса без `temperature`, если API возвращает ошибку
+> `unsupported_value`.
 
 ### 3. Предпродакшен проверка
 ```bash
 # Проверяем готовность к запуску
 python scripts/pre_production_check.py
 
-# Если все проверки пройдены, запускаем сервисы
-docker compose up -d
+# Если все проверки пройдены, запускаем сервисы ИЗ каталога langchain_api
+cd langchain_api
+docker compose -f ../docker-compose.yml up -d
 
 # Проверяем статус
-docker compose ps
+docker compose -f ../docker-compose.yml ps
 
-# Smoke тесты после запуска
-python scripts/smoke_tests.py
+# Smoke тесты после запуска (из app-контейнера)
+docker compose -f ../docker-compose.yml exec app python /app/langchain_api/scripts/smoke_tests.py
 ```
 
-> 💡 **Dev Mode**: По умолчанию бот запускается в режиме разработки, где все пользователи имеют админские права. Для production установите `BOT_DEV_MODE=false` в `telegram_bot/.env`
+> 💡 **Dev Mode**: По умолчанию бот запускается в режиме разработки, где все пользователи имеют админские права. Для production установите `BOT_DEV_MODE=false` (в корневом `.env`).
 
 ### 4. Первый запуск
 1. Откройте вашего бота в Telegram

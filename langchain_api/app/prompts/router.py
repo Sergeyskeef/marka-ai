@@ -73,6 +73,7 @@ class DynamicPromptRouter:
             logger.warning("Нет доступных промптов, создаю дефолтный")
             from .templates.mark_base import create_mark_base_prompt
             default_prompt = create_mark_base_prompt()
+            # Гарантируем, что промпт сохранится без Redis и сразу будет активирован
             await self.prompt_manager.save_prompt(default_prompt)
             candidates = [default_prompt.name]
         
@@ -93,6 +94,14 @@ class DynamicPromptRouter:
                 if prompt:
                     cost_factor = self._calculate_cost_factor(prompt, context["budget"])
                     ucb *= cost_factor
+            # Небольшая приоритизация по домену
+            domain = context.get("domain")
+            if domain == "technical" and ("code" in name or "tech" in name):
+                ucb *= 1.15
+            if domain == "creative" and ("chat" in name or "base" in name):
+                ucb *= 1.05
+            if context.get("requires_tools") and ("code" in name or "mark_code" in name):
+                ucb *= 1.10
             
             ucb_scores[name] = ucb
         
@@ -105,6 +114,11 @@ class DynamicPromptRouter:
             selected_name, 
             environment=environment
         )
+        if selected_prompt is None:
+            # Фолбэк: создаем базовый промпт и возвращаем его
+            from .templates.mark_base import create_mark_base_prompt
+            selected_prompt = create_mark_base_prompt()
+            await self.prompt_manager.save_prompt(selected_prompt)
         
         # Записываем выбор
         self.selection_history.append({

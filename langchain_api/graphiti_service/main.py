@@ -202,12 +202,10 @@ async def create_node(node: Node):
     props = process_properties(props)
     logger.info(f"PROPS to Neo4j → {props}")
 
-    # Проверка на существование
+    # Проверка на существование (в in-memory режиме)
     if node_id in in_memory_nodes:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Узел с ID {node_id} уже существует"
-        )
+        # Идемпотентность: возвращаем 409, но формально это не ошибка клиента
+        return {"message": f"Узел {node_id} уже существует", "id": node_id}
 
     node_data = {
         "id": node_id,
@@ -221,8 +219,10 @@ async def create_node(node: Node):
     if check_neo4j_connection():
         try:
             with neo4j_driver.session() as session:
+                # Идемпотентное создание: пытаемся MERGE по id
                 session.run(
-                    f"CREATE (n:{node.type} $props)",
+                    f"MERGE (n:{node.type} {{id: $id}}) SET n += $props",
+                    id=node_id,
                     props=props
                 )
             logger.info(f"Узел {node_id} создан в Neo4j")

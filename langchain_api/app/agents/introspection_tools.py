@@ -56,9 +56,9 @@ async def analyze_my_capabilities() -> str:
         for category, module in tool_modules:
             capabilities["tools"][category] = []
             
-            # Ищем все функции с декоратором @create_openai_tool
+            # Ищем все функции, превращённые в openai tool (есть _openai_tool_definition)
             for name, obj in inspect.getmembers(module):
-                if inspect.isfunction(obj) and hasattr(obj, '__wrapped__'):
+                if inspect.isfunction(obj) and hasattr(obj, '_openai_tool_definition'):
                     doc = inspect.getdoc(obj) or "Нет описания"
                     sig = inspect.signature(obj)
                     
@@ -213,7 +213,8 @@ async def analyze_my_structure() -> str:
     Возвращает детальную карту архитектуры системы.
     """
     try:
-        project_root = Path("/workspace")
+        # Корень проекта внутри контейнера
+        project_root = Path("/app")
         structure = {
             "core_modules": {},
             "agent_tools": {},
@@ -261,7 +262,7 @@ async def analyze_my_structure() -> str:
                 structure["agent_tools"]["categories"][category] = len(file_info["functions"])
         
         # Анализируем core модули
-        core_dirs = ["memory", "learning", "sandbox", "utils"]
+        core_dirs = ["memory", "learning", "sandbox", "utils", "core"]
         for dir_name in core_dirs:
             dir_path = project_root / dir_name
             if dir_path.exists():
@@ -272,9 +273,9 @@ async def analyze_my_structure() -> str:
         
         # Анализируем сервисы
         services = {
-            "FastAPI": "main.py",
-            "Telegram Bot": "telegram_bot/",
-            "Graphiti": "graphiti_service/",
+            "FastAPI": "app/main.py",
+            "Telegram Bot": "langchain_api/telegram_bot/",
+            "Graphiti": "langchain_api/graphiti_service/",
             "Neo4j": "docker-compose.yml"
         }
         
@@ -312,12 +313,19 @@ async def what_am_i_learning() -> str:
     Анализирует память и историю обучения.
     """
     try:
-        from ..learning.reap_cycle import REAPCycle
+        # Совместимость: в модуле определён класс REAPLearningCycle и экземпляр reap_cycle
+        try:
+            from ..learning.reap_cycle import REAPLearningCycle as REAPCycle
+        except Exception:
+            from ..learning.reap_cycle import reap_cycle as REAPCycle
         from ..memory.advanced_memory_adapter import AdvancedMemoryAdapter
         
         # Инициализируем компоненты
         memory = AdvancedMemoryAdapter()
-        reap = REAPCycle(memory)
+        try:
+            reap = REAPCycle(memory)
+        except Exception:
+            reap = None
         
         learning_status = {
             "recent_lessons": [],

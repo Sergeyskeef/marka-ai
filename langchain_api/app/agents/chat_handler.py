@@ -15,10 +15,12 @@ from .learning_tools import LEARNING_TOOLS
 from .vector_search_tools import VECTOR_SEARCH_TOOLS
 from .introspection_tools import INTROSPECTION_TOOLS
 from .file_tools import FILE_TOOLS
+from .sandbox_tools import SANDBOX_TOOLS
 from .test_tools import TEST_TOOLS
 from .code_analysis_tools import CODE_ANALYSIS_TOOLS
 from .dependency_tools import DEPENDENCY_TOOLS
 from core.memory.memory_manager import memory_manager
+from core.memory.graphiti_adapter import graphiti_adapter
 from ..prompts import PromptSystemFactory
 from redis.asyncio import Redis
 import asyncio
@@ -91,7 +93,7 @@ async def get_agent() -> MarkAgent:
                 all_tools = (MEMORY_TOOLS + ADVANCED_MEMORY_TOOLS + 
                             LEARNING_TOOLS + VECTOR_SEARCH_TOOLS + 
                             INTROSPECTION_TOOLS + FILE_TOOLS + TEST_TOOLS +
-                            CODE_ANALYSIS_TOOLS + DEPENDENCY_TOOLS)
+                            CODE_ANALYSIS_TOOLS + DEPENDENCY_TOOLS + SANDBOX_TOOLS)
                 
                 for tool in all_tools:
                     definition = tool._openai_tool_definition
@@ -131,6 +133,14 @@ async def enhanced_chat(
         
         # Получаем агента
         agent = await get_agent()
+        # Определяем session_id (используем chat_id как session_id, если задан)
+        session_id: str
+        if chat_id is not None:
+            session_id = str(chat_id)
+        else:
+            import uuid
+            # Fallback: уникальная сессия на запрос, если не передана
+            session_id = str(uuid.uuid4())
         
         # Подготавливаем контекст из памяти
         context = await _prepare_context(question, user_id)
@@ -139,13 +149,31 @@ async def enhanced_chat(
         result = await agent.chat(
             message=question,
             user_id=user_id,
-            chat_id=chat_id,
+            chat_id=session_id,
             context=context,
             use_tools=True
         )
         
         # Обрабатываем результат
         response = await _process_result(result, question, user_id)
+
+        # Персист сессии и сообщений в Graphiti
+        try:
+            await graphiti_adapter.create_session(session_id=session_id, user_id=user_id)
+            await graphiti_adapter.create_message(
+                session_id=session_id,
+                role="user",
+                text=question,
+                metadata={"user_id": user_id, "mode": mode}
+            )
+            await graphiti_adapter.create_message(
+                session_id=session_id,
+                role="assistant",
+                text=response.get("content", ""),
+                metadata={"user_id": user_id, "mode": mode, "has_tools": bool(response.get("tool_calls"))}
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось сохранить чат-сообщения в Graphiti: {e}")
         
         # Добавляем дополнительные метаданные
         response["metadata"].update({
@@ -235,7 +263,8 @@ async def _process_result(
         metadata = {
             "type": "dialog",
             "user_id": user_id,
-            "timestamp": datetime.now().isoformat(),
+            # Храним timestamp как целое число для совместимости с моделью
+            "timestamp": int(datetime.now().timestamp()),
             "has_tools": bool(result.get("tool_calls"))
         }
         

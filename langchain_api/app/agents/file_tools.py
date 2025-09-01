@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Безопасные директории для работы
 SAFE_DIRECTORIES = [
-    "/workspace",  # Основная рабочая директория
-    "/app",        # Директория приложения в контейнере
-    "/sandbox",    # Песочница
+    settings.FILE_TOOLS_BASE_DIR,  # Базовая директория из настроек (по умолчанию /app)
+    "/app",                       # Корень приложения в контейнере
+    # "/workspace",              # Отключено: не используется в текущей конфигурации
+    "/sandbox",                   # Песочница (для безопасных экспериментов)
 ]
 
 # Запрещенные паттерны файлов
@@ -76,7 +77,7 @@ async def read_file(
     Читает содержимое файла.
     
     Args:
-        file_path: Путь к файлу (абсолютный или относительный к /workspace)
+        file_path: Путь к файлу (абсолютный или относительный к базовой директории)
         start_line: Начальная строка (1-based, включительно)
         end_line: Конечная строка (1-based, включительно)
         encoding: Кодировка файла
@@ -85,9 +86,9 @@ async def read_file(
         Содержимое файла или его части
     """
     try:
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
-            file_path = os.path.join("/workspace", file_path)
+            file_path = os.path.join(settings.FILE_TOOLS_BASE_DIR, file_path)
         
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):
@@ -154,9 +155,9 @@ async def write_file(
         Сообщение о результате операции
     """
     try:
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
-            file_path = os.path.join("/workspace", file_path)
+            file_path = os.path.join(settings.FILE_TOOLS_BASE_DIR, file_path)
         
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):
@@ -203,9 +204,9 @@ async def append_to_file(
         Сообщение о результате операции
     """
     try:
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
-            file_path = os.path.join("/workspace", file_path)
+            file_path = os.path.join(settings.FILE_TOOLS_BASE_DIR, file_path)
         
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):
@@ -245,7 +246,7 @@ async def list_files(
     Список файлов в директории.
     
     Args:
-        directory: Путь к директории
+        directory: Путь к директории (абсолютный или относительный к базовой директории)
         pattern: Паттерн для фильтрации (например, "*.py")
         recursive: Рекурсивный поиск
         show_hidden: Показывать скрытые файлы
@@ -255,9 +256,9 @@ async def list_files(
         Список файлов в формате JSON
     """
     try:
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(directory):
-            directory = os.path.join("/workspace", directory)
+            directory = os.path.join(settings.FILE_TOOLS_BASE_DIR, directory)
         
         # Проверка безопасности
         if not is_safe_path(directory):
@@ -401,7 +402,7 @@ async def search_in_files(
     
     Args:
         pattern: Текст или регулярное выражение для поиска
-        directory: Директория для поиска
+        directory: Директория для поиска (абсолютный или относительный путь к базовой директории)
         file_pattern: Паттерн файлов (например, "*.py")
         case_sensitive: Учитывать регистр
         max_results: Максимальное количество результатов
@@ -412,9 +413,9 @@ async def search_in_files(
     try:
         import re
         
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(directory):
-            directory = os.path.join("/workspace", directory)
+            directory = os.path.join(settings.FILE_TOOLS_BASE_DIR, directory)
         
         # Проверка безопасности
         if not is_safe_path(directory):
@@ -513,7 +514,7 @@ async def delete_file(
     Удаляет файл.
     
     Args:
-        file_path: Путь к файлу
+        file_path: Путь к файлу (абсолютный или относительный к базовой директории)
         confirm: Подтверждение удаления (должно быть True)
     
     Returns:
@@ -523,9 +524,9 @@ async def delete_file(
         if not confirm:
             return "⚠️ Для удаления файла установите confirm=True"
         
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
-            file_path = os.path.join("/workspace", file_path)
+            file_path = os.path.join(settings.FILE_TOOLS_BASE_DIR, file_path)
         
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):

@@ -164,6 +164,23 @@ class GraphitiMemoryAdapter:
                         source="GraphitiAdapter"
                     ))
                 
+                # Инвалидация кеша поиска (новые данные)
+                try:
+                    if self.use_cache and self._cache is None:
+                        self._cache = await get_cache()
+                    if self.use_cache and self._cache:
+                        await self._cache.invalidate_query_type("search_episodes")
+                        # Если есть user_id в метаданных — чистим персональный кеш
+                        user_id = None
+                        try:
+                            user_id = (metadata or {}).get("user_id")
+                        except Exception:
+                            user_id = None
+                        if user_id:
+                            await self._cache.invalidate_user_cache(str(user_id))
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось инвалидировать кеш после записи: {e}")
+
                 return {"success": True, "id": node_id, "data": response_data}
             else:
                 error_text = response.text
@@ -171,6 +188,106 @@ class GraphitiMemoryAdapter:
                 return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
         except Exception as e:
             logger.error(f"❌ Ошибка создания эпизода: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def create_message(
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        metadata: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Создает сообщение чата (узел типа Message) в Graphiti"""
+        try:
+            import uuid
+            import time
+            node_id = str(uuid.uuid4())
+
+            properties: dict[str, Any] = {
+                "msg": text,
+                "session_id": session_id,
+                "role": role,
+                "created_at": int(time.time()),
+            }
+
+            if metadata:
+                for key, value in metadata.items():
+                    if isinstance(value, str | int | float | bool):
+                        properties[key] = value
+                    elif isinstance(value, list):
+                        properties[key] = json.dumps(value)
+                    elif value is None:
+                        continue
+                    else:
+                        properties[key] = json.dumps(value)
+
+            payload = {
+                "id": node_id,
+                "type": "Message",
+                "properties": properties
+            }
+
+            client = await self._get_retry_client()
+            response = await client.post("/nodes", json=payload)
+            if response.status_code == 201:
+                # Инвалидация кеша поиска
+                try:
+                    if self.use_cache and self._cache is None:
+                        self._cache = await get_cache()
+                    if self.use_cache and self._cache:
+                        await self._cache.invalidate_query_type("search_episodes")
+                        if metadata and metadata.get("user_id"):
+                            await self._cache.invalidate_user_cache(str(metadata.get("user_id")))
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось инвалидировать кеш после записи Message: {e}")
+
+                return {"success": True, "id": node_id}
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания Message: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def create_session(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
+        """Создает узел Session в Graphiti (идемпотентно по id)."""
+        try:
+            properties: dict[str, Any] = {
+                "id": session_id,
+                "ts_start": int(time.time()),
+            }
+            if user_id:
+                properties["user_id"] = user_id
+            if metadata:
+                for key, value in metadata.items():
+                    if isinstance(value, str | int | float | bool):
+                        properties[key] = value
+                    elif isinstance(value, list):
+                        properties[key] = json.dumps(value)
+                    elif value is None:
+                        continue
+                    else:
+                        properties[key] = json.dumps(value)
+
+            payload = {
+                "id": session_id,
+                "type": "Session",
+                "properties": properties,
+            }
+
+            client = await self._get_retry_client()
+            response = await client.post("/nodes", json=payload)
+            if response.status_code in (201, 409):
+                # 201 Created или 409 Conflict (уже существует) считаем успешным идемпотентным созданием
+                return {"success": True, "id": session_id}
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания Session: {e}")
             return {"success": False, "error": str(e)}
 
     async def search_episodes(self, query: str, limit: int = 10, user_id: Optional[str] = None) -> dict[str, Any]:

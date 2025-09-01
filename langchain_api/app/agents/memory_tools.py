@@ -76,12 +76,36 @@ async def save_to_memory(text: str, metadata: Optional[Dict[str, Any]] = None) -
         # Подготавливаем метаданные
         if metadata is None:
             metadata = {}
-            
-        metadata.update({
-            "source": "agent_tool",
-            "timestamp": datetime.now().isoformat(),
-            "tool": "save_to_memory"
-        })
+        else:
+            # Клонируем, чтобы не мутировать исходный объект
+            metadata = dict(metadata)
+
+        # Источник и инструмент
+        metadata["source"] = metadata.get("source", "agent_tool")
+        metadata["tool"] = metadata.get("tool", "save_to_memory")
+
+        # Нормализуем timestamp: предпочтительно целое Unix-время (секунды)
+        ts = metadata.get("timestamp")
+        if ts is None:
+            ts_int = int(datetime.now().timestamp())
+        else:
+            try:
+                if isinstance(ts, int):
+                    ts_int = ts
+                elif isinstance(ts, float):
+                    ts_int = int(ts)
+                elif isinstance(ts, str):
+                    # Попытка как целое
+                    try:
+                        ts_int = int(ts)
+                    except ValueError:
+                        # Попытка распарсить ISO8601
+                        ts_int = int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp())
+                else:
+                    ts_int = int(datetime.now().timestamp())
+            except Exception:
+                ts_int = int(datetime.now().timestamp())
+        metadata["timestamp"] = ts_int
         
         # Сохраняем
         result = await memory_manager.save(text, metadata)
@@ -204,7 +228,7 @@ async def remember_fact(subject: str, predicate: str, object: str, confidence: f
             "object": object,
             "confidence": confidence,
             "source": "agent_reasoning",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": int(datetime.now().timestamp())
         }
         
         # Сохраняем

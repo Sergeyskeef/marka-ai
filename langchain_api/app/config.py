@@ -77,13 +77,19 @@ class Settings(BaseSettings):
     TOOL_TIMEOUT: int = 30  # seconds
     
     # Prompt Management System
-    PROMPTS_STORAGE_PATH: str = "/workspace/data/prompts"
+    # Хранилище промптов по умолчанию внутри контейнера
+    PROMPTS_STORAGE_PATH: str = "/app/data/prompts"
     PROMPTS_CACHE_TTL: int = 3600  # 1 hour
     PROMPTS_MAX_CONTEXT_TOKENS: int = 8192
     PROMPTS_EVOLUTION_ENABLED: bool = True
     PROMPTS_EVOLUTION_CHECK_INTERVAL: int = 60  # seconds
     PROMPTS_ROUTER_ALPHA: float = 0.25  # exploration parameter
-    PROMPTS_DEFAULT_ENVIRONMENT: str = "development"
+    # Боевое окружение по умолчанию для роутинга
+    PROMPTS_DEFAULT_ENVIRONMENT: str = "production"
+    
+    # File Tools
+    # Базовая директория для файловых операций (относительные пути будут резолвиться сюда)
+    FILE_TOOLS_BASE_DIR: str = "/app"
     
 
 

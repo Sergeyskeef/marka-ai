@@ -10,6 +10,7 @@ from datetime import timedelta
 from .graphiti_adapter import graphiti_adapter
 from .models import MemoryEntry, MemoryMetadata, MemoryResponse
 from .hybrid_search import HybridSearchEngine
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,8 @@ class MemoryManager:
 
     def __init__(self):
         self.memory_instances = {}
-        self.hybrid_search = None  # Ленивая инициализация
+        # Не пересекаемся по имени с методом hybrid_search
+        self.hybrid_search_engine = None  # Ленивая инициализация
         self.memory_stats = {
             "total_entries": 0,
             "memory_types": []
@@ -70,13 +72,18 @@ class MemoryManager:
         try:
             # Валидируем входные данные
             if metadata:
-                validated_metadata = MemoryMetadata(**metadata).dict(exclude_none=True)
+                # Приводим к dict, даже если пришел MemoryMetadata
+                if isinstance(metadata, MemoryMetadata):
+                    validated_metadata = metadata.model_dump(exclude_none=True)
+                else:
+                    validated_metadata = MemoryMetadata(**metadata).model_dump(exclude_none=True)
             else:
                 validated_metadata = None
             
             entry = MemoryEntry(text=text, metadata=validated_metadata)
             
-            result = await graphiti_adapter.create_episode(entry.text, entry.metadata)
+            # Передаем в адаптер уже сериализованные метаданные (dict)
+            result = await graphiti_adapter.create_episode(entry.text, validated_metadata)
             if result.get("success", True):  # Graphiti может не возвращать success поле
                 self.memory_stats["total_entries"] += 1
                 logger.info(f"✅ Эпизод добавлен в память: {entry.text[:50]}...")
@@ -164,15 +171,29 @@ class MemoryManager:
         try:
             if use_hybrid:
                 # Инициализируем гибридный поиск если еще не создан
-                if self.hybrid_search is None:
-                    self.hybrid_search = HybridSearchEngine(graphiti_adapter)
+                if self.hybrid_search_engine is None:
+                    self.hybrid_search_engine = HybridSearchEngine(graphiti_adapter)
                 
                 # Выполняем гибридный поиск
-                results = await self.hybrid_search.search(
+                # Готовим фильтры и эмбеддинг запроса
+                _filters: dict[str, Any] = dict(filters or {})
+                try:
+                    client = AsyncOpenAI()
+                    emb_resp = await client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=query
+                    )
+                    query_embedding = emb_resp.data[0].embedding
+                    _filters["query_embedding"] = query_embedding
+                except Exception:
+                    # Если эмбеддинг не доступен, продолжаем без него
+                    pass
+
+                results = await self.hybrid_search_engine.search(
                     query=query,
                     user_id=user_id,
                     k=k,
-                    filters=filters,
+                    filters=_filters,
                     time_window=time_window
                 )
                 

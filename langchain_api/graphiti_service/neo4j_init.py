@@ -16,23 +16,28 @@ logger = logging.getLogger(__name__)
 
 # DDL для создания индексов и constraints
 _DDL_STATEMENTS = [
-    # Уникальный constraint для episode_id
+    # Episode
     "CREATE CONSTRAINT episode_id IF NOT EXISTS FOR (e:Episode) REQUIRE e.id IS UNIQUE;",
-    
-    # Индекс для поиска по сообщению
     "CREATE INDEX episode_msg IF NOT EXISTS FOR (e:Episode) ON (e.msg);",
-    
-    # Индекс для поиска по timestamp
     "CREATE INDEX episode_timestamp IF NOT EXISTS FOR (e:Episode) ON (e.timestamp);",
-    
-    # Индекс для поиска по chat_id
     "CREATE INDEX episode_chat_id IF NOT EXISTS FOR (e:Episode) ON (e.chat_id);",
-    
-    # Full-text индекс для поиска по содержимому (пока отключен - требует APOC)
-    # "CALL db.index.fulltext.createNodeIndex('episode_fulltext', ['Episode'], ['msg']) YIELD name;",
-    
-    # Индекс для metadata (если используется)
     "CREATE INDEX episode_metadata IF NOT EXISTS FOR (e:Episode) ON (e.metadata);",
+
+    # Message
+    "CREATE CONSTRAINT message_id IF NOT EXISTS FOR (m:Message) REQUIRE m.id IS UNIQUE;",
+    "CREATE INDEX message_msg IF NOT EXISTS FOR (m:Message) ON (m.msg);",
+    "CREATE INDEX message_session_id IF NOT EXISTS FOR (m:Message) ON (m.session_id);",
+    "CREATE INDEX message_role IF NOT EXISTS FOR (m:Message) ON (m.role);",
+    "CREATE INDEX message_created_at IF NOT EXISTS FOR (m:Message) ON (m.created_at);",
+
+    # Fact / Skill (если будут использоваться как отдельные метки в будущем)
+    "CREATE INDEX fact_subject IF NOT EXISTS FOR (f:Fact) ON (f.subject);",
+    "CREATE INDEX fact_predicate IF NOT EXISTS FOR (f:Fact) ON (f.predicate);",
+    "CREATE INDEX fact_object IF NOT EXISTS FOR (f:Fact) ON (f.object);",
+
+    # Fulltext индексы (безопасные вызовы, если доступно)
+    "CALL db.index.fulltext.createNodeIndex('fulltext_messages', ['Message'], ['msg'])",
+    "CALL db.index.fulltext.createNodeIndex('fulltext_episodes', ['Episode'], ['msg'])",
 ]
 
 def wait_for_neo4j(driver, max_retries: int = 30, delay: int = 2) -> bool:
