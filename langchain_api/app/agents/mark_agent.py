@@ -11,6 +11,7 @@ from datetime import datetime
 import asyncio
 
 from openai import AsyncOpenAI
+from redis.asyncio import Redis
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCallUnion
 from openai.types.chat.chat_completion import ChatCompletion
 
@@ -19,6 +20,7 @@ from ..prompts import (
     PromptEvolution
 )
 from ..prompts.templates.mark_base import create_mark_base_prompt
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +87,63 @@ class MarkAgent:
         # История по пользователям, чтобы не смешивать диалоги
         self.user_histories: Dict[str, List[Dict[str, str]]] = {}
         self._max_history_per_user: int = 100  # ограничение роста in-memory истории
+        self._history_max_total: int = getattr(settings, "HISTORY_MAX_MESSAGES", 100)
+        self._verbosity_mode: str = getattr(settings, "VERBOSITY_MODE", "auto")
+        self._redis: Optional[Redis] = None
         self.total_tokens_used = 0
         # Последняя подробная трассировка диалога для отладки
         self._last_debug: Dict[str, Any] = {}
         
         logger.info(f"✅ MarkAgent инициализирован с моделью {model}")
+
+    async def _get_redis(self) -> Optional[Redis]:
+        """Лениво инициализировать Redis для хранения истории диалогов."""
+        try:
+            if self._redis is None:
+                # Используем ту же конфигурацию, что и приложение
+                self._redis = Redis.from_url(settings.redis_url_with_auth)
+                await self._redis.ping()
+            return self._redis
+        except Exception:
+            return None
+
+    async def _load_user_history_from_store(self, history_key: str, max_items: int = 24) -> List[Dict[str, str]]:
+        """Загрузить последние сообщения пользователя из Redis (если доступен)."""
+        try:
+            r = await self._get_redis()
+            if not r:
+                return []
+            key = f"user_history:{history_key}"
+            # Берем последние элементы
+            raw_items = await r.lrange(key, -max_items, -1)
+            history: List[Dict[str, str]] = []
+            for bi in raw_items:
+                try:
+                    item = json.loads(bi)
+                    if isinstance(item, dict) and item.get("role") and item.get("content") is not None:
+                        history.append({"role": item["role"], "content": item["content"]})
+                except Exception:
+                    continue
+            return history
+        except Exception:
+            return []
+
+    async def _persist_user_history_to_store(self, history_key: str, new_items: List[Dict[str, str]]):
+        """Сохранить новые элементы истории пользователя в Redis и обрезать до лимита."""
+        try:
+            if not new_items:
+                return
+            r = await self._get_redis()
+            if not r:
+                return
+            key = f"user_history:{history_key}"
+            # Добавляем элементы
+            payloads = [json.dumps(it, ensure_ascii=False) for it in new_items]
+            if payloads:
+                await r.rpush(key, *payloads)
+                await r.ltrim(key, -self._history_max_total, -1)
+        except Exception:
+            return
     
     def _get_default_system_prompt(self) -> str:
         """Получить системный промпт по умолчанию"""
@@ -249,12 +303,14 @@ class MarkAgent:
             # Обновляем историю (персонально для пользователя)
             history_key = user_id or "anonymous"
             user_hist = self.user_histories.setdefault(history_key, [])
-            user_hist.append({"role": "user", "content": message})
-            user_hist.append({"role": "assistant", "content": result.get("content", "")})
+            new_entries = [{"role": "user", "content": message}, {"role": "assistant", "content": result.get("content", "")}]
+            user_hist.extend(new_entries)
             # Ограничение длины истории per-user
             if len(user_hist) > self._max_history_per_user:
                 # Оставляем последние N записей
                 self.user_histories[history_key] = user_hist[-self._max_history_per_user:]
+            # Персист в Redis (лучше хранить больше, чем in-memory лимит)
+            await self._persist_user_history_to_store(history_key, new_entries)
             # Поддерживаем и общую историю для обратной совместимости
             self.conversation_history.append({"role": "user", "content": message})
             self.conversation_history.append({"role": "assistant", "content": result.get("content", "")})
@@ -490,6 +546,12 @@ class MarkAgent:
         # Персональная длина диалога
         history_key = user_id or "anonymous"
         per_user_hist = self.user_histories.get(history_key, [])
+        if not per_user_hist:
+            # Ленивая подгрузка истории из Redis (последние 12 сообщений)
+            loaded = await self._load_user_history_from_store(history_key, max_items=24)
+            if loaded:
+                self.user_histories[history_key] = loaded
+                per_user_hist = loaded
 
         router_context = {
             "query": message,
@@ -559,6 +621,14 @@ class MarkAgent:
         logger.debug(f"Метрики контекста: {metrics}")
         
         # Формируем сообщения
+        # Инъекция стилистики краткости при verbosity=auto
+        if self._verbosity_mode == "auto":
+            brevity_instruction = (
+                "СТИЛЬ ОТВЕТА: кратко по умолчанию; сначала уточняй, если контекст недостаточен; "
+                "развёрнутый ответ — только по запросу пользователя."
+            )
+            optimized_context = (optimized_context.rstrip() + "\n\n" + brevity_instruction).strip()
+
         messages = [{"role": "system", "content": optimized_context}]
         
         # Добавляем историю

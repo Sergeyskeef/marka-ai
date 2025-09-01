@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-5-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_TEMPERATURE: float = 0.4
     OPENAI_MAX_TOKENS: Optional[int] = None
     
     # Memory System
@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # File Tools
     # Базовая директория для файловых операций (относительные пути будут резолвиться сюда)
     FILE_TOOLS_BASE_DIR: str = "/app"
+
+    # Conversation behavior
+    VERBOSITY_MODE: str = "auto"  # auto|terse|normal|detailed
+    HISTORY_MAX_MESSAGES: int = 100  # per user, persisted in Redis
     
 
 

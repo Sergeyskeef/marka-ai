@@ -252,7 +252,7 @@ class REAPLearningCycle:
                 response = await self.openai.chat.completions.create(
                     model=settings.OPENAI_MODEL or "gpt-5-mini",
                     messages=[{"role": "system", "content": prompt}],
-                    temperature=0.3
+                    temperature=getattr(settings, "OPENAI_TEMPERATURE", 0.4)
                 )
                 
                 # Парсим ответ
@@ -603,7 +603,7 @@ class REAPLearningCycle:
             response = await self.openai.chat.completions.create(
                 model=settings.OPENAI_MODEL or "gpt-5-mini",
                 messages=[{"role": "system", "content": prompt}],
-                temperature=0.7
+                temperature=getattr(settings, "OPENAI_TEMPERATURE", 0.4)
             )
             
             insights = response.choices[0].message.content.strip().split('\n')

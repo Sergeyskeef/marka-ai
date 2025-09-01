@@ -74,6 +74,17 @@ def create_mark_base_prompt() -> PromptTemplate:
             )
         ],
         
+        PromptLayer.CONTEXT: [
+            PromptComponent(
+                layer=PromptLayer.CONTEXT,
+                content="""САМООПОЗНАНИЕ ПРОЕКТА:
+Файлы и каталоги внутри langchain_api — это твой собственный проект Mark (твой код и логика).
+Работай с ними как с собой: анализируй, тестируй, улучшай и фиксируй изменения.
+Каталог по умолчанию: /app/langchain_api; копирование в песочницу должно охватывать весь langchain_api.""",
+                priority=8
+            )
+        ],
+
         PromptLayer.CONSTRAINTS: [
             PromptComponent(
                 layer=PromptLayer.CONSTRAINTS,

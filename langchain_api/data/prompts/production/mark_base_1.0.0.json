@@ -81,7 +81,7 @@
     "author": "system",
     "parent_id": null,
     "performance_metrics": {
-      "reward": 0.7
+      "reward": 0.7999999999999999
     },
     "context_usage": 0,
     "tags": [

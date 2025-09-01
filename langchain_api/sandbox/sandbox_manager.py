@@ -11,6 +11,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any, Iterable
+from app.config import settings
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -139,8 +140,8 @@ class SandboxManager:
         search = list(candidates or [])
         if not search:
             search = [
-                "/app",
-                "/app/langchain_api",
+                settings.FILE_TOOLS_BASE_DIR,
+                str(Path(settings.FILE_TOOLS_BASE_DIR) / "langchain_api"),
                 "/workspace/langchain_api",
                 "/workspace",
                 str(Path.cwd()),
@@ -153,7 +154,7 @@ class SandboxManager:
                 base_path = Path(base)
                 if base_path.is_dir():
                     # Если это именно папка langchain_api — используем её родителя
-                    if base_path.name == "langchain_api" and (base_path / "__init__.py").exists() or (base_path / "app").exists():
+                    if base_path.name == "langchain_api" and ((base_path / "__init__.py").exists() or (base_path / "app").exists() or (base_path / "main.py").exists()):
                         return str(base_path.parent)
                     # Если внутри есть langchain_api — отлично
                     if (base_path / "langchain_api").is_dir():
