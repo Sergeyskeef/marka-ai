@@ -72,7 +72,7 @@ bot:
 ```bash
 # OpenAI
 OPENAI_API_KEY=your-openai-api-key
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=gpt-4.1-mini
 OPENAI_TEMPERATURE=0.7
 OPENAI_MAX_TOKENS=4000
 

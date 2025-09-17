@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from .base import BaseHandler
 from ..keyboards import get_memory_menu_keyboard, get_memory_type_keyboard
+from ..services.memory_service import MemoryService
 from ..middleware.logging import log_error
 
 logger = logging.getLogger(__name__)
@@ -76,11 +77,21 @@ class MemoryHandler(BaseHandler):
 Что вы хотите сохранить?
 """
         
-        await query.edit_message_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=get_memory_type_keyboard()
-        )
+        # Если нажата конкретная категория (memory:add:fact|episode|skill)
+        parts = (query.data or "").split(":")
+        if len(parts) == 3 and parts[2] in ("fact", "episode", "skill"):
+            context.user_data["awaiting_memory_add"] = True
+            context.user_data["memory_type"] = parts[2]
+            await query.edit_message_text(
+                f"Введите текст для сохранения в память как {parts[2]}:",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.edit_message_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=get_memory_type_keyboard()
+            )
     
     @log_error
     async def handle_memory_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,14 +131,14 @@ class MemoryHandler(BaseHandler):
             # Выполняем поиск
             await self.send_typing_action(update)
             
-            if hasattr(context.bot_data, 'chat_service'):
-                response = await context.bot_data['chat_service'].ask_question(
-                    question=f"Найди в памяти: {text}",
-                    user_id=str(update.effective_user.id),
-                    mode="analysis"
-                )
-                
-                result = context.bot_data['chat_service'].format_response(response)
+            # Идём напрямую через MemoryService, чтобы результат был структурирован
+            ms = MemoryService()
+            found = await ms.search_memory(text, str(update.effective_user.id), limit=5)
+            if found:
+                lines = ["🔍 Результаты поиска:"]
+                for it in found:
+                    lines.append(f"• {it.get('text','')[:200]}")
+                result = "\n".join(lines)
             else:
                 result = "🔍 Поиск временно недоступен"
             
@@ -146,23 +157,10 @@ class MemoryHandler(BaseHandler):
             # Сохраняем в память
             await self.send_typing_action(update)
             
-            if hasattr(context.bot_data, 'chat_service'):
-                if memory_type == "fact":
-                    question = f"Запомни факт: {text}"
-                elif memory_type == "episode":
-                    question = f"Запомни эпизод: {text}"
-                else:
-                    question = f"Создай навык: {text}"
-                
-                response = await context.bot_data['chat_service'].ask_question(
-                    question=question,
-                    user_id=str(update.effective_user.id),
-                    mode="task"
-                )
-                
-                result = "✅ Сохранено в памяти!"
-            else:
-                result = "💾 Сохранение временно недоступно"
+            # Сохраняем через MemoryService
+            ms = MemoryService()
+            ok = await ms.add_memory(memory_type, text, str(update.effective_user.id))
+            result = "✅ Сохранено в памяти!" if ok else "❌ Не удалось сохранить"
             
             await update.message.reply_text(
                 result,

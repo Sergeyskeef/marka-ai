@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 
 from core.memory.graphiti_adapter import GraphitiMemoryAdapter
+from core.memory.graphiti_adapter import graphiti_adapter as default_graphiti_adapter
 from .neo4j_direct import neo4j_client
 from app.utils import id_generator, IDType
 import httpx
@@ -42,10 +43,11 @@ class AdvancedMemoryAdapter:
     
     def __init__(
         self,
-        graphiti_adapter: GraphitiMemoryAdapter,
+        graphiti_adapter: Optional[GraphitiMemoryAdapter] = None,
         openai_client: Optional[AsyncOpenAI] = None
     ):
-        self.graphiti = graphiti_adapter
+        # Позволяем инициализацию без явной передачи адаптера
+        self.graphiti = graphiti_adapter or default_graphiti_adapter
         self.openai_client = openai_client or AsyncOpenAI()
         logger.info("🧠 AdvancedMemoryAdapter инициализирован")
     
@@ -406,3 +408,69 @@ class AdvancedMemoryAdapter:
                 "skills": 0,
                 "total": 0
             }
+
+    # --- New upsert & logging APIs ---
+    async def upsert_person(self, user_id: str, name: str | None = None, preferences_patch: dict | None = None) -> dict[str, Any]:
+        """Создать/обновить реальный узел Person и опционально применить preferences_patch."""
+        try:
+            node_id = f"person:{user_id}"
+            props: dict[str, Any] = {"user_id": user_id}
+            if name:
+                props["name"] = name
+            # Идемпотентное создание/обновление Person
+            res = await self.graphiti.upsert_node(node_id=node_id, node_type="Person", properties=props)
+            # Частичное обновление preferences
+            if preferences_patch:
+                await self.graphiti.update_node_properties(node_id=node_id, properties_patch={"preferences": preferences_patch})
+            return {"success": True, "id": node_id, "upsert": res}
+        except Exception as e:
+            logger.error(f"❌ Ошибка upsert_person: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def upsert_project(self, project_id: str, name: str | None = None, domains_patch: dict | None = None) -> dict[str, Any]:
+        """Создать/обновить реальный узел Project и обновить домены при необходимости."""
+        try:
+            node_id = f"project:{project_id}"
+            props: dict[str, Any] = {"project_id": project_id}
+            if name:
+                props["name"] = name
+            res = await self.graphiti.upsert_node(node_id=node_id, node_type="Project", properties=props)
+            if domains_patch:
+                await self.graphiti.update_node_properties(node_id=node_id, properties_patch={"domains": domains_patch})
+            return {"success": True, "id": node_id, "upsert": res}
+        except Exception as e:
+            logger.error(f"❌ Ошибка upsert_project: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def log_incident(self, kind: str, params: dict | None = None, error: str | None = None, project_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
+        payload = {
+            "type": "incident",
+            "kind": kind,
+            "params": params or {},
+            "error": error,
+            "project_id": project_id,
+            "user_id": user_id,
+            "status": "open"
+        }
+        text = f"[INCIDENT] kind={kind} error={(error or '')[:140]}"
+        return await self.graphiti.create_episode(text=text, metadata=payload)
+
+    async def upsert_skill(self, name: str, recipe: dict, applies_to: dict | None = None) -> dict[str, Any]:
+        """Создать/обновить реальный узел Skill с процедурой и привязками."""
+        try:
+            import re
+            key = re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()) or "skill"
+            node_id = f"skill:{key}"
+            props: dict[str, Any] = {
+                "name": name,
+                "recipe": recipe,
+                "applies_to": applies_to or {},
+                "version": 1,
+                "success_count": 0,
+                "last_used": None,
+            }
+            res = await self.graphiti.upsert_node(node_id=node_id, node_type="Skill", properties=props)
+            return {"success": True, "id": node_id, "upsert": res}
+        except Exception as e:
+            logger.error(f"❌ Ошибка upsert_skill: {e}")
+            return {"success": False, "error": str(e)}

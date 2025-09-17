@@ -45,6 +45,19 @@ class NodeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class EdgeCreate(BaseModel):
+    """Модель создания связи между узлами"""
+    source_id: str = Field(..., description="ID исходного узла")
+    target_id: str = Field(..., description="ID целевого узла")
+    type: str = Field(..., description="Тип связи, напр. RESOLVED_BY")
+    properties: dict[str, Any] | None = None
+
+class EdgeResponse(BaseModel):
+    source_id: str
+    target_id: str
+    type: str
+    properties: dict[str, Any] | None = None
+
 class HealthResponse(BaseModel):
     """Ответ health check"""
     status: str = "healthy"
@@ -69,6 +82,7 @@ app = FastAPI(
 # Глобальные переменные
 neo4j_driver = None
 in_memory_nodes = {}
+in_memory_edges: list[dict] = []
 
 def init_neo4j():
     """Инициализация Neo4j подключения"""
@@ -282,7 +296,7 @@ async def get_node(node_id: str):
     )
 
 @app.get("/nodes")
-async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None):
+async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None, group_id: str | None = None):
     """Получение списка узлов с опциональным поиском"""
     nodes_list = []
 
@@ -295,13 +309,17 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None
                     logger.info(f"Выполняется поиск: '{search}'")
                     try:
                         # Пробуем полнотекстовый поиск (Enterprise Edition)
-                        result = session.run("""
-                            CALL db.index.fulltext.queryNodes('episode_fulltext', $search)
-                            YIELD node, score
-                            RETURN node, score
-                            ORDER BY score DESC
-                            SKIP $offset LIMIT $limit
-                        """, search=search, offset=offset, limit=limit)
+                        q = (
+                            "CALL db.index.fulltext.queryNodes('episode_fulltext', $search) "
+                            "YIELD node, score "
+                            "WITH node, score "
+                            + ("WHERE node.group_id = $group_id " if group_id else "") +
+                            "RETURN node, score ORDER BY score DESC SKIP $offset LIMIT $limit"
+                        )
+                        params = {"search": search, "offset": offset, "limit": limit}
+                        if group_id:
+                            params["group_id"] = group_id
+                        result = session.run(q, **params)
 
                         for record in result:
                             node = record["node"]
@@ -328,13 +346,15 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None
                         if "ProcedureNotFound" in str(e) or "There is no such fulltext schema index" in str(e):
                             # Fallback для Community Edition - поиск через LIKE
                             logger.info("Используется LIKE поиск (Community Edition)")
-                            result = session.run("""
-                                MATCH (n:Episode)
-                                WHERE toLower(n.msg) CONTAINS toLower($search)
-                                RETURN n
-                                ORDER BY n.created_at DESC
-                                SKIP $offset LIMIT $limit
-                            """, search=search, offset=offset, limit=limit)
+                            q = (
+                                "MATCH (n:Episode) WHERE toLower(n.msg) CONTAINS toLower($search) "
+                                + ("AND n.group_id = $group_id " if group_id else "") +
+                                "RETURN n ORDER BY n.created_at DESC SKIP $offset LIMIT $limit"
+                            )
+                            params = {"search": search, "offset": offset, "limit": limit}
+                            if group_id:
+                                params["group_id"] = group_id
+                            result = session.run(q, **params)
 
                             for record in result:
                                 node = record["n"]
@@ -349,20 +369,25 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None
                                 nodes_list.append(node_data)
 
                             # Общее количество для поиска
-                            count_result = session.run("""
-                                MATCH (n:Episode)
-                                WHERE toLower(n.msg) CONTAINS toLower($search)
-                                RETURN count(n) as total
-                            """, search=search)
+                            qcnt = (
+                                "MATCH (n:Episode) WHERE toLower(n.msg) CONTAINS toLower($search) "
+                                + ("AND n.group_id = $group_id " if group_id else "") +
+                                "RETURN count(n) as total"
+                            )
+                            params = {"search": search}
+                            if group_id:
+                                params["group_id"] = group_id
+                            count_result = session.run(qcnt, **params)
                             total = count_result.single()["total"]
                         else:
                             raise e
                 else:
                     # Обычный список узлов
-                    result = session.run(
-                        "MATCH (n) RETURN n ORDER BY n.created_at DESC SKIP $offset LIMIT $limit",
-                        offset=offset, limit=limit
-                    )
+                    q = "MATCH (n) " + ("WHERE n.group_id = $group_id " if group_id else "") + "RETURN n ORDER BY n.created_at DESC SKIP $offset LIMIT $limit"
+                    params = {"offset": offset, "limit": limit}
+                    if group_id:
+                        params["group_id"] = group_id
+                    result = session.run(q, **params)
                     for record in result:
                         node = record["n"]
                         node_data = {
@@ -376,6 +401,11 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None
 
                     # Общее количество
                     count_result = session.run("MATCH (n) RETURN count(n) as total")
+                    qcnt = "MATCH (n) " + ("WHERE n.group_id = $group_id " if group_id else "") + "RETURN count(n) as total"
+                    params = {}
+                    if group_id:
+                        params["group_id"] = group_id
+                    count_result = session.run(qcnt, **params)
                     total = count_result.single()["total"]
 
                 logger.info(f"Загружено {len(nodes_list)} узлов из Neo4j")
@@ -384,7 +414,8 @@ async def list_nodes(limit: int = 10, offset: int = 0, search: str | None = None
                     "total": total,
                     "limit": limit,
                     "offset": offset,
-                    "search": search
+                    "search": search,
+                    "group_id": group_id
                 }
         except Exception as e:
             logger.error(f"Ошибка чтения узлов из Neo4j: {e}")
@@ -432,6 +463,150 @@ async def delete_node(node_id: str):
         detail=f"Узел с ID {node_id} не найден"
     )
 
+@app.post("/edges", response_model=EdgeResponse)
+async def create_edge(edge: EdgeCreate):
+    """Создать (или подтвердить) связь между узлами в Neo4j. В in-memory режиме возвращаем эхо."""
+    if check_neo4j_connection():
+        try:
+            with neo4j_driver.session() as session:
+                props = edge.properties or {}
+                session.run(
+                    f"""
+                    MATCH (a {{id: $sid}}), (b {{id: $tid}})
+                    MERGE (a)-[r:{edge.type}]->(b)
+                    SET r += $props
+                    RETURN id(r)
+                    """,
+                    sid=edge.source_id,
+                    tid=edge.target_id,
+                    props=props,
+                )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Neo4j edge error: {e}")
+    else:
+        # In-memory fallback
+        in_memory_edges.append({
+            "source_id": edge.source_id,
+            "target_id": edge.target_id,
+            "type": edge.type,
+            "properties": edge.properties or {}
+        })
+    return EdgeResponse(source_id=edge.source_id, target_id=edge.target_id, type=edge.type, properties=edge.properties or {})
+
+@app.get("/edges")
+async def list_edges(
+    source_id: str | None = None,
+    target_id: str | None = None,
+    type: str | None = None,
+    group_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Список связей с фильтрами. При наличии Neo4j читаем из БД, иначе из in-memory."""
+    edges: list[dict] = []
+    total: int = 0
+
+    if check_neo4j_connection():
+        try:
+            with neo4j_driver.session() as session:
+                where_clauses = []
+                params: dict[str, Any] = {"offset": offset, "limit": limit}
+                if source_id:
+                    where_clauses.append("a.id = $sid")
+                    params["sid"] = source_id
+                if target_id:
+                    where_clauses.append("b.id = $tid")
+                    params["tid"] = target_id
+                if type:
+                    where_clauses.append("type(r) = $rtype")
+                    params["rtype"] = type
+                if group_id:
+                    # Фильтруем по group_id хотя бы одного из узлов
+                    where_clauses.append("(a.group_id = $gid OR b.group_id = $gid)")
+                    params["gid"] = group_id
+
+                where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+                q = (
+                    "MATCH (a)-[r]->(b)" + where_sql + " RETURN a, r, b SKIP $offset LIMIT $limit"
+                )
+                res = session.run(q, **params)
+                for rec in res:
+                    a = rec["a"]
+                    r = rec["r"]
+                    b = rec["b"]
+                    edges.append({
+                        "source_id": a.get("id"),
+                        "target_id": b.get("id"),
+                        "type": r.type,
+                        "properties": dict(r)
+                    })
+
+                # Подсчет total
+                qcnt = "MATCH (a)-[r]->(b)" + where_sql + " RETURN count(r) as total"
+                cnt = session.run(qcnt, **{k: v for k, v in params.items() if k not in ("offset", "limit")})
+                total = cnt.single()["total"]
+        except Exception as e:
+            logger.error(f"Ошибка чтения связей из Neo4j: {e}")
+            edges = []
+            total = 0
+    else:
+        # In-memory список
+        filtered = []
+        for e in in_memory_edges:
+            if source_id and e.get("source_id") != source_id:
+                continue
+            if target_id and e.get("target_id") != target_id:
+                continue
+            if type and e.get("type") != type:
+                continue
+            if group_id:
+                # В in-memory нет group_id, пропускаем фильтр
+                pass
+            filtered.append(e)
+        total = len(filtered)
+        edges = filtered[offset: offset + limit]
+
+    return {"edges": edges, "total": total, "limit": limit, "offset": offset}
+
+class NodeUpdate(BaseModel):
+    properties: dict[str, Any]
+
+@app.patch("/nodes/{node_id}")
+async def patch_node(node_id: str, update: NodeUpdate):
+    """Частичное обновление свойств узла (SET n += props)."""
+    props = process_properties(update.properties or {})
+    # Пытаемся в Neo4j
+    if check_neo4j_connection():
+        try:
+            with neo4j_driver.session() as session:
+                result = session.run(
+                    "MATCH (n {id: $id}) SET n += $props RETURN count(n) as updated",
+                    id=node_id,
+                    props=props
+                )
+                updated = result.single()["updated"]
+                if updated == 0:
+                    raise HTTPException(status_code=404, detail=f"Узел {node_id} не найден")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Ошибка обновления узла в Neo4j: {e}")
+            # Падаем в in-memory
+            node = in_memory_nodes.get(node_id)
+            if not node:
+                raise HTTPException(status_code=404, detail=f"Узел {node_id} не найден")
+            node["properties"].update(props)
+            node["updated_at"] = datetime.now()
+            return {"id": node_id, "properties": node["properties"]}
+        return {"id": node_id, "properties": props}
+    # In-memory режим
+    node = in_memory_nodes.get(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Узел {node_id} не найден")
+    node["properties"].update(props)
+    node["updated_at"] = datetime.now()
+    return {"id": node_id, "properties": node["properties"]}
+
 @app.get("/")
 async def root():
     """Корневой endpoint"""
@@ -444,8 +619,10 @@ async def root():
             "version": "/version",
             "stats": "/stats",
             "nodes": "/nodes",
+            "edges": "/edges",
             "create_node": "POST /nodes",
             "get_node": "GET /nodes/{node_id}",
+            "patch_node": "PATCH /nodes/{node_id}",
             "delete_node": "DELETE /nodes/{node_id}"
         }
     }

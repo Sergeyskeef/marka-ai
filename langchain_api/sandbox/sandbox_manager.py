@@ -153,8 +153,8 @@ class SandboxManager:
                     continue
                 base_path = Path(base)
                 if base_path.is_dir():
-                    # Если это именно папка langchain_api — используем её родителя
-                    if base_path.name == "langchain_api" and ((base_path / "__init__.py").exists() or (base_path / "app").exists() or (base_path / "main.py").exists()):
+                    # Если это именно папка langchain_api — используем её родителя (без дополнительных условий)
+                    if base_path.name == "langchain_api":
                         return str(base_path.parent)
                     # Если внутри есть langchain_api — отлично
                     if (base_path / "langchain_api").is_dir():
@@ -206,6 +206,14 @@ class SandboxManager:
                 "*.ipynb",
                 "*.graphml",
                 "*.cache",
+                ".venv",
+                "venv",
+                "node_modules",
+                "dist",
+                "build",
+                ".mypy_cache",
+                ".ruff_cache",
+                ".coverage",
             ]
             patterns = list(exclude_patterns or []) or default_exclude
 
@@ -225,13 +233,9 @@ class SandboxManager:
                 return False
 
             files_copied = 0
-            # Копируем только папку langchain_api и связанные корневые файлы (pyproject/requirements/docker-compose)
-            items_to_copy = []
-            if (source_root / "langchain_api").is_dir():
-                items_to_copy.append((source_root / "langchain_api", dest_root / "langchain_api"))
-            else:
-                # fallback: копируем весь source_root
-                items_to_copy.append((source_root, dest_root))
+            # Копируем весь корень проекта (например, /app), а не только внутреннюю папку langchain_api
+            # Это соответствует реальной структуре проекта, где код распределён по нескольким директориям
+            items_to_copy = [(source_root, dest_root)]
 
             important_root_files = [
                 "pyproject.toml", "requirements.txt", "docker-compose.yml", "README.md"

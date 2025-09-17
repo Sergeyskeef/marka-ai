@@ -229,7 +229,7 @@ class TestContextArchitect:
         prompt = create_mark_base_prompt()
         context_data = {
             "user_query": "Тестовый запрос",
-            "model_name": "gpt-5-mini",
+            "model_name": "gpt-4.1-mini",
             "user_id": "test123"
         }
         
@@ -304,14 +304,14 @@ class TestPromptTemplates:
         prompt = create_mark_base_prompt()
         
         context = {
-            "model_name": "gpt-5-mini",
+            "model_name": "gpt-4.1-mini",
             "user_id": "user123",
             "user_query": "Тестовый вопрос"
         }
         
         rendered = prompt.render(context)
         
-        assert "gpt-5-mini" in rendered
+        assert "gpt-4.1-mini" in rendered
         assert "user123" in rendered
         assert "Тестовый вопрос" in rendered
     

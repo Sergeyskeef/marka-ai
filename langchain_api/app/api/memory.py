@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from app.memory.advanced_memory_adapter import AdvancedMemoryAdapter
 from core.memory.graphiti_adapter import GraphitiMemoryAdapter
 from app.config import settings
+from core.memory.graphiti_adapter import graphiti_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,13 @@ class MemoryAddRequest(BaseModel):
 
 class MemoryStatsResponse(BaseModel):
 	total_memories: int = 0
+
+class ToolLogItem(BaseModel):
+	text: str
+	metadata: Dict[str, Any]
+
+class ToolLogsResponse(BaseModel):
+	items: List[ToolLogItem]
 
 # Global memory adapter instance
 _memory_adapter: Optional[AdvancedMemoryAdapter] = None
@@ -93,4 +101,25 @@ async def get_memory_stats(
 		return MemoryStatsResponse(total_memories=0)
 	except Exception as e:
 		logger.error(f"Error getting memory stats: {e}")
+		raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tool-logs", response_model=ToolLogsResponse)
+async def get_tool_logs(limit: int = Query(50, ge=1, le=500)):
+	"""
+	Получить последние события вызовов инструментов из памяти (type=tool_call).
+	Требует Graphiti; отдаёт последние N записей в обратном порядке времени.
+	"""
+	try:
+		res = await graphiti_adapter.list_episodes(limit=500)
+		items: List[ToolLogItem] = []
+		for n in res.get("nodes", []):
+			props = n.get("properties", {}) or {}
+			if props.get("type") == "tool_call":
+				text = props.get("text") or props.get("msg") or ""
+				items.append(ToolLogItem(text=text, metadata=props))
+		# Сортировка по timestamp, затем берём последние limit
+		items = sorted(items, key=lambda x: x.metadata.get("timestamp", 0))[-limit:]
+		return ToolLogsResponse(items=items)
+	except Exception as e:
+		logger.error(f"Error getting tool logs: {e}")
 		raise HTTPException(status_code=500, detail=str(e))

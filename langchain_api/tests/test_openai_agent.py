@@ -20,7 +20,7 @@ from openai import AsyncOpenAI
 async def test_mark_agent_basic():
     """Тест базовой функциональности агента"""
     client = AsyncOpenAI()
-    agent = MarkAgent(client, model="gpt-5-mini")
+    agent = MarkAgent(client, model="gpt-4.1-mini")
     
     result = await agent.chat("Привет! Как дела?")
     
@@ -28,7 +28,7 @@ async def test_mark_agent_basic():
     assert result["content"] is not None
     assert len(result["content"]) > 0
     assert "metadata" in result
-    assert result["metadata"]["model"] == "gpt-5-mini"
+    assert result["metadata"]["model"] == "gpt-4.1-mini"
 
 
 @pytest.mark.asyncio

@@ -250,7 +250,7 @@ class REAPLearningCycle:
             try:
                 from app.config import settings
                 response = await self.openai.chat.completions.create(
-                    model=settings.OPENAI_MODEL or "gpt-5-mini",
+                    model=settings.OPENAI_MODEL or "gpt-4.1-mini",
                     messages=[{"role": "system", "content": prompt}],
                     temperature=getattr(settings, "OPENAI_TEMPERATURE", 0.4)
                 )
@@ -468,7 +468,8 @@ class REAPLearningCycle:
             if (metadata.get("type") == MemoryType.EPISODE.value and
                 not metadata.get("lesson_learned") and
                 metadata.get("outcome") in ["success", "failure"]):
-                return metadata.get("id")
+                # Возвращаем ID узла из ответа Graphiti (а не из metadata)
+                return item.get("id")
         
         return None
     
@@ -601,7 +602,7 @@ class REAPLearningCycle:
         try:
             from app.config import settings
             response = await self.openai.chat.completions.create(
-                model=settings.OPENAI_MODEL or "gpt-5-mini",
+                model=settings.OPENAI_MODEL or "gpt-4.1-mini",
                 messages=[{"role": "system", "content": prompt}],
                 temperature=getattr(settings, "OPENAI_TEMPERATURE", 0.4)
             )

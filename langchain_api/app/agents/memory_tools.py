@@ -8,9 +8,13 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from core.memory.memory_manager import memory_manager
+from app.memory.advanced_memory_adapter import AdvancedMemoryAdapter
+from core.memory.graphiti_adapter import graphiti_adapter as _graphiti
 from .tools import register_tool, format_tool_result, format_tool_error
 
 logger = logging.getLogger(__name__)
+_adv_adapter = AdvancedMemoryAdapter(graphiti_adapter=_graphiti)
+
 
 
 @register_tool()
@@ -124,6 +128,40 @@ async def save_to_memory(text: str, metadata: Optional[Dict[str, Any]] = None) -
             
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения в память: {str(e)}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+@register_tool()
+async def update_user_preference(user_id: str, key: str, value: Any) -> str:
+    """Частично обновить предпочтение пользователя (upsert Person)."""
+    try:
+        res = await _adv_adapter.upsert_person(user_id=user_id, preferences_patch={key: value})
+        return json.dumps({"success": True, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка update_user_preference: {e}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+@register_tool()
+async def log_error_pattern(params: Dict[str, Any], error: str, project_id: Optional[str] = None, user_id: Optional[str] = None) -> str:
+    """Залогировать инцидент с ошибкой (pattern) в память."""
+    try:
+        res = await _adv_adapter.log_incident(kind="error_pattern", params=params, error=error, project_id=project_id, user_id=user_id)
+        return json.dumps({"success": True, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка log_error_pattern: {e}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+@register_tool()
+async def log_fix_recipe(name: str, steps: List[str], applies_to: Optional[Dict[str, Any]] = None) -> str:
+    """Сохранить рецепт фикса (skill)."""
+    try:
+        recipe = {"steps": steps}
+        res = await _adv_adapter.upsert_skill(name=name, recipe=recipe, applies_to=applies_to)
+        return json.dumps({"success": True, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка log_fix_recipe: {e}")
         return json.dumps(format_tool_error(e), ensure_ascii=False)
 
 
@@ -302,3 +340,44 @@ MEMORY_TOOLS = [
     remember_fact,
     check_memory_health
 ]
+
+# === ГРАФ-ИНСТРУМЕНТЫ (узлы/рёбра) ===
+
+@register_tool()
+async def create_graph_edge(source_id: str, target_id: str, edge_type: str, properties: Optional[Dict[str, Any]] = None) -> str:
+    """Создать/подтвердить связь между узлами (MERGE)."""
+    try:
+        res = await _graphiti.create_edge(source_id=source_id, target_id=target_id, type=edge_type, properties=properties or {})
+        ok = res.get("success", True)
+        return json.dumps({"success": ok, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка create_graph_edge: {e}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+@register_tool()
+async def upsert_graph_node(node_id: str, node_type: str, properties: Dict[str, Any]) -> str:
+    """Идемпотентно создать/обновить узел с типом и свойствами."""
+    try:
+        res = await _graphiti.upsert_node(node_id=node_id, node_type=node_type, properties=properties or {})
+        ok = res.get("success", True)
+        return json.dumps({"success": ok, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка upsert_graph_node: {e}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+@register_tool()
+async def update_graph_node(node_id: str, properties_patch: Dict[str, Any]) -> str:
+    """Частично обновить свойства узла (PATCH /nodes/{id})."""
+    try:
+        res = await _graphiti.update_node_properties(node_id=node_id, properties_patch=properties_patch or {})
+        ok = res.get("success", True)
+        return json.dumps({"success": ok, "result": res}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка update_graph_node: {e}")
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+
+# Добавляем граф-инструменты к экспорту
+MEMORY_TOOLS.extend([create_graph_edge, upsert_graph_node, update_graph_node])

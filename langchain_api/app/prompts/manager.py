@@ -77,7 +77,51 @@ class PromptManager:
                     environment = env_dir.name
                     for prompt_file in env_dir.glob("*.json"):
                         async with aiofiles.open(prompt_file, 'r') as f:
-                            data = json.loads(await f.read())
+                            raw = await f.read()
+                            data = json.loads(raw)
+                            # Нормализуем ключи слоёв: '1'|'INSTRUCTIONS' -> PromptLayer
+                            try:
+                                comps = data.get("components", {})
+                                normalized: dict = {}
+                                for k, v in comps.items():
+                                    # Определяем слой по ключу (имя/число/enum)
+                                    layer = None
+                                    if isinstance(k, str):
+                                        if k.isdigit():
+                                            try:
+                                                layer = PromptLayer(int(k))
+                                            except Exception:
+                                                pass
+                                        else:
+                                            try:
+                                                layer = PromptLayer[k]
+                                            except Exception:
+                                                pass
+                                    elif isinstance(k, int):
+                                        try:
+                                            layer = PromptLayer(k)
+                                        except Exception:
+                                            pass
+                                    elif isinstance(k, PromptLayer):
+                                        layer = k
+                                    if layer is None:
+                                        logger.warning(f"Пропускаю неизвестный слой промпта: {k}")
+                                        continue
+                                    # Нормализуем элементы слоя: гарантируем PromptLayer в поле 'layer'
+                                    items = []
+                                    try:
+                                        for item in (v or []):
+                                            if isinstance(item, dict):
+                                                item = dict(item)
+                                                item["layer"] = layer  # перезаписываем строковые значения
+                                            items.append(item)
+                                    except Exception:
+                                        items = v or []
+                                    normalized[layer] = items
+                                if normalized:
+                                    data["components"] = normalized
+                            except Exception as e:
+                                logger.warning(f"Не удалось нормализовать компоненты промпта {prompt_file.name}: {e}")
                             template = PromptTemplate(**data)
                             self._store_in_memory(template)
                             logger.info(f"Загружен промпт {template.name} v{template.metadata.version} для {environment}")
@@ -127,9 +171,33 @@ class PromptManager:
         filename = f"{template.name}_{template.metadata.version}.json"
         filepath = env_path / filename
         
+        # Сохраняем с человеческими ключами слоев (именами), чтобы корректно парсить при загрузке
+        safe_dump = template.model_dump()
+        try:
+            comp_export = {}
+            for layer, items in template.components.items():
+                key = layer.name if hasattr(layer, "name") else str(layer)
+                serialized_items = []
+                for item in items:
+                    data = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+                    # Нормализуем поле layer внутри элемента компонента
+                    lyr = data.get("layer")
+                    try:
+                        from .base import PromptLayer as _PL
+                        if isinstance(lyr, _PL):
+                            data["layer"] = lyr.name
+                        elif hasattr(lyr, "name"):
+                            data["layer"] = getattr(lyr, "name")
+                    except Exception:
+                        # Если нет поля или уже строка — оставляем как есть
+                        pass
+                    serialized_items.append(data)
+                comp_export[key] = serialized_items
+            safe_dump["components"] = comp_export
+        except Exception:
+            pass
         async with aiofiles.open(filepath, 'w') as f:
-            # Pydantic v2: используем model_dump_json вместо json()
-            await f.write(template.model_dump_json(indent=2))
+            await f.write(json.dumps(safe_dump, ensure_ascii=False, indent=2, default=str))
         
         # Кешируем в Redis если доступен
         if self.redis:
@@ -137,8 +205,8 @@ class PromptManager:
             await self.redis.setex(
                 cache_key,
                 self.cache_ttl,
-                # Сериализация совместимая с Pydantic v2
-                template.model_dump_json()
+                # Кладём в кеш уже нормализованный JSON с текстовыми ключами слоёв
+                json.dumps(safe_dump, ensure_ascii=False, default=str)
             )
         
         logger.info(f"Сохранен промпт {template.name} v{template.metadata.version}")

@@ -1,0 +1,80 @@
+import asyncio
+import fnmatch
+import os
+from pathlib import Path
+from typing import List, Tuple
+
+from fastapi import HTTPException
+
+from .config import settings
+
+
+_ALLOW: List[Path] = [Path(p).resolve() for p in settings.allow_paths if p]
+_PENDING_WRITES: dict[str, Tuple[Path, bytes]] = {}
+
+
+def _is_allowed(path: Path) -> bool:
+	try:
+		res = path.resolve()
+		for base in _ALLOW:
+			if res.is_relative_to(base):  # py311
+				return True
+		return False
+	except Exception:
+		return False
+
+
+async def fs_glob(pattern: str, root: str | None = None) -> list[str]:
+	bases: List[Path] = []
+	if root:
+		root_path = Path(root)
+		if not _is_allowed(root_path):
+			raise HTTPException(status_code=403, detail="Root not allowed")
+		bases = [root_path]
+	else:
+		bases = list(_ALLOW)
+
+	items: list[str] = []
+	for base in bases:
+		for r, dnames, fnames in os.walk(base):
+			for name in fnames + dnames:
+				full = os.path.join(r, name)
+				# Match against relative to base and full path
+				rel = os.path.relpath(full, base)
+				if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(full, pattern):
+					items.append(full)
+					if len(items) >= settings.max_glob_items:
+						return items
+	return items
+
+
+async def fs_read(path: str, max_bytes: int | None = None) -> str:
+	p = Path(path)
+	if not _is_allowed(p):
+		raise HTTPException(status_code=403, detail="Path not allowed")
+	if not p.exists() or not p.is_file():
+		raise HTTPException(status_code=404, detail="File not found")
+	limit = max_bytes or settings.max_read_bytes
+	data = await asyncio.to_thread(p.read_bytes)
+	return data[:limit].decode("utf-8", errors="replace")
+
+
+async def security_request_write(path: str, content: str) -> dict:
+	p = Path(path)
+	if not _is_allowed(p):
+		raise HTTPException(status_code=403, detail="Path not allowed")
+	request_id = os.urandom(8).hex()
+	_PENDING_WRITES[request_id] = (p, content.encode("utf-8"))
+	return {"request_id": request_id, "dry_run": True, "path": str(p)}
+
+
+async def confirm_write(request_id: str, allow: bool) -> dict:
+	item = _PENDING_WRITES.pop(request_id, None)
+	if not item:
+		raise HTTPException(status_code=404, detail="Pending request not found")
+	p, data = item
+	if not allow:
+		return {"request_id": request_id, "applied": False}
+	p.parent.mkdir(parents=True, exist_ok=True)
+	await asyncio.to_thread(p.write_bytes, data)
+	return {"request_id": request_id, "applied": True, "path": str(p)}

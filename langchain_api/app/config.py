@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-mini"
+    # Модель и параметры по умолчанию (можно переопределить через .env)
+    OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0.4
     OPENAI_MAX_TOKENS: Optional[int] = None
@@ -75,6 +76,11 @@ class Settings(BaseSettings):
     # Performance
     MAX_CONCURRENT_TOOLS: int = 5
     TOOL_TIMEOUT: int = 30  # seconds
+    # Limits
+    LLM_CALLS_PER_REQUEST_LIMIT: int = 10
+    PROGRESS_CHECKPOINT_CALLS: int = 2
+    TOOL_CALLS_PER_REQUEST_LIMIT: int = 6
+    BUDGET_CHECKPOINT_TOOL_CALLS: int = 2
     
     # Prompt Management System
     # Хранилище промптов по умолчанию внутри контейнера
@@ -94,6 +100,18 @@ class Settings(BaseSettings):
     # Conversation behavior
     VERBOSITY_MODE: str = "auto"  # auto|terse|normal|detailed
     HISTORY_MAX_MESSAGES: int = 100  # per user, persisted in Redis
+    # Prompt compactness
+    USE_COMPACT_SYSTEM_PROMPT: bool = True
+    # Mode-based token limits
+    MAX_TOKENS_CHAT: int = 1536
+    MAX_TOKENS_TASK: int = 768
+    MAX_TOKENS_ANALYSIS: int = 1024
+    # Project/Graph namespacing
+    PROJECT_ID: str = "mark"
+    ENVIRONMENT: str = "dev"  # dev|staging|prod
+    @property
+    def GRAPH_GROUP_ID(self) -> str:
+        return f"project:{self.PROJECT_ID}:{self.ENVIRONMENT}"
     
 
 

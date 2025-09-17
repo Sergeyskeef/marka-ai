@@ -100,6 +100,9 @@ class DynamicPromptRouter:
                 ucb *= 1.15
             if domain == "creative" and ("chat" in name or "base" in name):
                 ucb *= 1.05
+            # Для общего домена поощряем дружелюбный чат
+            if (domain is None or domain == "general") and ("chat" in name or "mark_chat" in name or "base" in name):
+                ucb *= 1.10
             if context.get("requires_tools") and ("code" in name or "mark_code" in name):
                 ucb *= 1.10
             

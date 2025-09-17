@@ -21,6 +21,9 @@ from ..prompts import (
 )
 from ..prompts.templates.mark_base import create_mark_base_prompt
 from ..config import settings
+from app.memory.fractal_graph import fractal_graph
+from app.agents.fractal.reap import detect_incident, mine_skill
+from core.memory.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +36,14 @@ class MarkAgent:
     - Прямое использование OpenAI API без абстракций
     - Встроенная поддержка инструментов (tools)
     - Интеграция с Graphiti памятью
-    - Модель gpt-5-mini по умолчанию
+    - Модель gpt-4.1-mini по умолчанию
     - Продвинутая система управления промптами
     """
     
     def __init__(
         self, 
         client: AsyncOpenAI,
-        model: str = "gpt-5-mini",
+        model: str = "gpt-4.1-mini",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
@@ -63,7 +66,10 @@ class MarkAgent:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.system_prompt = system_prompt or self._get_default_system_prompt()
+        base_prompt = system_prompt or self._get_default_system_prompt()
+        if getattr(settings, 'USE_COMPACT_SYSTEM_PROMPT', False):
+            base_prompt = self._compact_prompt(base_prompt)
+        self.system_prompt = base_prompt
         
         # Система промптов
         self.prompt_manager = prompt_manager
@@ -147,19 +153,30 @@ class MarkAgent:
     
     def _get_default_system_prompt(self) -> str:
         """Получить системный промпт по умолчанию"""
-        return """Ты - Марк, интеллектуальный AI-ассистент с долговременной памятью и способностью к самообучению.
-
-Твои ключевые особенности:
-- Ты помнишь предыдущие разговоры и учишься на них
-- Ты можешь анализировать свои действия и улучшаться
-- У тебя есть доступ к различным инструментам для выполнения задач
-- Ты стремишься быть полезным, честным и дружелюбным
-
-Всегда:
-- Используй память для персонализации ответов
-- Сохраняй важную информацию в память
-- Будь проактивным в предложении помощи
-- Признавай ошибки и учись на них"""
+        return (
+            "Ты - Марк, интеллектуальный AI-ассистент с долговременной памятью и способностью к самообучению.\n\n"
+            "Твои ключевые особенности:\n"
+            "- Ты помнишь предыдущие разговоры и учишься на них\n"
+            "- Ты можешь анализировать свои действия и улучшаться\n"
+            "- У тебя есть доступ к различным инструментам для выполнения задач\n"
+            "- Ты стремишься быть полезным, честным и дружелюбным\n\n"
+            "Всегда:\n"
+            "- Используй память для персонализации ответов\n"
+            "- Сохраняй важную информацию в память\n"
+            "- Будь проактивным в предложении помощи\n"
+            "- Признавай ошибки и учись на них\n"
+            "- Уважай бюджет инструментов и лимиты LLM: заверши в рамках текущего лимита, если он близок к исчерпанию, дай краткий полезный ответ и остановись, предложив продолжение при необходимости\n"
+            "- Сохраняй промежуточные отчёты прогресса и бюджетные чекпоинты в память; при запросе пользователя 'продолжай' возобновляй с места остановки\n"
+            "- Для диагностики используй логи инструментов (инструмент get_recent_tool_logs) и, при необходимости, сообщай пользователю, каких инструментов или настроек не хватает\n"
+                "- Для статуса изменений в проекте при необходимости используй инструмент generate_change_report (кратко и без лишних деталей)\n\n"
+                "Правдивость про инструменты (обязательно):\n"
+                "- Если в текущем ответе инструменты НЕ вызывались — явно укажи 'инструменты не вызывались'; не создавай впечатление, что они использовались.\n"
+                "- Если опираешься на ранее сохранённую информацию — обозначь, что это контекст из памяти, а не результат текущих вызовов.\n"
+                "- Если пользователь явно просит вызвать инструменты (например: 'вызови N инструментов', 'запусти X') — делай это по делу; если инструмент не нужен или недоступен — кратко объясни почему.\n\n"
+                "Уточнения и продолжение:\n"
+                "- Не спрашивай 'продолжать?' без веской причины. Спрашивай только при неоднозначности цели пользователя или когда продолжение приведёт к существенным затратам.\n"
+                "- Если бюджет на исходе — подведи краткий итог, сохрани прогресс и предложи продолжение по запросу пользователя."
+        )
     
     def register_tool(self, tool_definition: Dict[str, Any], function: callable):
         """
@@ -180,7 +197,10 @@ class MarkAgent:
         user_id: Optional[str] = None,
         chat_id: Optional[int] = None,
         context: Optional[List[Dict[str, str]]] = None,
-        use_tools: bool = True
+        use_tools: bool = True,
+        override_max_tokens: Optional[int] = None,
+        override_llm_calls_limit: Optional[int] = None,
+        override_tool_calls_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Основной метод общения с агентом
@@ -191,42 +211,111 @@ class MarkAgent:
             chat_id: ID чата
             context: Дополнительный контекст (история сообщений)
             use_tools: Использовать ли инструменты
+            override_max_tokens: Явно ограничить токены генерации для этого запроса
             
         Returns:
             Словарь с ответом и метаданными
         """
         try:
+            # Инициализация лимитов и счётчиков для текущего запроса
+            t_func_start = __import__('time').time()
+            self._current_request_llm_calls: int = 0
+            self._current_request_llm_limit: int = int(
+                (override_llm_calls_limit if override_llm_calls_limit is not None else getattr(settings, "LLM_CALLS_PER_REQUEST_LIMIT", 10)) or 10
+            )
+            self._current_request_tool_calls: int = 0
+            self._current_request_tool_limit: int = int(
+                (override_tool_calls_limit if override_tool_calls_limit is not None else getattr(settings, "TOOL_CALLS_PER_REQUEST_LIMIT", 6)) or 6
+            )
+            self._current_request_rounds: int = 0
+            self._progress_checkpoint_calls: int = int(getattr(settings, "PROGRESS_CHECKPOINT_CALLS", 2) or 2)
+            self._budget_checkpoint_tool_calls: int = int(getattr(settings, "BUDGET_CHECKPOINT_TOOL_CALLS", 2) or 2)
+            self._progress_snapshots: list[dict[str, Any]] = []
             # Запоминаем текущего пользователя для контекста инструментов
             self._current_user_id = user_id
             # Подготавливаем сообщения
+            t_build_start = __import__('time').time()
             if self.use_dynamic_prompts:
+                # Детализированные тайминги подготовки контекста
+                t_hist_start = __import__('time').time()
+                # Внутри prepare_messages_dynamic произойдёт ленивый fetch истории из Redis (если нужно)
                 messages = await self._prepare_messages_dynamic(message, context, user_id)
+                t_hist_end = __import__('time').time()
+                # Сохраняем в отладочной трассе
+                debug_hist_ms = int((t_hist_end - t_hist_start) * 1000)
+                # Инициализируем debug_trace, чтобы тайминги не потерялись до заполнения ниже
+                debug_trace = {
+                    "timings": {
+                        "build_messages_ms": int((t_hist_end - t_build_start) * 1000),
+                        "prepare_history_ms": debug_hist_ms,
+                    }
+                }
             else:
                 messages = []
                 messages.append({"role": "system", "content": self.system_prompt})
                 if context:
                     messages.extend(context)
+                # Инъекция фрактального контекста и в не‑динамической ветке
+                try:
+                    zoom_items = await fractal_graph.retrieve_context(query=message, scale="auto", k=8)
+                    if zoom_items:
+                        fc = self._format_fractal_context(zoom_items)
+                        if fc:
+                            messages[0]["content"] = (fc.rstrip() + "\n\n" + messages[0]["content"]).strip()
+                except Exception as e:
+                    logger.warning(f"Fractal context injection (non-dynamic) failed: {e}")
                 messages.append({"role": "user", "content": message})
+            t_build_end = __import__('time').time()
             
             # Параметры для API
             api_params = {
                 "model": self.model,
                 "messages": messages,
             }
-            # Некоторые модели (например, семейство mini) не поддерживают произвольную температуру
-            # В таких случаях используем значение по умолчанию, просто не передавая параметр
+            # Устанавливаем температуру, если она явно задана и отличается от 1.0
             if self.temperature is not None and float(self.temperature) != 1.0:
                 api_params["temperature"] = self.temperature
             
-            if self.max_tokens:
-                api_params["max_tokens"] = self.max_tokens
+            # Лимит длины генерации
+            max_limit = override_max_tokens if override_max_tokens is not None else self.max_tokens
+            if max_limit:
+                api_params["max_tokens"] = max_limit
             
-            # Добавляем инструменты если нужно
+            # Первый ход: просим модель спланировать без инструментов (план + критерии)
             if use_tools and self.tools:
+                planning_hint = (
+                    "Сначала краткий план действий без вызова инструментов: шаги, критерий результата, бюджет инструментов."
+                    f" Допустимый бюджет инструментов за запрос: {self._current_request_tool_limit}."
+                    " Затем, если необходимо, переходи к инструментам."
+                    " Если бюджет инструментов исчерпан или близок к исчерпанию — дай финальный краткий ответ,"
+                    " зафиксируй прогресс и остановись. Избегай холостых повторов и пустых вызовов инструментов."
+                )
+                messages.insert(1, {"role": "system", "content": planning_hint})
+                # Разрешаем инструментам быть вызванными уже на первом ходе (для проверки бюджета)
                 api_params["tools"] = self.tools
                 api_params["tool_choice"] = "auto"
             
             # Собираем отладочную информацию перед вызовом LLM
+            # Подсчёт размеров промпта по ролям
+            sys_len = len(messages[0].get("content", "")) if messages and messages[0].get("role") == "system" else 0
+            user_msgs = [m for m in messages if m.get("role") == "user"]
+            asst_msgs = [m for m in messages if m.get("role") == "assistant"]
+            tool_msgs = [m for m in messages if m.get("role") == "tool"]
+            system_msgs = [m for m in messages if m.get("role") == "system"]
+            hist_msgs = [m for m in messages if m.get("role") in ("user","assistant")]
+            def _tok_est(text: str) -> int:
+                return int(len(text) / 4) if text else 0
+            prompt_sizes = {
+                "system_chars": sys_len,
+                "system_tokens_est": _tok_est(system_msgs[0].get("content","")) if system_msgs else 0,
+                "history_count": len(hist_msgs),
+                "history_tokens_est": sum(_tok_est((m.get("content") or "")) for m in hist_msgs),
+                "user_count": len(user_msgs),
+                "assistant_count": len(asst_msgs),
+                "tool_count": len(tool_msgs),
+                "total_messages": len(messages),
+            }
+            # Если ранее мы частично наполнили debug_trace, дополним его; иначе создадим
             debug_trace: Dict[str, Any] = {
                 "stage": "before_llm",
                 "selected_prompt": getattr(self, "_last_prompt_name", None),
@@ -248,26 +337,159 @@ class MarkAgent:
                     "temperature": self.temperature if (self.temperature is not None and float(self.temperature) != 1.0) else None,
                     "max_tokens": self.max_tokens,
                 },
+                "prompt_sizes": prompt_sizes,
+                "timings": {
+                    **((debug_trace.get("timings") or {}) if 'debug_trace' in locals() else {}),
+                    "build_messages_ms": int((t_build_end - t_build_start) * 1000),
+                }
             }
             # Сохраняем отладочную информацию ДО вызова LLM, чтобы видеть контекст даже при таймауте
             self._last_debug = debug_trace
-
+            
             # Вызываем OpenAI API
             logger.info(f"🤖 Отправка запроса к {self.model}")
+            t_llm_start = __import__('time').time()
             try:
-                response = await self.client.chat.completions.create(**api_params)
+                response = await self._create_with_limit(**api_params)
             except Exception as e:
                 err_text = str(e).lower()
-                # Авто-ретрай без temperature, если модель не поддерживает переопределение
+                # Авто-ретраи для несовместимых параметров
                 if "temperature" in err_text and ("unsupported" in err_text or "unsupported_value" in err_text):
                     logger.warning("🔁 Повтор запроса без temperature из-за ограничений модели")
                     api_params.pop("temperature", None)
-                    response = await self.client.chat.completions.create(**api_params)
+                    response = await self._create_with_limit(**api_params)
+                elif "max_tokens" in err_text and ("unsupported" in err_text or "unsupported_parameter" in err_text):
+                    # Переключаемся на max_completion_tokens
+                    val = api_params.pop("max_tokens", None)
+                    if val is not None:
+                        api_params["max_completion_tokens"] = val
+                    logger.warning("🔁 Повтор запроса с max_completion_tokens вместо max_tokens")
+                    response = await self._create_with_limit(**api_params)
+                elif "max_completion_tokens" in err_text and ("unsupported" in err_text or "unsupported_parameter" in err_text):
+                    # Переключаемся обратно на max_tokens
+                    val = api_params.pop("max_completion_tokens", None)
+                    if val is not None:
+                        api_params["max_tokens"] = val
+                    logger.warning("🔁 Повтор запроса с max_tokens вместо max_completion_tokens")
+                    response = await self._create_with_limit(**api_params)
+                elif ("rate limit" in err_text) or ("rate_limit" in err_text) or ("too many requests" in err_text) or (" 429" in err_text):
+                    # Мягкая обработка 429/TPM: подождём указанное время и повторим один раз
+                    try:
+                        import re
+                        m = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)s", str(e), flags=re.IGNORECASE)
+                        wait_s = float(m.group(1)) if m else 12.0
+                        wait_s = max(3.0, min(wait_s + 0.5, 25.0))
+                    except Exception:
+                        wait_s = 12.0
+                    try:
+                        logger.warning(f"⏳ Rate limit detected, sleep {wait_s:.2f}s and retry")
+                        await asyncio.sleep(wait_s)
+                        # Отметим задержку в отладке (запишется позже в metadata.timings)
+                        try:
+                            if 'debug_trace' in locals():
+                                dt = debug_trace.get("timings", {})
+                                dt["tpm_wait_ms"] = int(wait_s * 1000)
+                                debug_trace["timings"] = dt
+                        except Exception:
+                            pass
+                        response = await self._create_with_limit(**api_params)
+                    except Exception as er:
+                        if isinstance(er, RuntimeError) and "llm_limit_reached" in str(er):
+                            report = self._build_limit_report(rounds=0, t_start=t_llm_start, prompt_sizes={})
+                            return report
+                        raise
                 else:
+                    if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
+                        # Формируем отчёт о достигнутом лимите
+                        report = self._build_limit_report(rounds=0, t_start=t_llm_start, prompt_sizes={})
+                        return report
                     raise
+            t_llm_end = __import__('time').time()
             
             # Обрабатываем ответ
             result = await self._process_response(response, messages)
+            # Сохраняем ранний прогресс в память (внутренний чекпоинт)
+            try:
+                if self._current_request_llm_calls >= self._progress_checkpoint_calls:
+                    snapshot = self._build_progress_checkpoint(rounds=1, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                    self._progress_snapshots.append(snapshot)
+                    # Персист краткого прогресса в память
+                    summary = snapshot.get("content", "")
+                    if summary:
+                        await memory_manager.save(
+                            text=summary,
+                            metadata={
+                                "type": "progress_checkpoint",
+                                "user_id": user_id,
+                                "timestamp": int(__import__('time').time()),
+                            }
+                        )
+            except Exception:
+                pass
+
+            # Многошаговый цикл инструментов: повторяем, пока модель вызывает инструменты,
+            # но ограничиваемся MAX_CONCURRENT_TOOLS*2 раундами для безопасности
+            max_rounds = max(3, int(getattr(settings, "MAX_CONCURRENT_TOOLS", 5)) * 2)
+            rounds = 1
+            while use_tools and self.tools and (result.get("tool_calls") or []) and rounds < max_rounds:
+                rounds += 1
+                self._current_request_rounds = rounds
+                # После каждого исполнения инструментов модель уже запрашивала финальный текст.
+                # Если финальный текст пустой и снова есть намерение вызвать инструменты — позволим ещё один цикл
+                last_messages = list(messages)
+                # Принудительно просим модель продолжить решение до завершения или запроса подтверждения
+                # Инъекция состояния бюджета инструментов
+                budget_left = max(0, self._current_request_tool_limit - self._current_request_tool_calls)
+                budget_hint = (
+                    f"Бюджет инструментов на этот запрос: всего {self._current_request_tool_limit}, осталось {budget_left}. "
+                    "Вызывай инструменты только если нужно для следующего проверяемого шага."
+                )
+                last_messages.append({"role": "system", "content": budget_hint})
+                api_loop = {"model": self.model, "messages": last_messages, "tools": self.tools, "tool_choice": "auto"}
+                try:
+                    response = await self._create_with_limit(**api_loop)
+                except Exception as e:
+                    if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
+                        report = self._build_limit_report(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                        return report
+                    # Обработка 429/TPM и здесь
+                    err_text = str(e).lower()
+                    if ("rate limit" in err_text) or ("rate_limit" in err_text) or ("too many requests" in err_text) or (" 429" in err_text):
+                        try:
+                            import re
+                            m = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)s", str(e), flags=re.IGNORECASE)
+                            wait_s = float(m.group(1)) if m else 10.0
+                            wait_s = max(3.0, min(wait_s + 0.5, 25.0))
+                        except Exception:
+                            wait_s = 10.0
+                        logger.warning(f"⏳ Rate limit in tools loop, sleep {wait_s:.2f}s and retry")
+                        await asyncio.sleep(wait_s)
+                        response = await self._create_with_limit(**api_loop)
+                    else:
+                        raise
+                result = await self._process_response(response, last_messages)
+                # Логируем прогресс циклов
+                try:
+                    loop_ms = int((__import__('time').time() - t_llm_start) * 1000)
+                    logger.info(f"tools_loop_round={rounds} llm_call_ms_total~={loop_ms}")
+                except Exception:
+                    pass
+                # Чекпоинт бюджета инструментов с персистом
+                try:
+                    if self._current_request_tool_calls % max(1, self._budget_checkpoint_tool_calls) == 0:
+                        budget_snapshot = (
+                            f"Бюджет инструментов: использовано {self._current_request_tool_calls} из {self._current_request_tool_limit}."
+                        )
+                        await memory_manager.save(
+                            text=budget_snapshot,
+                            metadata={
+                                "type": "budget_checkpoint",
+                                "user_id": user_id,
+                                "timestamp": int(__import__('time').time()),
+                            }
+                        )
+                except Exception:
+                    pass
 
             # Пополняем отладочную информацию
             try:
@@ -281,24 +503,126 @@ class MarkAgent:
                     "role": getattr(first_msg_obj, "role", None),
                     "content": getattr(first_msg_obj, "content", None),
                 }
+                # Диагностика ответа: finish_reason, длина контента, количество tool_calls
+                try:
+                    fr = getattr(getattr(response.choices[0], "finish_reason", None), "value", None) or getattr(response.choices[0], "finish_reason", None)
+                except Exception:
+                    fr = None
+                try:
+                    tc_count = len(getattr(response.choices[0].message, "tool_calls", []) or [])
+                except Exception:
+                    tc_count = 0
+                logger.info(f"LLM after_llm: finish_reason={fr}, content_len={len(getattr(first_msg_obj,'content','') or '')}, tool_calls={tc_count}")
             except Exception:
                 first_msg = None
 
+            pre_llm_ms = int((t_llm_start - t_func_start) * 1000)
+            first_llm_ms = int((t_llm_end - t_llm_start) * 1000)
             debug_trace.update({
                 "stage": "after_llm",
                 "usage": usage,
                 "first_model_message": first_msg,
                 "tool_calls_count": len(getattr(response.choices[0].message, "tool_calls", []) or []),
+                "timings": {
+                    **(debug_trace.get("timings") or {}),
+                    "pre_llm_ms": pre_llm_ms,
+                    "llm_first_call_ms": first_llm_ms,
+                    "llm_call_ms": int((t_llm_end - t_llm_start) * 1000)
+                }
             })
             
+            # Если контент пустой, делаем один принудительный повтор без инструментов
+            if not (result.get("content") or "").strip():
+                try:
+                    fr = getattr(getattr(response.choices[0], "finish_reason", None), "value", None) or getattr(response.choices[0], "finish_reason", None)
+                except Exception:
+                    fr = None
+                logger.warning(f"⚠️ Пустой ответ модели. Повтор запроса без инструментов (finish_reason={fr}).")
+                try:
+                    messages_retry = list(messages)
+                    messages_retry.append({
+                        "role": "system",
+                        "content": "Ответь текстом, кратко (1–2 предложения)."
+                    })
+                    retry_kwargs = {"model": self.model, "messages": messages_retry}
+                    if self.tools:
+                        retry_kwargs["tools"] = self.tools
+                        retry_kwargs["tool_choice"] = "none"
+                    response_retry = await self._create_with_limit(**retry_kwargs)
+                    result = await self._process_response(response_retry, messages_retry)
+                except Exception as e:
+                    if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
+                        report = self._build_limit_report(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                        return report
+                    logger.warning(f"Повтор без инструментов не удался: {e}")
+
+            # Ранний чекпоинт прогресса: если инструментов не было и количество вызовов достигло порога
+            try:
+                if self._current_request_tool_calls == 0 and self._current_request_llm_calls >= self._progress_checkpoint_calls:
+                    early = self._build_progress_checkpoint(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                    # Вставляем краткий отчёт в начало ответа
+                    result["content"] = (early["content"] + "\n\n" + (result.get("content") or "")).strip()
+                    result.setdefault("metadata", {}).update({"progress_checkpoint": True})
+                    # Персистим отчёт
+                    try:
+                        await memory_manager.save(
+                            text=early.get("content", ""),
+                            metadata={
+                                "type": "progress_checkpoint",
+                                "user_id": user_id,
+                                "timestamp": int(__import__('time').time()),
+                            }
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            
             # Добавляем метаданные
+            t_total_end = __import__('time').time()
+            tools_phase_ms = None
+            try:
+                tools_phase_ms = int((t_total_end - t_llm_end) * 1000)
+            except Exception:
+                tools_phase_ms = None
             result["metadata"] = {
                 "model": self.model,
                 "user_id": user_id,
                 "chat_id": chat_id,
                 "timestamp": datetime.now().isoformat(),
-                "tokens_used": response.usage.total_tokens if response.usage else None
+                "tokens_used": response.usage.total_tokens if response.usage else None,
+                "prompt_sizes": prompt_sizes,
+                "timings": {
+                    **(debug_trace.get("timings") or {}),
+                    "agent_total_ms": int((t_total_end - t_func_start) * 1000),
+                    **({"tools_phase_ms": tools_phase_ms} if tools_phase_ms is not None else {}),
+                },
+                "rounds": getattr(self, "_current_request_rounds", None),
+                "tool_calls_count": getattr(self, "_current_request_tool_calls", 0),
+                "llm_calls": getattr(self, "_current_request_llm_calls", 0),
+                "selected_prompt": getattr(self, "_last_prompt_name", None),
+                "router_context": getattr(self, "_last_router_context", None),
             }
+            # Встраиваем собранные чекпоинты в метаданные
+            if getattr(self, "_progress_snapshots", None):
+                try:
+                    result["metadata"]["progress_snapshots"] = [s.get("content") for s in self._progress_snapshots][:3]
+                except Exception:
+                    pass
+            # REAP: Reflect/Extract/Apply/Persist — минимальная встройка
+            try:
+                outcome = {
+                    "text": result.get("content", ""),
+                    "steps": [tc.get("name") for tc in (result.get("tool_calls") or [])],
+                }
+                incident = await detect_incident(outcome)
+                skill = await mine_skill(outcome)
+                result["metadata"]["reap"] = {"incident": incident, "skill": skill}
+            except Exception as _e:
+                try:
+                    result.setdefault("metadata", {})["reap_error"] = str(_e)
+                except Exception:
+                    pass
             
             # Обновляем историю (персонально для пользователя)
             history_key = user_id or "anonymous"
@@ -340,12 +664,76 @@ class MarkAgent:
             return result
             
         except Exception as e:
+            # Специальная обработка лимита, чтобы вернуть краткий отчёт вместо сырой ошибки
+            try:
+                if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
+                    report = self._build_limit_report(
+                        rounds=getattr(self, "_current_request_rounds", 0),
+                        t_start=locals().get("t_llm_start", None),
+                        prompt_sizes=locals().get("prompt_sizes", {})
+                    )
+                    return report
+            except Exception:
+                pass
             logger.error(f"❌ Ошибка в chat: {str(e)}")
             return {
                 "content": f"Произошла ошибка: {str(e)}",
                 "error": True,
                 "metadata": {"error": str(e)}
             }
+
+    async def _create_with_limit(self, **kwargs) -> ChatCompletion:
+        """Обертка над client.chat.completions.create с лимитом вызовов за запрос."""
+        try:
+            limit = getattr(self, "_current_request_llm_limit", None)
+            calls = getattr(self, "_current_request_llm_calls", 0)
+            if limit is not None and calls >= int(limit):
+                raise RuntimeError("llm_limit_reached")
+            self._current_request_llm_calls = calls + 1
+            return await self.client.chat.completions.create(**kwargs)
+        except Exception:
+            raise
+
+    def _build_limit_report(self, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
+        """Сформировать краткий отчёт при достижении лимита LLM-вызовов."""
+        try:
+            elapsed_ms = int((__import__('time').time() - t_start) * 1000) if t_start else None
+        except Exception:
+            elapsed_ms = None
+        calls = getattr(self, "_current_request_llm_calls", 0)
+        limit = getattr(self, "_current_request_llm_limit", 0)
+        tools_used = getattr(self, "_current_request_tool_calls", 0)
+        content = (
+            f"⏹ Достигнут лимит вызовов LLM: {calls} из {limit}.\n"
+            f"Что сделано:\n- Раундов инструментов: {rounds}\n- Вызовы инструментов: {tools_used}\n"
+            + (f"- Время обработки LLM: ~{elapsed_ms} мс\n" if elapsed_ms is not None else "")
+            + "\nОтветьте ‘продолжай’, чтобы выполнить ещё шаги, или уточните запрос."
+        )
+        return {
+            "content": content,
+            "tool_calls": [],
+            "metadata": {
+                "limit_reached": True,
+                "llm_calls": calls,
+                "llm_limit": limit,
+                "tool_calls_count": tools_used,
+                "prompt_sizes": prompt_sizes,
+            }
+        }
+
+    def _build_progress_checkpoint(self, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
+        """Короткий промежуточный отчёт о прогрессе, чтобы не ждать лимита."""
+        try:
+            elapsed_ms = int((__import__('time').time() - t_start) * 1000) if t_start else None
+        except Exception:
+            elapsed_ms = None
+        calls = getattr(self, "_current_request_llm_calls", 0)
+        tools_used = getattr(self, "_current_request_tool_calls", 0)
+        content = (
+            f"⏸ Промежуточный отчёт: LLM-вызовов {calls}, инструментов {tools_used}, раундов {rounds}."
+            + (f" Время: ~{elapsed_ms} мс." if elapsed_ms is not None else "")
+        )
+        return {"content": content, "tool_calls": [], "metadata": {"checkpoint": True, "llm_calls": calls, "tool_calls_count": tools_used, "prompt_sizes": prompt_sizes}}
     
     async def _process_response(
         self, 
@@ -370,15 +758,27 @@ class MarkAgent:
                 })
             
             # Получаем финальный ответ
-            final_response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages
-            )
+            # Важно: после инструментов принудительно требуем текстовый ответ
+            # чтобы избежать повторного tool_call и пустого content
+            final_kwargs = {"model": self.model, "messages": messages}
+            if self.tools:
+                final_kwargs["tools"] = self.tools
+                final_kwargs["tool_choice"] = "none"
+            final_response = await self._create_with_limit(**final_kwargs)
             
             final_message = final_response.choices[0].message
+            # Защитный фолбэк: если контент пуст, вернем метаданные причины
+            final_content = getattr(final_message, "content", None)
+            if not (final_content or "").strip():
+                try:
+                    fr = getattr(getattr(final_response.choices[0], "finish_reason", None), "value", None) or getattr(final_response.choices[0], "finish_reason", None)
+                except Exception:
+                    fr = None
+                logger.warning(f"⚠️ Финальный ответ без контента после tools. finish_reason={fr}")
+                final_content = ""
             
             return {
-                "content": final_message.content,
+                "content": final_content,
                 "tool_calls": [
                     {
                         "name": getattr(getattr(tc, "function", None), "name", "unknown"),
@@ -411,6 +811,14 @@ class MarkAgent:
                     "error": "Invalid tool call: missing function/name"
                 })
                 continue
+            # Проверяем бюджет инструментов
+            try:
+                if self._current_request_tool_calls >= self._current_request_tool_limit:
+                    logger.warning("⏹ Достигнут лимит инструментов на запрос — пропускаю выполнение.")
+                    results.append({"error": "tool_budget_exhausted"})
+                    continue
+            except Exception:
+                pass
             
             if tool_name not in self.tool_functions:
                 logger.error(f"❌ Инструмент не найден: {tool_name}")
@@ -453,7 +861,7 @@ class MarkAgent:
                         filtered_args['metadata'] = md
                 except Exception:
                     filtered_args = args or {}
-
+                t0 = __import__('time').time()
                 if inspect.iscoroutinefunction(function):
                     result = await function(**filtered_args)
                 else:
@@ -462,14 +870,66 @@ class MarkAgent:
                         result = await res
                     else:
                         result = res
+                duration_ms = int((__import__('time').time() - t0) * 1000)
                 
+                self._current_request_tool_calls += 1
                 results.append(result)
+                
+                # Логируем вызов инструмента в память (для прозрачности и обучения)
+                try:
+                    # Определяем успех по отсутствию ключа error
+                    success = True
+                    error_text = None
+                    if isinstance(result, dict) and result.get("error"):
+                        success = False
+                        error_text = str(result.get("error"))
+                    elif isinstance(result, str) and '"error"' in result.lower():
+                        success = False
+                        error_text = "error in string result"
+                    # Краткое представление аргументов
+                    try:
+                        args_preview = json.dumps(filtered_args, ensure_ascii=False)[:800]
+                    except Exception:
+                        args_preview = str(filtered_args)[:800]
+                    text = (
+                        f"TOOL {tool_name}: {'OK' if success else 'FAIL'} in {duration_ms} ms\n"
+                        f"args={args_preview}"
+                    )
+                    await memory_manager.save(
+                        text=text,
+                        metadata={
+                            "type": "tool_call",
+                            "tool": tool_name,
+                            "success": success,
+                            "duration_ms": duration_ms,
+                            "user_id": getattr(self, "_current_user_id", None),
+                            "timestamp": int(__import__('time').time()),
+                            "error": error_text,
+                        },
+                    )
+                except Exception:
+                    pass
                 
             except Exception as e:
                 logger.error(f"❌ Ошибка выполнения {tool_name}: {str(e)}")
                 results.append({
                     "error": f"Error executing {tool_name}: {str(e)}"
                 })
+                # Персист ошибки инструмента
+                try:
+                    await memory_manager.save(
+                        text=f"TOOL {tool_name}: EXCEPTION {str(e)[:400]}",
+                        metadata={
+                            "type": "tool_call",
+                            "tool": tool_name,
+                            "success": False,
+                            "user_id": getattr(self, "_current_user_id", None),
+                            "timestamp": int(__import__('time').time()),
+                            "error": str(e)[:800],
+                        },
+                    )
+                except Exception:
+                    pass
         
         return results
     
@@ -535,6 +995,40 @@ class MarkAgent:
         except Exception as e:
             logger.error(f"Ошибка создания базового промпта: {e}")
     
+    def _compact_prompt(self, text: str) -> str:
+        """Уплотнение системного промпта: удаление повторов, лишних пустых строк,
+        схлопывание пробелов и не влияющих на смысл формулировок.
+        Безопасно: не меняет смысл, только представление.
+        """
+        try:
+            # Сначала удалим повторяющиеся абзацы/строки существующим методом
+            dedup = self._deduplicate_system_prompt(text)
+            # Схлопываем множественные пробелы внутри строк
+            lines = []
+            for ln in dedup.splitlines():
+                stripped = " ".join(ln.strip().split())
+                lines.append(stripped)
+            # Убираем последовательные пустые строки
+            out = []
+            prev_blank = False
+            for ln in lines:
+                is_blank = (ln == "")
+                if is_blank and prev_blank:
+                    continue
+                out.append(ln)
+                prev_blank = is_blank
+            compact = "\n".join(out).strip()
+            # Мини-замены формулировок без потери смысла
+            replacements = {
+                "Всегда:": "Всегда делай:",
+                "Ты - Марк,": "Ты — Марк,",
+            }
+            for a, b in replacements.items():
+                compact = compact.replace(a, b)
+            return compact
+        except Exception:
+            return text
+    
     async def _prepare_messages_dynamic(
         self,
         message: str,
@@ -595,6 +1089,15 @@ class MarkAgent:
                     # Дедупликация повторяющихся абзацев/строк
                     messages[0]["content"] = self._deduplicate_system_prompt(merged)
                 messages.extend(non_system_messages)
+            # Инъекция фрактального контекста и в фолбэк-ветке
+            try:
+                zoom_items = await fractal_graph.retrieve_context(query=message, scale="auto", k=8)
+                if zoom_items:
+                    fc = self._format_fractal_context(zoom_items)
+                    if fc:
+                        messages[0]["content"] = (messages[0]["content"].rstrip() + "\n\n" + fc).strip()
+            except Exception as e:
+                logger.warning(f"Fractal context injection (fallback) failed: {e}")
             messages.append({"role": "user", "content": message})
             self._last_prompt_name = "default_system"
             self._last_router_context = router_context
@@ -630,6 +1133,19 @@ class MarkAgent:
             optimized_context = (optimized_context.rstrip() + "\n\n" + brevity_instruction).strip()
 
         messages = [{"role": "system", "content": optimized_context}]
+
+        # Инъекция фрактального контекста (zoom-attention) в системный блок
+        try:
+            zoom_items = await fractal_graph.retrieve_context(query=message, scale="auto", k=8)
+            if zoom_items:
+                fc = self._format_fractal_context(zoom_items)
+                if fc:
+                    messages[0]["content"] = (fc.rstrip() + "\n\n" + messages[0]["content"]).strip()
+                fc = self._format_fractal_context(zoom_items)
+                if fc:
+                    messages[0]["content"] = (fc.rstrip() + "\n\n" + messages[0]["content"]).strip()
+        except Exception as e:
+            logger.warning(f"Fractal context injection failed: {e}")
         
         # Добавляем историю
         # 1) Внешний контекст (например, RAG). Системные блоки объединяем в один
@@ -659,6 +1175,22 @@ class MarkAgent:
         self._last_router_context = router_context
         
         return messages
+
+    def _format_fractal_context(self, items: List[Dict[str, Any]]) -> str:
+        """Сформировать краткий блок фрактального контекста для системного промпта."""
+        try:
+            lines: List[str] = []
+            for it in items[:8]:
+                md = it.get("metadata", {}) or {}
+                scale = md.get("scale") or md.get("payload", {}).get("scale") or "?"
+                ntype = md.get("type") or it.get("type") or "Node"
+                text = (it.get("text") or "")[:140].replace("\n", " ")
+                lines.append(f"- [{scale}] {ntype}: {text}")
+            if not lines:
+                return ""
+            return "Фрактальный контекст:\n" + "\n".join(lines)
+        except Exception:
+            return ""
 
     def _remove_unfilled_placeholders(self, text: str) -> str:
         """Удалить строки с незаполненными плейсхолдерами вида {variable}.

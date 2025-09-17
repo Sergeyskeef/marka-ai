@@ -296,12 +296,12 @@ class TestTraceFunctions:
             trace_collector.db_path = db_path
             trace_collector._init_database()  # Инициализируем новую БД
             
-            trace_llm_call("gpt-5-mini", "Hello", "Hi there!", 150.5)
+            trace_llm_call("gpt-4.1-mini", "Hello", "Hi there!", 150.5)
             
             spans = trace_collector.get_recent_spans(10)
             assert len(spans) == 1
             assert spans[0]["span_type"] == "llm"
-            assert spans[0]["name"] == "LLM Call: gpt-5-mini"
+            assert spans[0]["name"] == "LLM Call: gpt-4.1-mini"
             assert spans[0]["status"] == "completed"
             
             # Восстанавливаем оригинальный путь к БД

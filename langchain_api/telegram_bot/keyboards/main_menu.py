@@ -19,9 +19,9 @@ def get_main_menu_keyboard(user_id: int = None) -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("💬 Новый чат", callback_data="menu:chat:new"),
-            InlineKeyboardButton("🔄 Режим чата", callback_data="menu:chat:mode"),
         ],
         [
+            InlineKeyboardButton("🧭 Режим", callback_data="menu:mode"),
             InlineKeyboardButton("🧠 Память", callback_data="menu:memory"),
             InlineKeyboardButton("📚 Обучение", callback_data="menu:learning"),
         ],

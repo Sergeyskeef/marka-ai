@@ -38,6 +38,50 @@ _DDL_STATEMENTS = [
     # Fulltext индексы (безопасные вызовы, если доступно)
     "CALL db.index.fulltext.createNodeIndex('fulltext_messages', ['Message'], ['msg'])",
     "CALL db.index.fulltext.createNodeIndex('fulltext_episodes', ['Episode'], ['msg'])",
+
+    # Fractal node types
+    "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (p:Person) REQUIRE p.id IS UNIQUE;",
+    "CREATE INDEX person_user_id IF NOT EXISTS FOR (p:Person) ON (p.user_id);",
+    "CREATE CONSTRAINT project_id IF NOT EXISTS FOR (p:Project) REQUIRE p.id IS UNIQUE;",
+    "CREATE INDEX project_name IF NOT EXISTS FOR (p:Project) ON (p.name);",
+    "CREATE CONSTRAINT skill_id IF NOT EXISTS FOR (s:Skill) REQUIRE s.id IS UNIQUE;",
+    "CREATE INDEX skill_name IF NOT EXISTS FOR (s:Skill) ON (s.name);",
+    "CREATE CONSTRAINT incident_id IF NOT EXISTS FOR (i:Incident) REQUIRE i.id IS UNIQUE;",
+    "CREATE CONSTRAINT goal_id IF NOT EXISTS FOR (g:Goal) REQUIRE g.id IS UNIQUE;",
+    "CREATE CONSTRAINT strategy_id IF NOT EXISTS FOR (s:Strategy) REQUIRE s.id IS UNIQUE;",
+
+    # Relationship property indexes (Neo4j 5 supports property indexes on rels)
+    "CREATE INDEX rel_scale IF NOT EXISTS FOR ()-[r]-() ON (r.scale)",
+    # --- Graph Schema v1 (для тестов) ---
+    # User
+    "CREATE CONSTRAINT user_id IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE;",
+    "CREATE INDEX user_email IF NOT EXISTS FOR (u:User) ON (u.email);",
+    "CREATE INDEX user_created_at IF NOT EXISTS FOR (u:User) ON (u.created_at);",
+    # Preference
+    "CREATE CONSTRAINT preference_id IF NOT EXISTS FOR (p:Preference) REQUIRE p.id IS UNIQUE;",
+    "CREATE INDEX preference_key IF NOT EXISTS FOR (p:Preference) ON (p.key);",
+    # ToolCall
+    "CREATE CONSTRAINT toolcall_id IF NOT EXISTS FOR (t:ToolCall) REQUIRE t.id IS UNIQUE;",
+    "CREATE INDEX toolcall_user_tool IF NOT EXISTS FOR (t:ToolCall) ON (t.user_id, t.tool_name);",
+    "CREATE INDEX toolcall_started_at IF NOT EXISTS FOR (t:ToolCall) ON (t.started_at);",
+    "CREATE INDEX toolcall_status IF NOT EXISTS FOR (t:ToolCall) ON (t.status);",
+    # Outcome
+    "CREATE CONSTRAINT outcome_id IF NOT EXISTS FOR (o:Outcome) REQUIRE o.id IS UNIQUE;",
+    "CREATE INDEX outcome_toolcall IF NOT EXISTS FOR (o:Outcome) ON (o.toolcall_id);",
+    "CREATE INDEX outcome_success IF NOT EXISTS FOR (o:Outcome) ON (o.success);",
+    "CREATE INDEX outcome_created_at IF NOT EXISTS FOR (o:Outcome) ON (o.created_at);",
+    # DiaryEntry
+    "CREATE CONSTRAINT diary_entry_id IF NOT EXISTS FOR (d:DiaryEntry) REQUIRE d.id IS UNIQUE;",
+    "CREATE INDEX diary_user IF NOT EXISTS FOR (d:DiaryEntry) ON (d.user_id);",
+    "CREATE INDEX diary_timestamp IF NOT EXISTS FOR (d:DiaryEntry) ON (d.timestamp);",
+    "CREATE INDEX diary_content IF NOT EXISTS FOR (d:DiaryEntry) ON (d.content);",
+    # Concept
+    "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (c:Concept) REQUIRE c.id IS UNIQUE;",
+    "CREATE INDEX concept_name IF NOT EXISTS FOR (c:Concept) ON (c.name);",
+    "CREATE INDEX concept_category IF NOT EXISTS FOR (c:Concept) ON (c.category);",
+    "CREATE INDEX concept_description IF NOT EXISTS FOR (c:Concept) ON (c.description);",
+    # Relationship index: User-Preference (по требованию тестов)
+    "CREATE INDEX user_pref_relationship IF NOT EXISTS FOR ()-[r:PREFERS]-() ON (r.created_at)",
 ]
 
 def wait_for_neo4j(driver, max_retries: int = 30, delay: int = 2) -> bool:
@@ -57,7 +101,7 @@ def wait_for_neo4j(driver, max_retries: int = 30, delay: int = 2) -> bool:
 def init_neo4j():
     """Инициализация Neo4j для Graphiti"""
     # Получаем параметры подключения
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://graphiti-neo4j:7687")
     neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
     env = os.getenv("ENV", "dev")
@@ -102,6 +146,28 @@ def init_neo4j():
             logger.info(f"📊 Созданные индексы: {indexes}")
         
         logger.info("✅ Инициализация Neo4j завершена успешно")
+        # Тестовые данные для Graph Schema v1 (dev)
+        if env != "prod":
+            try:
+                with driver.session() as session:
+                    session.run(
+                        "MERGE (u:User {id: 'test_user_001'}) SET u.email='test@example.com', u.created_at=timestamp()"
+                    )
+                    session.run(
+                        "MERGE (p:Preference {id: 'pref_001'}) SET p.key='theme', p.value='dark'"
+                    )
+                    session.run(
+                        "MERGE (d:DiaryEntry {id: 'diary_001'}) SET d.user_id='test_user_001', d.timestamp=timestamp(), d.content='Test entry'"
+                    )
+                    session.run(
+                        "MATCH (u:User {id:'test_user_001'}), (p:Preference {id:'pref_001'}) MERGE (u)-[:PREFERS]->(p)"
+                    )
+                    session.run(
+                        "MATCH (u:User {id:'test_user_001'}), (d:DiaryEntry {id:'diary_001'}) MERGE (u)-[:WRITES]->(d)"
+                    )
+                logger.info("✅ Тестовые данные Graph Schema v1 созданы")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось создать тестовые данные Graph Schema v1: {e}")
         return True
         
     except Exception as e:

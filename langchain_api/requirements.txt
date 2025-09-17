@@ -1,25 +1,17 @@
 # Основные зависимости для LangChain API
 openai>=1.97.1
-langchain_openai==0.1.6
-langchain==0.1.14
 # langchain-weaviate==0.0.4 - УДАЛЕНО
-langchain-community==0.0.34
 
 # OpenAI Agents SDK для Pydantic-schemas и Guardrails
 openai-agents>=0.2.4
 PyYAML>=6.0
-jinja2>=3.0
 
 # HTTP клиенты и серверы
 httpx[http2]==0.27.2
-h2
-aiohttp>=3.8.0
 fastapi>=0.110.0
 uvicorn>=0.15.0
-sse-starlette
 
 # LangServe и инструменты
-langserve
 tiktoken
 
 # Конфигурация и переменные окружения
@@ -62,7 +54,6 @@ matplotlib
 
 # Машинное обучение и анализ данных
 scikit-learn>=1.0.2
-numpy>=1.21.0
 
 
 # Graphiti и Neo4j

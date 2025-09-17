@@ -66,7 +66,7 @@ docker compose exec app python scripts/migrate_old_data.py
 # app/config.py
 class Settings(BaseSettings):
     # OpenAI
-    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_MODEL: str = "gpt-4.1-mini"
     
     # Memory System
     USE_DIRECT_NEO4J: bool = True

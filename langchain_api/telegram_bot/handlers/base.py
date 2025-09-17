@@ -39,7 +39,8 @@ class BaseHandler(ABC):
     
     def get_chat_mode(self, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Получить текущий режим чата"""
-        return context.user_data.get("chat_mode", "chat")
+        # По умолчанию режим задач
+        return context.user_data.get("chat_mode", "task")
     
     def set_chat_mode(self, context: ContextTypes.DEFAULT_TYPE, mode: str) -> None:
         """Установить режим чата"""

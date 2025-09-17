@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import httpx
 from core.error_middleware import RetryableHTTPClient
+from app.config import settings
 from core.memory.graphiti_cache import get_cache
 import asyncio
 import os
@@ -48,6 +49,14 @@ class GraphitiMemoryAdapter:
         self.semaphore_limit = int(os.getenv('GRAPHITI_SEMAPHORE_LIMIT', '20'))
         self._semaphore = asyncio.Semaphore(self.semaphore_limit)
         logger.info(f"🧠 GraphitiMemoryAdapter инициализирован: {base_url} (cache: {use_cache}, semaphore: {self.semaphore_limit})")
+
+        # Namespacing (group_id) и базовый Project
+        try:
+            self.group_id = settings.GRAPH_GROUP_ID
+            self.project_id = settings.PROJECT_ID
+        except Exception:
+            self.group_id = "project:mark:dev"
+            self.project_id = "mark"
     
     async def _get_client(self) -> httpx.AsyncClient:
         """Получает или создает оптимизированный HTTP клиент"""
@@ -113,6 +122,9 @@ class GraphitiMemoryAdapter:
                 "test_run": False,
                 "pytest_test": False
             }
+            # Добавляем group_id и project_id
+            properties["group_id"] = self.group_id
+            properties["project_id"] = self.project_id
 
             # Добавляем метаданные, сериализуя сложные типы
             if metadata:
@@ -181,6 +193,30 @@ class GraphitiMemoryAdapter:
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось инвалидировать кеш после записи: {e}")
 
+                # Автосоздание рёбер на основе метаданных (best-effort)
+                try:
+                    ep_id = node_id
+                    meta = metadata or {}
+                    # Person → Episode
+                    uid = meta.get("user_id")
+                    if uid:
+                        person_id = f"person:{uid}"
+                        await self.upsert_node(person_id, "Person", {"user_id": uid, "group_id": self.group_id, "project_id": self.project_id})
+                        await self.create_edge(person_id, ep_id, "RELATED_TO", {"since": int(time.time())})
+                    # Project → Episode
+                    pid = meta.get("project_id", self.project_id)
+                    if pid:
+                        proj_id = f"project:{pid}"
+                        await self.upsert_node(proj_id, "Project", {"project_id": pid, "group_id": self.group_id, "name": pid})
+                        await self.create_edge(proj_id, ep_id, "HAS_ITEM", {"type": meta.get("type", "episode")})
+                    # Session → Episode
+                    sid = meta.get("session_id")
+                    if sid:
+                        await self.upsert_node(sid, "Session", {"id": sid, "group_id": self.group_id, "project_id": self.project_id})
+                        await self.create_edge(sid, ep_id, "HAS_EVENT", {"ts": int(time.time())})
+                except Exception as e:
+                    logger.warning(f"⚠️ Автосоздание рёбер для Episode не удалось: {e}")
+
                 return {"success": True, "id": node_id, "data": response_data}
             else:
                 error_text = response.text
@@ -209,6 +245,8 @@ class GraphitiMemoryAdapter:
                 "role": role,
                 "created_at": int(time.time()),
             }
+            properties["group_id"] = self.group_id
+            properties["project_id"] = self.project_id
 
             if metadata:
                 for key, value in metadata.items():
@@ -241,6 +279,13 @@ class GraphitiMemoryAdapter:
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось инвалидировать кеш после записи Message: {e}")
 
+                # Автосоздание рёбер: Session → Message
+                try:
+                    await self.upsert_node(session_id, "Session", {"id": session_id, "group_id": self.group_id, "project_id": self.project_id})
+                    await self.create_edge(session_id, node_id, "HAS_MESSAGE", {"role": role})
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось создать связь Session→Message: {e}")
+
                 return {"success": True, "id": node_id}
             else:
                 return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
@@ -260,6 +305,8 @@ class GraphitiMemoryAdapter:
                 "id": session_id,
                 "ts_start": int(time.time()),
             }
+            properties["group_id"] = self.group_id
+            properties["project_id"] = self.project_id
             if user_id:
                 properties["user_id"] = user_id
             if metadata:
@@ -283,6 +330,14 @@ class GraphitiMemoryAdapter:
             response = await client.post("/nodes", json=payload)
             if response.status_code in (201, 409):
                 # 201 Created или 409 Conflict (уже существует) считаем успешным идемпотентным созданием
+                # Автосоздание Person → Session
+                if user_id:
+                    try:
+                        person_id = f"person:{user_id}"
+                        await self.upsert_node(person_id, "Person", {"user_id": user_id, "group_id": self.group_id, "project_id": self.project_id})
+                        await self.create_edge(person_id, session_id, "OWNS_SESSION", {"ts_start": properties["ts_start"]})
+                    except Exception as e:
+                        logger.warning(f"⚠️ Не удалось создать связь Person→Session: {e}")
                 return {"success": True, "id": session_id}
             else:
                 return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
@@ -306,10 +361,8 @@ class GraphitiMemoryAdapter:
             
             # Используем полнотекстовый поиск через Graphiti API
             client = await self._get_retry_client()
-            response = await client.get(
-                "/nodes",
-                params={"search": query, "limit": limit}
-            )
+            params = {"search": query, "limit": limit, "group_id": self.group_id, "project_id": self.project_id}
+            response = await client.get("/nodes", params=params)
             
             if response.status_code == 200:
                 data = response.json()
@@ -359,6 +412,18 @@ class GraphitiMemoryAdapter:
             logger.error(f"❌ Ошибка получения эпизода {episode_id}: {str(e)}")
             return {"error": str(e)}
 
+    async def get_node(self, node_id: str) -> dict[str, Any]:
+        """Получить любой узел по ID (тип определяется на сервере)."""
+        try:
+            client = await self._get_retry_client()
+            response = await client.get(f"/nodes/{node_id}")
+            if response.status_code == 200:
+                return response.json()
+            return {"error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения узла {node_id}: {e}")
+            return {"error": str(e)}
+
     async def list_episodes(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         """Получает список эпизодов"""
         try:
@@ -378,6 +443,75 @@ class GraphitiMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка получения списка эпизодов: {str(e)}")
             return {"items": [], "total": 0, "error": str(e)}
+
+    # --- Новые расширенные методы ---
+    async def create_edge(self, source_id: str, target_id: str, type: str, properties: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Создать/подтвердить связь между узлами."""
+        try:
+            client = await self._get_retry_client()
+            payload = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "type": type,
+                "properties": properties or {}
+            }
+            response = await client.post("/edges", json=payload)
+            if response.status_code in (200, 201):
+                return {"success": True, "data": response.json()}
+            return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка create_edge: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def list_edges(self, source_id: str | None = None, target_id: str | None = None, type: str | None = None, group_id: str | None = None, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+        """Листинг связей с фильтрами."""
+        try:
+            client = await self._get_retry_client()
+            params: dict[str, Any] = {"limit": limit, "offset": offset}
+            if source_id: params["source_id"] = source_id
+            if target_id: params["target_id"] = target_id
+            if type: params["type"] = type
+            if group_id: params["group_id"] = group_id
+            response = await client.get("/edges", params=params)
+            if response.status_code == 200:
+                return response.json()
+            return {"edges": [], "total": 0, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка list_edges: {e}")
+            return {"edges": [], "total": 0, "error": str(e)}
+
+    async def upsert_node(self, node_id: str, node_type: str, properties: dict[str, Any]) -> dict[str, Any]:
+        """Идемпотентно создать/обновить узел (через POST /nodes, сервер делает MERGE или 409)."""
+        try:
+            client = await self._get_retry_client()
+            props = dict(properties)
+            # всегда добавляем namespace
+            props.setdefault("group_id", self.group_id)
+            props.setdefault("project_id", self.project_id)
+            payload = {"id": node_id, "type": node_type, "properties": props}
+            response = await client.post("/nodes", json=payload)
+            if response.status_code in (201, 200, 409):
+                return {"success": True, "id": node_id}
+            return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка upsert_node: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def update_node_properties(self, node_id: str, properties_patch: dict[str, Any]) -> dict[str, Any]:
+        """Частичное обновление свойств узла (PATCH /nodes/{id})."""
+        try:
+            client = await self._get_retry_client()
+            payload = {"properties": properties_patch}
+            response = await client.patch(f"/nodes/{node_id}", json=payload)
+            if response.status_code in (200, 204):
+                return {"success": True, "id": node_id}
+            # Некоторые FastAPI возвращают 200 с телом
+            if response.status_code == 200:
+                return {"success": True, "id": node_id, "data": response.json()}
+            return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except Exception as e:
+            logger.error(f"❌ Ошибка update_node_properties: {e}")
+            return {"success": False, "error": str(e)}
 
     async def close(self):
         """Закрывает HTTP сессию"""

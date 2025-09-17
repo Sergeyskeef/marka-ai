@@ -3,7 +3,7 @@
 """
 
 import logging
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
 from .base import BaseHandler
@@ -49,9 +49,18 @@ class StartHandler(BaseHandler):
         self.set_user_data(context, "first_name", user.first_name)
         
         # Устанавливаем режим чата по умолчанию
-        self.set_chat_mode(context, "chat")
+        # По умолчанию включаем режим задач
+        self.set_chat_mode(context, "task")
         
-        # Отправляем приветствие с клавиатурой
+        # Сначала убираем возможную старую ReplyKeyboard (историческую)
+        try:
+            await update.message.reply_text(
+                "Обновляю меню…",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        except Exception:
+            pass
+        # Отправляем приветствие с Inline‑клавиатурой
         await update.message.reply_text(
             welcome_text,
             parse_mode="Markdown",

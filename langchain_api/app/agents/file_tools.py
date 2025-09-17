@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 SAFE_DIRECTORIES = [
     settings.FILE_TOOLS_BASE_DIR,  # Базовая директория из настроек (по умолчанию /app)
     "/app",                       # Корень приложения в контейнере
-    # "/workspace",              # Отключено: не используется в текущей конфигурации
+    "/workspace",                # Рабочее дерево проекта (read-only по умолчанию)
     "/sandbox",                   # Песочница (для безопасных экспериментов)
 ]
 
@@ -28,7 +28,6 @@ FORBIDDEN_PATTERNS = [
     "*.pyc",
     "__pycache__/*",
     ".git/*",
-    ".env*",
     "*.key",
     "*.pem",
     "*.secret"
@@ -65,6 +64,21 @@ def is_safe_path(path: str) -> bool:
     except Exception:
         return False
 
+
+def _is_in_sandbox(path: str) -> bool:
+    try:
+        abs_path = os.path.realpath(os.path.abspath(path))
+        return abs_path.startswith("/sandbox") or abs_path.startswith("/workspace/sandbox_test")
+    except Exception:
+        return False
+
+
+WRITE_DELETE_PROTECTED_PATTERNS = [
+    ".env*",
+    "*.key",
+    "*.pem",
+    "*.secret",
+]
 
 @create_openai_tool
 async def read_file(
@@ -162,11 +176,19 @@ async def write_file(
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):
             return f"❌ Ошибка: небезопасный путь '{file_path}'"
+        # Разрешаем запись ТОЛЬКО в песочницу
+        if not _is_in_sandbox(file_path):
+            return "⚠️ Запись разрешена только в песочницу: /sandbox или /workspace/sandbox_test"
         
         # Создаем директории если нужно
         if create_dirs:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
+        # Защита от записи чувствительных файлов вне песочницы
+        base = os.path.basename(file_path)
+        if file_path.startswith("/app") and any(fnmatch.fnmatch(base, pat) for pat in WRITE_DELETE_PROTECTED_PATTERNS):
+            return f"⚠️ Запись защищённых файлов запрещена вне песочницы: '{base}'"
+
         # Записываем файл
         with open(file_path, 'w', encoding=encoding) as f:
             f.write(content)
@@ -211,6 +233,9 @@ async def append_to_file(
         # Проверка безопасности после нормализации пути
         if not is_safe_path(file_path):
             return f"❌ Ошибка: небезопасный путь '{file_path}'"
+        # Разрешаем модификацию файлов только в песочнице
+        if not _is_in_sandbox(file_path):
+            return "⚠️ Изменение файлов разрешено только в песочнице: /sandbox или /workspace/sandbox_test"
         
         # Проверяем существование файла
         if not os.path.exists(file_path):
@@ -521,8 +546,9 @@ async def delete_file(
         Сообщение о результате операции
     """
     try:
-        if not confirm:
-            return "⚠️ Для удаления файла установите confirm=True"
+        # Для песочницы подтверждение не требуется
+        if not confirm and not _is_in_sandbox(file_path):
+            return "⚠️ Для удаления вне песочницы установите confirm=True"
         
         # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
@@ -541,6 +567,11 @@ async def delete_file(
         # Получаем информацию перед удалением
         file_size = os.path.getsize(file_path)
         
+        # Защита от удаления чувствительных файлов вне песочницы
+        base = os.path.basename(file_path)
+        if file_path.startswith("/app") and any(fnmatch.fnmatch(base, pat) for pat in WRITE_DELETE_PROTECTED_PATTERNS) and not _is_in_sandbox(file_path):
+            return f"⚠️ Удаление защищённых файлов вне песочницы запрещено: '{base}'"
+
         # Удаляем файл
         os.remove(file_path)
         
@@ -564,9 +595,9 @@ async def file_info(file_path: str) -> str:
         Информация о файле в формате JSON
     """
     try:
-        # Если путь относительный, делаем относительно /workspace
+        # Если путь относительный, делаем относительно базовой директории
         if not os.path.isabs(file_path):
-            file_path = os.path.join("/workspace", file_path)
+            file_path = os.path.join(settings.FILE_TOOLS_BASE_DIR, file_path)
         
         # Проверка безопасности
         if not is_safe_path(file_path):

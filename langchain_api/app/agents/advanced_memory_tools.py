@@ -10,6 +10,7 @@ from datetime import datetime
 from app.memory.advanced_memory_adapter import AdvancedMemoryAdapter, MemoryType
 from core.memory.memory_manager import memory_manager
 from core.memory.graphiti_adapter import graphiti_adapter
+from app.memory.fractal_graph import fractal_graph
 from .tools import register_tool, format_tool_result, format_tool_error
 
 logger = logging.getLogger(__name__)
@@ -387,3 +388,30 @@ ADVANCED_MEMORY_TOOLS = [
     analyze_memory_patterns,
     get_user_profile
 ]
+
+
+@register_tool()
+async def upsert_graph_node(
+    node_id: str,
+    node_type: str = "Concept",
+    scale: str = "meso",
+    payload: Optional[Dict[str, Any]] = None,
+    motifs: Optional[List[str]] = None,
+    extra: Optional[Dict[str, Any]] = None
+) -> str:
+    """Создать/обновить фрактальный узел (Graphiti) с масштабом и полезной нагрузкой."""
+    try:
+        result = await fractal_graph.upsert_node(
+            node_id=node_id,
+            node_type=node_type,
+            scale=scale,
+            payload=payload or {},
+            motifs=motifs or [],
+            extra=extra or {}
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps(format_tool_error(e), ensure_ascii=False)
+
+# Добавляем новый инструмент в экспорт
+ADVANCED_MEMORY_TOOLS.append(upsert_graph_node)

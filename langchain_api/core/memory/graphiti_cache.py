@@ -31,8 +31,21 @@ class GraphitiCache:
         # Поддержка REDIS_PASSWORD из окружения и docker-compose сервиса 'redis'
         env_url = os.getenv("REDIS_URL")
         env_pass = os.getenv("REDIS_PASSWORD")
-        if env_pass and not env_url:
-            env_url = f"redis://:{env_pass}@redis:6379"
+        # Всегда встраиваем пароль в URL, если он задан, даже если REDIS_URL уже указан
+        if env_pass:
+            if env_url and "@" not in env_url:
+                # Простой случай: нет auth-части в URL
+                try:
+                    # Разбираем схему и хост
+                    if env_url.startswith("redis://"):
+                        rest = env_url[len("redis://"):]
+                        env_url = f"redis://:{env_pass}@{rest}"
+                    else:
+                        env_url = f"redis://:{env_pass}@redis:6379"
+                except Exception:
+                    env_url = f"redis://:{env_pass}@redis:6379"
+            elif not env_url:
+                env_url = f"redis://:{env_pass}@redis:6379"
         env = os.getenv("ENV", "dev")
         self._env = env
         self.redis_url = env_url or redis_url

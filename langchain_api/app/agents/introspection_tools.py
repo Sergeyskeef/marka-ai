@@ -12,6 +12,7 @@ import logging
 
 from .tools import create_openai_tool
 from ..config import settings
+from core.memory.graphiti_adapter import graphiti_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,9 @@ async def analyze_my_capabilities() -> str:
             file_tools,
             test_tools,
             code_analysis_tools,
-            dependency_tools
+            dependency_tools,
+            change_tracker_tools,
+            introspection_tools as self_tools,
         )
         
         capabilities = {
@@ -50,7 +53,9 @@ async def analyze_my_capabilities() -> str:
             ("Работа с файлами", file_tools),
             ("Тестирование", test_tools),
             ("Анализ кода", code_analysis_tools),
-            ("Управление зависимостями", dependency_tools)
+            ("Управление зависимостями", dependency_tools),
+            ("Трекер изменений", change_tracker_tools),
+            ("Интроспекция", self_tools),
         ]
         
         for category, module in tool_modules:
@@ -80,7 +85,7 @@ async def analyze_my_capabilities() -> str:
         capabilities["limitations"] = [
             "Доступ к файлам ограничен безопасными директориями (/workspace, /app, /sandbox)",
             "Песочница изолирована от основной системы",
-            "Нет инструментов для работы с Git",
+            "Нет инструментов для работы с Git (есть только Change Tracker отчёт)",
             "Ограниченное время выполнения команд (30 сек)",
             "Нет персистентного состояния между вызовами"
         ]
@@ -304,6 +309,32 @@ async def analyze_my_structure() -> str:
     except Exception as e:
         logger.error(f"Ошибка анализа структуры: {e}")
         return f"Ошибка анализа: {str(e)}"
+
+
+@create_openai_tool
+async def get_recent_tool_logs(limit: int = 50) -> str:
+    """
+    Возвращает последние логи вызовов инструментов из памяти (type=tool_call).
+    Args:
+        limit: Максимальное количество записей (1..500)
+    """
+    try:
+        limit = max(1, min(int(limit), 500))
+        res = await graphiti_adapter.list_episodes(limit=500)
+        items = []
+        for n in res.get("nodes", []):
+            props = n.get("properties", {}) or {}
+            if props.get("type") == "tool_call":
+                text = props.get("text") or props.get("msg") or ""
+                items.append({
+                    "text": text,
+                    "metadata": props,
+                })
+        items = sorted(items, key=lambda x: x["metadata"].get("timestamp", 0))[-limit:]
+        return json.dumps({"items": items, "total": len(items)}, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Ошибка получения логов инструментов: {e}")
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
 @create_openai_tool

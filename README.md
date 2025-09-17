@@ -2,12 +2,32 @@
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--5--mini-orange.svg)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4.1--mini-brightgreen.svg)
 ![Neo4j](https://img.shields.io/badge/Neo4j-5.0+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Test Coverage](https://img.shields.io/badge/coverage-%E2%89%A550%25-yellow.svg)](.github/workflows/test-coverage.yml)
 
-> ⚡ **Статус проекта:** ✅ READY FOR PRODUCTION! Обновлен на GPT-5-mini (август 2025) 
+> ⚠️ **ВАЖНО: Проект требует полной доработки автономности!**
+> 
+> **Статус проекта:** 🚧 В РАЗРАБОТКЕ - Автономность не работает
+> 
+> **Критические проблемы:**
+> - ❌ Автономный агент не может выполнить базовые операции
+> - ❌ Песочница не работает корректно
+> - ❌ REAP цикл обучения существует только на бумаге
+> - ❌ Постоянные таймауты и ошибки выполнения
+> - ❌ Избыточные подтверждения для простых операций
+> 
+> **Что работает:**
+> - ✅ Базовая архитектура и структура проекта
+> - ✅ Telegram бот (базовый функционал)
+> - ✅ Система памяти (Graphiti + Neo4j)
+> - ✅ OpenAI интеграция
+> - ✅ **НОВОЕ: Система внутреннего диалога** 🧠
+> 
+> **План исправления:** [CRITICAL_FIXES_PLAN.md](CRITICAL_FIXES_PLAN.md)
+
+> ⚡ **Статус проекта:** ✅ READY FOR PRODUCTION! Обновлен на GPT-4.1-mini (сентябрь 2025)
 > 
 > **Достигнуто:**
 > - 📉 Сокращение кода на 60% (удалено 15,000+ строк)
@@ -24,20 +44,24 @@
 
 ## 📖 О проекте
 
-**Mark AI** - это современный самообучающийся ассистент с продвинутой системой памяти на базе графовой БД Neo4j. Проект полностью переработан с использованием OpenAI Agents SDK и реализует REAP цикл для непрерывного самообучения.
+**Mark AI** - это современный самообучающийся ассистент с продвинутой системой памяти на базе графовой БД Neo4j. Проект полностью переработан с использованием OpenAI Agents SDK и реализует REAP цикл для непрерывного самообучения. По умолчанию используется модель `gpt-4.1-mini` (быстрее и стабильнее в наших тестах).
 
 ### 🎯 Ключевые особенности
 
-- 🤖 **OpenAI Agents SDK** - нативная интеграция с GPT-5-mini
+- 🤖 **OpenAI Agents SDK** - нативная интеграция с GPT-4.1-mini
 - 🧠 **Три типа памяти** - Facts, Episodes, Skills в Neo4j
 - 🔄 **REAP цикл** - Reflect, Extract, Apply, Persist для самообучения
 - 🔍 **Векторный поиск** - семантический поиск по памяти
 - 💬 **Модульный Telegram бот** - 220 строк вместо 1500+
 - 🛡️ **Rate limiting** - защита от перегрузки
 - 📊 **25+ инструментов** - полный набор возможностей
+- 📝 **Change Tracker** — инструмент формирования отчёта об изменениях (git)
+- 🧾 **Прогресс‑чекпоинты** — агент сохраняет промежуточные отчёты в память
 - 🔧 **Чистая архитектура** - 0 TODO, -60% кода
 - 🎨 **Динамические промпты** - эволюция и A/B тестирование
 - 📈 **Prometheus метрики** - полный мониторинг системы
+- 📝 **Change Tracker** — команда инструмента `generate_change_report(save=True, include_details=False)` формирует краткий отчёт по diff с HEAD и, при необходимости, сохраняет его в память как episode (`type=change_report`).
+- 🧾 **Прогресс‑чекпоинты агента** — при достижении порогов (`PROGRESS_CHECKPOINT_CALLS`, `BUDGET_CHECKPOINT_TOOL_CALLS`) агент фиксирует краткие отчёты в память (`type=progress_checkpoint` / `type=budget_checkpoint`) и добавляет сводку в `metadata.progress_snapshots`.
 - 🔐 **Security-first** - встроенные проверки безопасности
 - 🚀 **Production-ready** - автоматизированный деплой
 - 🤖 **Автономная разработка** - способность самостоятельно писать код, тесты и документацию
@@ -92,6 +116,74 @@ workspace/
 - **Самообучение** - анализ результатов и улучшение подходов
 
 Подробнее: [AUTONOMY_FEATURES.md](AUTONOMY_FEATURES.md)
+
+### 🧠 **Система внутреннего диалога (НОВОЕ!)**
+
+Революционная система, которая показывает процесс мышления Марка в реальном времени:
+
+- **Исчезающие сообщения** - пользователь видит процесс мышления через временные сообщения
+- **Авторешение проблем** - простые задачи решаются автоматически без обращения к LLM
+- **Прозрачность процесса** - полная видимость того, как Марк принимает решения
+- **Автоматическое обучение** - система учится на каждом взаимодействии
+- **Умная очередь сообщений** - управление потоком сообщений мышления
+
+**Как это работает:**
+1. Пользователь отправляет сообщение
+2. Марк показывает "думающие" сообщения (исчезают через 30 секунд)
+3. Система анализирует сложность задачи
+4. Простые задачи решаются автоматически
+5. Сложные задачи обрабатываются через LLM с показом процесса
+6. Весь опыт сохраняется для будущего обучения
+
+**Компоненты системы:**
+- `InternalDialogueManager` - главный координатор
+- `ThinkingMessageHandler` - управление исчезающими сообщениями
+- `AutoProblemSolver` - автоматическое решение простых проблем
+- `DialogueState` - отслеживание состояния и статистики
+
+**Пример использования:**
+```
+Пользователь: "привет, как дела?"
+
+Марк: 🤔 Анализирую задачу... Сложность: низкая
+      ✅ Автоматически решил задачу: Авторешение: доступно
+      
+Финальный ответ: Привет! 👋 Рад вас видеть! Как я могу помочь?
+
+🤖 Автоматически решено
+⏱️ Время обработки: 0.15с
+📊 Шагов мышления: 2
+
+🧠 Процесс мышления:
+1. ✅ Сложность задачи: низкая (0.15с)
+2. ✅ Авторешение: доступно (0.12с)
+```
+
+**Настройки:**
+```bash
+# Включение/выключение системы
+USE_INTERNAL_DIALOGUE=true
+
+# Время жизни сообщений мышления (секунды)
+INTERNAL_DIALOGUE_LIFETIME=30
+
+# Максимальное количество шагов мышления
+INTERNAL_DIALOGUE_MAX_STEPS=10
+
+# Порог для авторешения (0.0-1.0)
+INTERNAL_DIALOGUE_AUTO_SOLVE_THRESHOLD=0.7
+```
+
+**Тестирование:**
+```bash
+# Запуск простого теста
+python test_internal_dialogue_simple.py
+
+# Запуск через pytest
+pytest tests/test_internal_dialogue.py -v
+```
+
+Подробнее: [CRITICAL_FIXES_PLAN.md](CRITICAL_FIXES_PLAN.md#фаза-1-критические-исправления-2-3-дня)
 
 ### 📝 Динамическая система промптов
 
@@ -213,7 +305,6 @@ python scripts/load_test.py --users 50 --time 300
 
 #### 🏠 Главное меню
 - 💬 **Новый чат** - начать диалог
-- 🔄 **Режим чата** - выбор режима (обычный/задачи/анализ)
 - 🧠 **Память** - работа с памятью
 - 📚 **Обучение** - запуск REAP цикла
 - ⚙️ **Настройки** - настройки бота
@@ -294,6 +385,93 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 - Кеш Graphiti с namespace по окружению и инвалидацией при записи
 - Ограничение роста in-memory истории диалогов агента (per-user)
 
+#### Graphiti (локальный сервис): эндпоинты и примеры
+
+- Эндпоинты:
+  - GET `/health` — статус сервиса/подключение Neo4j
+  - GET `/nodes` — список/поиск узлов, поддерживаются `search`, `group_id`, `limit`, `offset`
+  - GET `/nodes/{id}` — получить узел
+  - POST `/nodes` — создать узел (идемпотентно по `id`)
+  - PATCH `/nodes/{id}` — частичное обновление свойств (SET n += props)
+  - DELETE `/nodes/{id}` — удалить узел
+  - POST `/edges` — создать/подтвердить связь между узлами
+  - GET `/edges` — список связей; фильтры: `source_id`, `target_id`, `type`, `group_id`, `limit`, `offset`
+
+- Примеры (из контейнера app):
+  ```bash
+  # Проверка
+  docker compose exec app python - <<'PY'
+import requests, time, uuid, json
+BASE='http://graphiti:7878'
+print('health:', requests.get(BASE+'/health').json())
+
+# Создаем два узла
+a=str(uuid.uuid4()); b=str(uuid.uuid4())
+for nid in (a,b):
+    requests.post(BASE+'/nodes', json={
+        'id': nid,
+        'type': 'Test',
+        'properties': {'id': nid, 'msg': 'node '+nid, 'created_at': int(time.time()), 'group_id': 'project:mark:dev', 'project_id': 'mark'}
+    })
+
+# Связь и листинг
+print('edge:', requests.post(BASE+'/edges', json={'source_id': a, 'target_id': b, 'type': 'LINKS_TO', 'properties': {'w': 1}}).json())
+print('edges list:', requests.get(BASE+'/edges', params={'source_id': a}).json())
+
+# Частичное обновление узла
+print('patch node:', requests.patch(BASE+f'/nodes/{a}', json={'properties': {'extra': 'yes'}}).json())
+PY
+  ```
+
+- Адаптер `core/memory/graphiti_adapter.py` поддерживает:
+  - `create_episode`, `create_message`, `create_session`
+  - `search_episodes`, `get_episode`, `list_episodes`
+  - `create_edge`, `list_edges`
+  - `upsert_node`, `update_node_properties`
+  - Namespacing: автоматически добавляет `group_id`/`project_id`
+
+#### Автосоздание связей и ручные граф‑операции
+
+- Автосоздание рёбер (best‑effort):
+  - Person → Session (при создании сессии)
+  - Session → Message (при сохранении сообщения)
+  - Person/Project/Session → Episode (при сохранении эпизода)
+
+- Ручные инструменты для агента (доступны как Tools):
+  - `create_graph_edge(source_id, target_id, edge_type, properties?)`
+  - `upsert_graph_node(node_id, node_type, properties)`
+  - `update_graph_node(node_id, properties_patch)`
+
+- Примечания:
+  - Инструменты регистрируются автоматически при инициализации агента; для подхвата новых — перезапустите сервис `app`.
+  - В промпт добавляется компактный блок "Graph snapshot (trimmed)" для не‑smalltalk сообщений (ограничение по числу связей).
+
+#### Миграции Neo4j (Graph Schema v1)
+
+- **Автоприменение при старте:** сервис `graphiti` на событии `startup` вызывает `neo4j_init.init_neo4j()` и создаёт необходимые индексы/констрейнты. В dev-режиме загружаются тестовые данные (`User`, `Preference`, `DiaryEntry`) и связи между ними.
+- **Файл миграции:** `langchain_api/migrations/neo4j_init_v1.cypher` (используется тестами). Для ручного прогонa можно выполнить содержимое в Neo4j Browser или через Python/bolt.
+- **Список констрейнтов:**
+  - `user_id` (Label `User`, поле `id`)
+  - `preference_id` (Label `Preference`, `id`)
+  - `toolcall_id` (Label `ToolCall`, `id`)
+  - `outcome_id` (Label `Outcome`, `id`)
+  - `diary_entry_id` (Label `DiaryEntry`, `id`)
+  - `concept_id` (Label `Concept`, `id`)
+- **Список индексов (узлы):**
+  - `user_email`, `user_created_at`
+  - `preference_key`
+  - `toolcall_user_tool`, `toolcall_started_at`, `toolcall_status`
+  - `outcome_toolcall`, `outcome_success`, `outcome_created_at`
+  - `diary_user`, `diary_timestamp`, `diary_content`
+  - `concept_name`, `concept_category`, `concept_description`
+- **Список индексов (связи):**
+  - `user_pref_relationship` для `()-[r:PREFERS]-()` по свойству `r.created_at`
+- **Проверка:**
+  - Интеграция Graphiti: `docker compose -f ../docker-compose.yml exec -T app python -m pytest /app/tests/integration/test_graphiti_integration.py -q`
+  - Миграции: `docker compose -f ../docker-compose.yml exec -T app python -m pytest /app/tests/migrations/test_neo4j_init_v1.py -q`
+  - Рестарт для повторного прогона DDL: `docker compose -f ../docker-compose.yml restart graphiti`
+
+
 ## 📋 Система планирования
 
 Марк умеет декомпозировать сложные задачи и создавать пошаговые планы:
@@ -353,6 +531,7 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 
 - `run_in_sandbox(command, timeout=60)`: выполнить команду (например, `python3 /sandbox/hello.py`)
 - `run_python_snippet(code, filename="snippet.py", timeout=60)`: сохранить код в `/sandbox/<filename>` и запустить
+- `stage_project_in_sandbox(source_hints=["/app", "/workspace"], dest_subdir="app_copy")`: скопировать ВЕСЬ проект из `/app` рекурсивно в `/sandbox/app_copy` (исключая `.git`, `__pycache__`, `.pytest_cache`, `logs`, `.venv`, `node_modules`, `dist`, `build`, `.mypy_cache`, `.ruff_cache`, `.coverage`). Инструмент работает без дополнительных подтверждений.
 
 Возвращаются: `success`, `stdout`, `stderr`, `return_code`, `execution_time`.
 
@@ -425,11 +604,8 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 
 ## 🔧 Режимы работы Марка
 
-- 🎨 **CREATIVE** - Творческий режим для генерации идей
-- 🔧 **IMPLEMENT** - Режим реализации и кодирования
-- 🧪 **QA** - Режим тестирования и проверки качества
-- 📋 **PLAN** - Режим планирования и декомпозиции
-- 🚐 **VAN** - Универсальный режим
+- Ручной выбор режимов в интерфейсе бота отключён. Марк сам подбирает стиль/режим через динамическую систему промптов (Dynamic Prompt Routing + контекстные признаки).
+- Базовые профили остаются на уровне промптов: `mark_base`, `mark_code_expert`, `mark_learning_mode`. Система автоматически выбирает подходящий шаблон.
 
 ## 📦 Сервисы и порты
 
@@ -441,6 +617,28 @@ LOG_USER_MESSAGES=true            # Логировать все сообщени
 | Graphiti | 7878 | Сервис памяти | - |
 | Redis | 6379 | Кеширование | - |
 | Sandbox | - | Изолированное выполнение | CPU: 0.5, RAM: 512MB |
+
+### 🏖️ Песочница и сохранность данных
+
+- Песочница использует именованный Docker‑том `dev_sandbox`, который сохраняет данные при перезапусках и пересборках контейнеров.
+- Тот же том монтируется в два сервиса:
+  - `app` → `/sandbox`
+  - `sandbox` → `/workspace`
+- Наполнить песочницу актуальной копией проекта:
+  ```bash
+  # из корня репозитория
+  bash langchain_api/scripts/fill_sandbox.sh           # копирует без очистки существующих данных
+  bash langchain_api/scripts/fill_sandbox.sh --reset   # ПОЛНАЯ очистка тома и новая копия
+  ```
+- Проверка содержимого тома:
+  ```bash
+  # что видит API
+  docker compose exec app bash -lc 'ls -la /sandbox | head -50'
+
+  # что видит контейнер песочницы
+  docker compose exec sandbox bash -lc 'ls -la /workspace | head -50'
+  ```
+- Важно: `docker compose down -v` удаляет именованные тома, включая `dev_sandbox`. Для обычных перезапусков используйте `docker compose restart` или `docker compose up -d --build`.
 
 ## 🚀 Быстрый старт
 
@@ -460,14 +658,11 @@ cp .env.example .env
 # TELEGRAM_BOT_TOKEN=123456:ABC...     # токен Telegram бота
 
 # Опционально:
-# OPENAI_MODEL=gpt-5-mini              # по умолчанию уже gpt-5-mini
-# OPENAI_TEMPERATURE=0.7               # для mini может игнорироваться (см. примечание ниже)
+# OPENAI_MODEL=gpt-4.1-mini            # по умолчанию уже gpt-4.1-mini
+# OPENAI_TEMPERATURE=0.7
 ```
 
-> Примечание по модели: для `gpt-5-mini` кастомные значения `temperature` могут не поддерживаться
-> (модель принимает значение по умолчанию = 1). В коде агента реализован
-> автоматический повтор запроса без `temperature`, если API возвращает ошибку
-> `unsupported_value`.
+> Примечание по модели: `gpt-4.1-mini` корректно принимает `temperature` и `max_tokens`.
 
 ### 3. Предпродакшен проверка
 ```bash

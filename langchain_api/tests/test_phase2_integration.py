@@ -178,7 +178,7 @@ class TestPhase2Integration:
         )
         
         # Запускаем рефлексию
-        reflection = await reap_cycle.reflect_on_experience(episode_result["id"])
+        reflection = await reap_cycle.reflect_on_episode(episode_result["id"]) 
         
         assert reflection is not None
         assert hasattr(reflection, 'patterns')

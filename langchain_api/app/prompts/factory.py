@@ -59,9 +59,11 @@ class PromptSystemFactory:
                     create_mark_base_prompt,
                     create_mark_code_expert_prompt,
                     create_mark_learning_prompt,
+                    create_mark_chat_prompt,
                 )
                 for maker in [
                     create_mark_base_prompt,
+                    create_mark_chat_prompt,
                     create_mark_code_expert_prompt,
                     create_mark_learning_prompt,
                 ]:

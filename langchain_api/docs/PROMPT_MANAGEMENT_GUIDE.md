@@ -246,7 +246,7 @@ evolution.triggers.append(
 # Адаптация под конкретную модель
 optimized = architect.optimize_for_model(
     template=prompt,
-    model_name="gpt-5-mini"  # или "claude-3", "gemini-pro"
+    model_name="gpt-4.1-mini"  # или другие: "claude-3", "gemini-pro"
 )
 ```
 

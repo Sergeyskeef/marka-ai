@@ -27,7 +27,7 @@ cp .env.example .env
 ```bash
 # OpenAI API
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=gpt-4.1-mini
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
