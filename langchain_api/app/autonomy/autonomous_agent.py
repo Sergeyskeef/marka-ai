@@ -84,7 +84,8 @@ class AutonomousAgent:
             
             self.is_active = True
             self.current_project = project_description
-            
+            self.completed_tasks = []
+
             # 1. Анализ проекта и создание плана
             logger.info("📋 Создание плана проекта...")
             plan = await self.planner.create_project_plan(project_description)
@@ -109,9 +110,10 @@ class AutonomousAgent:
                     
                 result = await self._execute_task(task)
                 results.append(result)
-                
+
                 # Обучаемся на результате
                 if result["status"] == "completed":
+                    self.completed_tasks.append(task)
                     await self._learn_from_result(task, result)
             
             return {
@@ -173,7 +175,7 @@ class AutonomousAgent:
             )
             
             return result
-            
+
         except Exception as e:
             logger.error(f"❌ Ошибка при выполнении задачи {task['name']}: {str(e)}")
             return {
@@ -181,6 +183,13 @@ class AutonomousAgent:
                 "task": task,
                 "error": str(e)
             }
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Публичный метод для выполнения задачи"""
+        result = await self._execute_task(task)
+        if result.get("status") == "completed":
+            self.completed_tasks.append(task)
+        return result
     
     async def _handle_code_generation(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Обработка задачи генерации кода"""
