@@ -682,6 +682,51 @@ class MarkAgent:
                 "metadata": {"error": str(e)}
             }
 
+    async def generate_response(
+        self,
+        prompt: str,
+        *,
+        user_id: Optional[str] = None,
+        chat_id: Optional[int] = None,
+        context: Optional[List[Dict[str, str]]] = None,
+        use_tools: bool = True,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        llm_calls_limit: Optional[int] = None,
+        tool_calls_limit: Optional[int] = None,
+    ) -> str:
+        """Сгенерировать текстовый ответ, используя основную логику chat."""
+        prev_temperature = self.temperature
+        temperature_overridden = False
+        if temperature is not None and temperature != self.temperature:
+            self.temperature = temperature
+            temperature_overridden = True
+
+        try:
+            response = await self.chat(
+                prompt,
+                user_id=user_id,
+                chat_id=chat_id,
+                context=context,
+                use_tools=use_tools,
+                override_max_tokens=max_tokens,
+                override_llm_calls_limit=llm_calls_limit,
+                override_tool_calls_limit=tool_calls_limit,
+            )
+        finally:
+            if temperature_overridden:
+                self.temperature = prev_temperature
+
+        if isinstance(response, dict) and "content" in response:
+            content = response.get("content")
+            if isinstance(content, str):
+                return content
+            if content is None:
+                return ""
+            return str(content)
+
+        return ""
+
     async def _create_with_limit(self, **kwargs) -> ChatCompletion:
         """Обертка над client.chat.completions.create с лимитом вызовов за запрос."""
         try:
@@ -794,9 +839,89 @@ class MarkAgent:
             "content": getattr(message, "content", ""),
             "tool_calls": []
         }
-    
+
+    def _prepare_tool_call_arguments(
+        self,
+        tool_name: str,
+        function: callable,
+        args: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Подготовить аргументы для вызова инструмента согласно его сигнатуре."""
+        normalized_args: Dict[str, Any] = {}
+        base_args = args or {}
+
+        try:
+            signature = inspect.signature(function)
+        except (TypeError, ValueError):
+            return dict(base_args)
+
+        allowed = set(signature.parameters.keys())
+        normalized_args = {k: v for k, v in base_args.items() if k in allowed}
+        dropped = sorted(set(base_args.keys()) - allowed)
+        if dropped:
+            logger.warning(
+                f"🔎 Игнорирую неподдерживаемые аргументы для {tool_name}: {dropped}"
+            )
+
+        if "metadata" in signature.parameters:
+            metadata = normalized_args.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            current_user = getattr(self, "_current_user_id", None)
+            if current_user:
+                metadata.setdefault("owner_id", current_user)
+                metadata.setdefault("user_id", current_user)
+            metadata.setdefault("timestamp", int(__import__('time').time()))
+            normalized_args["metadata"] = metadata
+
+        return normalized_args
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: Optional[Union[str, Dict[str, Any]]] = None
+    ) -> Any:
+        """Вызвать зарегистрированный инструмент напрямую."""
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError("Tool name must be a non-empty string")
+
+        normalized_name = tool_name.strip()
+        if normalized_name not in self.tool_functions:
+            raise ValueError(f"Tool '{normalized_name}' is not registered")
+
+        if isinstance(arguments, str):
+            try:
+                parsed_args = json.loads(arguments)
+            except Exception:
+                parsed_args = {}
+        elif isinstance(arguments, dict):
+            parsed_args = arguments
+        else:
+            parsed_args = {}
+
+        function = self.tool_functions[normalized_name]
+        filtered_args = self._prepare_tool_call_arguments(normalized_name, function, parsed_args)
+
+        logger.info(f"🔧 Вызов инструмента: {normalized_name}")
+        try:
+            if inspect.iscoroutinefunction(function):
+                result = await function(**filtered_args)
+            else:
+                outcome = function(**filtered_args)
+                result = await outcome if inspect.iscoroutine(outcome) else outcome
+
+            try:
+                self._current_request_tool_calls = getattr(self, "_current_request_tool_calls", 0) + 1
+            except Exception:
+                pass
+
+            return result
+        except Exception as exc:
+            logger.error(f"❌ Ошибка выполнения инструмента {normalized_name}: {exc}")
+            raise
+
     async def _execute_tools(
-        self, 
+        self,
         tool_calls: List[ChatCompletionMessageToolCallUnion]
     ) -> List[Any]:
         """Выполнение вызовов инструментов"""
@@ -834,33 +959,13 @@ class MarkAgent:
                     args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                 except Exception:
                     args = {}
-                
+
                 # Выполняем функцию
                 logger.info(f"🔧 Выполнение инструмента: {tool_name}")
                 function = self.tool_functions[tool_name]
-                
+
                 # Корректно обрабатываем async/sync
-                # Фильтруем неожиданные аргументы по сигнатуре функции
-                try:
-                    signature = inspect.signature(function)
-                    allowed = set(signature.parameters.keys())
-                    filtered_args = {k: v for k, v in (args or {}).items() if k in allowed}
-                    dropped = set((args or {}).keys()) - allowed
-                    if dropped:
-                        logger.warning(f"🔎 Игнорирую неподдерживаемые аргументы для {tool_name}: {sorted(dropped)}")
-                    # Инъекция owner_id/user_id в метаданные, если поддерживается
-                    if 'metadata' in signature.parameters:
-                        md = filtered_args.get('metadata') or {}
-                        if not isinstance(md, dict):
-                            md = {}
-                        if getattr(self, '_current_user_id', None):
-                            md.setdefault('owner_id', self._current_user_id)
-                            md.setdefault('user_id', self._current_user_id)
-                        # Гарантируем целочисленный timestamp, если нет
-                        md.setdefault('timestamp', int(__import__('time').time()))
-                        filtered_args['metadata'] = md
-                except Exception:
-                    filtered_args = args or {}
+                filtered_args = self._prepare_tool_call_arguments(tool_name, function, args)
                 t0 = __import__('time').time()
                 if inspect.iscoroutinefunction(function):
                     result = await function(**filtered_args)
