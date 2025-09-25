@@ -1,8 +1,29 @@
-"""
-REAP Learning Cycle - unit/integration tests
-"""
+"""REAP Learning Cycle - unit/integration tests."""
+
+import uuid
 
 import pytest
+import pytest_asyncio
+
+
+@pytest_asyncio.fixture
+async def real_episode_id():
+    """Создает реальный эпизод в Graphiti и возвращает его ID."""
+    from app.learning.reap_cycle import reap_cycle
+
+    episode = await reap_cycle.memory.save_episode(
+        situation=f"REAP fixture episode {uuid.uuid4()}",
+        actions_taken=["prepare", "execute", "review"],
+        outcome="success",
+        reasoning="Fixture preparation for reflection test",
+        lesson_learned="Graphiti episode accessible by ID",
+        satisfaction=0.8,
+    )
+
+    assert episode.get("success") is True
+    episode_id = episode.get("id")
+    assert isinstance(episode_id, str) and episode_id
+    return episode_id
 
 
 @pytest.mark.asyncio
@@ -51,5 +72,17 @@ async def test_run_learning_cycle_wrapper():
     result = await reap_cycle.run_learning_cycle(auto_mode=False)
     assert isinstance(result, dict)
     assert result.get("status") in {"completed", "skip", "error"}
+
+
+@pytest.mark.asyncio
+async def test_reflect_on_real_episode_id(real_episode_id):
+    """Проверяем, что рефлексия по реальному ID проходит успешно."""
+    from app.learning.reap_cycle import reap_cycle
+
+    reflection = await reap_cycle.reflect_on_episode(real_episode_id)
+
+    assert reflection.effectiveness > 0
+    assert reflection.recommendations
+    assert reflection.recommendations != ["Эпизод не найден"]
 
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.memory.advanced_memory_adapter import AdvancedMemoryAdapter, MemoryType
-from core.memory.graphiti_adapter import graphiti_adapter
+from core.memory.graphiti_adapter import graphiti_adapter, parse_node
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -450,13 +450,43 @@ class REAPLearningCycle:
     
     async def _get_episode_by_id(self, episode_id: str) -> Optional[Dict[str, Any]]:
         """Получить эпизод по ID"""
-        from app.memory.neo4j_direct import neo4j_client
-        
-        # Graphiti-only
-        results = await self.memory.graphiti.search_episodes(episode_id, limit=1)
-        if results.get("items"):
-            return results["items"][0]
-        return None
+        try:
+            response = await self.memory.graphiti.get_episode(episode_id)
+        except Exception as error:  # pragma: no cover - сетевые ошибки логируем и пробрасываем наверх
+            logger.error(f"❌ Ошибка запроса эпизода {episode_id}: {error}")
+            return None
+
+        if not isinstance(response, dict):
+            logger.error(f"❌ Некорректный ответ от Graphiti для эпизода {episode_id}: {response}")
+            return None
+
+        if error_message := response.get("error"):
+            message_text = str(error_message)
+            if "404" in message_text or "not found" in message_text.lower():
+                logger.warning(f"⚠️ Эпизод {episode_id} не найден в Graphiti")
+                return None
+
+            logger.error(f"❌ Ошибка Graphiti при получении эпизода {episode_id}: {message_text}")
+            return None
+
+        properties = response.get("properties", {})
+        if not properties:
+            logger.warning(f"⚠️ В ответе Graphiti отсутствуют свойства эпизода {episode_id}")
+            return None
+
+        parsed = parse_node(properties)
+        metadata = dict(parsed.get("metadata", {}))
+        metadata.setdefault("graphiti_id", response.get("id"))
+
+        episode = {
+            "id": response.get("id"),
+            "type": response.get("type"),
+            "text": parsed.get("text"),
+            "metadata": metadata,
+        }
+
+        logger.debug(f"Получен эпизод {episode_id}: {episode}")
+        return episode
     
     async def _select_episode_for_learning(self) -> Optional[str]:
         """Выбрать эпизод для обучения"""
