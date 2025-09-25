@@ -215,3 +215,9 @@ class RetryableHTTPClient:
         """DELETE запрос с retry"""
         await self._ensure_client()
         return await self.client.delete(url, **kwargs)
+
+    @retry_on_failure()
+    async def patch(self, url: str, **kwargs):
+        """PATCH запрос с retry"""
+        await self._ensure_client()
+        return await self.client.patch(url, **kwargs)

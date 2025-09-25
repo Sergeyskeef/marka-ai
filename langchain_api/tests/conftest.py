@@ -1,3 +1,4 @@
+import os
 import time
 
 import httpx
@@ -7,6 +8,8 @@ from neo4j import GraphDatabase
 
 @pytest.fixture(scope="session", autouse=True)
 def wait_graphiti():
+    if os.getenv("SKIP_GRAPHITI_WAIT") == "1":
+        return
     url = "http://graphiti:7878/health"
     for _ in range(30):  # 30 × 2 s = 1 мин
         try:

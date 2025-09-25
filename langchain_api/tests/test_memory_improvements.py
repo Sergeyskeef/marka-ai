@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from core.memory.memory_manager import MemoryManager
 from core.memory.models import MemoryEntry, MemoryMetadata, MemoryResponse
@@ -113,7 +114,7 @@ class TestMemoryImprovements:
 
 class TestRetryLogic:
     """Тесты для retry логики"""
-    
+
     @pytest.mark.asyncio
     async def test_retry_on_connection_error(self):
         """Проверяет retry при ошибке соединения"""
@@ -136,6 +137,42 @@ class TestRetryLogic:
             
             assert result["status"] == "healthy"
             mock_client.get.assert_called_once_with("/health")
+
+    @pytest.mark.asyncio
+    async def test_retryable_http_client_supports_patch(self):
+        """Убеждаемся, что RetryableHTTPClient проксирует PATCH запросы."""
+        from core.error_middleware import RetryableHTTPClient
+
+        mock_http_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_http_client.patch = AsyncMock(return_value=mock_response)
+
+        with patch('core.error_middleware.httpx.AsyncClient', return_value=mock_http_client):
+            client = RetryableHTTPClient(base_url="http://graphiti:7878")
+            response = await client.patch("/nodes/123", json={"foo": "bar"})
+
+        mock_http_client.patch.assert_awaited_once_with("/nodes/123", json={"foo": "bar"})
+        assert response is mock_response
+
+    @pytest.mark.asyncio
+    async def test_update_node_properties_uses_patch_client(self):
+        """Проверяет, что GraphitiMemoryAdapter вызывает PATCH на клиенте без AttributeError."""
+        from core.memory.graphiti_adapter import GraphitiMemoryAdapter
+
+        adapter = GraphitiMemoryAdapter()
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 204
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        adapter._retry_client = mock_client
+
+        result = await adapter.update_node_properties("node-1", {"foo": "bar"})
+
+        mock_client.patch.assert_awaited_once_with(
+            "/nodes/node-1",
+            json={"properties": {"foo": "bar"}}
+        )
+        assert result == {"success": True, "id": "node-1"}
 
 
 if __name__ == "__main__":
