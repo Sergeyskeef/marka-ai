@@ -20,6 +20,9 @@ services:
       - .env
     environment:
       - RAG_MODE=v2
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=${NO_PROXY}
     networks:
       - marka_net
     volumes:
@@ -149,8 +152,8 @@ services:
     container_name: graphiti-neo4j
     restart: unless-stopped
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     networks:
       - marka_net
     environment:
@@ -178,13 +181,14 @@ services:
     image: redis:7-alpine
     container_name: marka-redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-defaultpass} --bind 0.0.0.0
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
     ports:
       - "127.0.0.1:6379:6379"  # Только локальный доступ с хоста
     networks:
       - marka_net
     volumes:
       - redis_data:/data
+      - ./langchain_api/configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-defaultpass}", "ping"]
       interval: 30s

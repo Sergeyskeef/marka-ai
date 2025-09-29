@@ -68,5 +68,17 @@ clean-q1: ## Очистка временных файлов Q1
 	@rm -f migration.log
 	@echo "✅ Очистка завершена"
 
+.PHONY: snapshot neo4j-init test-mcp
+
+snapshot: ## Создать снапшот перед изменениями
+	git add -A
+	git commit -m "chore: pre-memory-hardening snapshot" || true
+
+neo4j-init: ## Применить индексы Neo4j
+	docker exec -i graphiti-neo4j cypher-shell -u neo4j -p "$$NEO4J_PASSWORD" -f /var/lib/neo4j/import/neo4j_init.cypher
+
+test-mcp: ## Запустить тесты MCP
+	pytest -q mark_mcp/tests || true
+
 help: ## Показать доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

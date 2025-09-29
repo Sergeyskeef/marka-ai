@@ -10,6 +10,7 @@ from datetime import timedelta
 from .graphiti_adapter import graphiti_adapter
 from .models import MemoryEntry, MemoryMetadata, MemoryResponse
 from .hybrid_search import HybridSearchEngine
+from .xtrace import build_xtrace, set_last_xtrace
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,10 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"❌ Ошибка добавления эпизода: {str(e)}")
             return {"success": False, "error": str(e)}
+
+    async def save(self, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Алиас для add_episode() для обратной совместимости"""
+        return await self.add_episode(text, metadata)
 
     async def search_episodes(self, query: str, limit: int = 10) -> dict[str, Any]:
         """Ищет эпизоды в Graphiti памяти"""
@@ -198,7 +203,13 @@ class MemoryManager:
                 )
                 
                 # Преобразуем результаты в словари
-                return [r.to_dict() for r in results]
+                dicts = [r.to_dict() for r in results]
+                # xtrace (fallback ветка, когда фасад не активен)
+                try:
+                    set_last_xtrace(build_xtrace(query=query, filters=_filters, results=dicts))
+                except Exception:
+                    pass
+                return dicts
             else:
                 # Используем обычный векторный поиск
                 response = await self.search_episodes(query, limit=k)
@@ -211,6 +222,10 @@ class MemoryManager:
                         "source": "vector",
                         "metadata": item.get("metadata", {})
                     })
+                try:
+                    set_last_xtrace(build_xtrace(query=query, filters=filters, results=results))
+                except Exception:
+                    pass
                 return results
                 
         except Exception as e:

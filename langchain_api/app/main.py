@@ -9,6 +9,12 @@ import warnings
 # Добавляем путь к корню проекта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# включаем фасад памяти (можно отключить MARK_MEMORY_FACADE=0)
+try:
+    import core.memory.facade_shim  # noqa: F401
+except Exception as _e:
+    logging.getLogger(__name__).warning(f'facade_shim not loaded: {_e}')
+
 from app.api.chat import router as chat_router
 from app.api.prompts_api import register_prompts_api
 from core.monitoring import metrics, update_memory_usage
