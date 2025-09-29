@@ -13,12 +13,14 @@ from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
-    """Middleware для централизованной обработки ошибок"""
+    """Middleware для централизованной обработки ошибок
+    """
     
     async def dispatch(self, request: Request, call_next):
         try:
@@ -165,6 +167,7 @@ class RetryableHTTPClient:
         self.retry_delay = retry_delay
         self.backoff_factor = backoff_factor
         self.client: httpx.AsyncClient | None = None
+        self._http2 = os.getenv('HTTPX_HTTP2', '0') in ('1','true','True','yes')
 
     async def _ensure_client(self):
         """Создает httpx.AsyncClient при первом обращении."""
@@ -174,13 +177,13 @@ class RetryableHTTPClient:
                     base_url=self.base_url,
                     timeout=httpx.Timeout(self.timeout),
                     limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-                    http2=True,
+                    http2=self._http2,
                 )
             else:
                 self.client = httpx.AsyncClient(
                     timeout=httpx.Timeout(self.timeout),
                     limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-                    http2=True,
+                    http2=self._http2,
                 )
     
     async def __aenter__(self):

@@ -14,6 +14,7 @@ from app.agents.mark_agent import MarkAgent
 from app.agents.chat_handler import get_agent
 from app.config import settings
 from app.agents.chat_handler import enhanced_chat
+from core.memory.xtrace import get_last_xtrace
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,16 @@ async def chat(
             mode=str((request.context or {}).get("mode", "chat")),
             user_id=request.user_id,
         )
+        # Вклеим xtrace в метаданные ответа (если есть)
+        meta = dict(result.get("metadata") or {})
+        xt = get_last_xtrace()
+        if xt:
+            meta["xtrace"] = xt
         
         return ChatResponse(
             response=result.get("content", ""),
             session_id=request.session_id or "default",
-            metadata=result.get("metadata"),
+            metadata=meta,
             tool_calls=result.get("tool_calls")
         )
         
@@ -248,14 +254,22 @@ async def chat_stream(request: ChatRequest):
                         session_id=session_id,
                         role="assistant",
                         text=final_text,
-                        metadata={"user_id": request.user_id, "mode": "chat", "streamed": True}
+                        metadata={"user_id": request.user_id, "mode": "chat"}
                     )
                 except Exception:
                     pass
 
-                yield f"data: {_json.dumps({'type':'done'}, ensure_ascii=False)}\n\n"
+                # Финальное событие с xtrace если есть
+                try:
+                    from core.memory.xtrace import get_last_xtrace as _glx
+                    xt = _glx()
+                    if xt:
+                        yield f"data: {_json.dumps({'type':'xtrace','xtrace':xt}, ensure_ascii=False)}\n\n"
+                except Exception:
+                    pass
+
             except Exception as e:
-                yield f"data: {_json.dumps({'type':'finalize_error','message':str(e)}, ensure_ascii=False)}\n\n"
+                yield f"data: {_json.dumps({'type':'finalize_store_error','message':str(e)}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(token_stream(), media_type="text/event-stream")
     except Exception as e:

@@ -15,6 +15,10 @@ class Settings(BaseModel):
 	port: int = int(os.getenv("PORT", "8788"))
 	env: str = os.getenv("ENV", "dev")
 	dry_run_default: bool = os.getenv("DRY_RUN_DEFAULT", "true").lower() == "true"
+	# OAuth
+	oauth_enabled: bool = os.getenv("OAUTH_ENABLED", "false").lower() == "true"
+	oauth_issuer: str | None = os.getenv("OAUTH_ISSUER")  # e.g., https://auth.example.com/realms/marka
+	oauth_resource: str | None = os.getenv("OAUTH_RESOURCE")  # e.g., https://<DOMAIN>/mcp/
 
 
 settings = Settings()
