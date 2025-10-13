@@ -4,8 +4,9 @@ import logging
 import os
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from mark_mcp.logging_config import setup_logging
 from mark_mcp.security import require_auth, require_scope_write
@@ -16,11 +17,19 @@ from mark_mcp.agent_tools import agent_run_task
 from mark_mcp.repo_tools import repo_snapshot, git_local_commit
 from mark_mcp.docker_tools import compose_cmd, compose_logs, container_exec, tests_run
 from mark_mcp.mcp_server import mcp
+from mark_mcp.oidc import router as oidc_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name, redirect_slashes=False)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "supersecret"),
+)
+
+# OAuth login/callback endpoints
+app.include_router(oidc_router, prefix="/mcp")
 
 # Mount MCP SSE/JSON-RPC app at /mcp (handled by mcp SDK)
 # Use include_in_schema=False to prevent automatic redirects
@@ -875,20 +884,31 @@ async def audit_log(request: Request, call_next):
 @app.middleware("http")
 async def auth_guard(request: Request, call_next):
     # Enforce OAuth on MCP transport paths, but allow unauthenticated access for discovery
-    if (request.url.path == "/mcp" or request.url.path.startswith("/mcp/") or 
+    if (request.url.path == "/mcp" or request.url.path.startswith("/mcp/") or
         request.url.path == "/tools" or request.url.path.startswith("/tools/") or
         request.url.path == "/mcp/tools"):
         authorization = request.headers.get("authorization")
-        
+        cookie_token = request.cookies.get("mcp_access")
+
         # Debug logging
-        logger.info(f"Auth check: path={request.url.path}, method={request.method}, has_auth={bool(authorization)}")
-        
+        logger.info(
+            "Auth check: path=%s, method=%s, has_auth_header=%s, has_cookie=%s",
+            request.url.path,
+            request.method,
+            bool(authorization and authorization.startswith("Bearer ")),
+            bool(cookie_token),
+        )
+
         # Allow GET and POST requests without auth for discovery and JSON-RPC
-        if request.method in ["GET", "POST"] and (not authorization or not authorization.startswith("Bearer ")):
+        if request.method in ["GET", "POST"] and not (
+            (authorization and authorization.startswith("Bearer ")) or cookie_token
+        ):
             logger.info(f"Allowing unauthenticated {request.method} request to {request.url.path}")
             return await call_next(request)
         # For other methods, require auth
-        if not authorization or not authorization.startswith("Bearer "):
+        if not (
+            (authorization and authorization.startswith("Bearer ")) or cookie_token
+        ):
             resource = (settings.oauth_resource or "https://<DOMAIN>/mcp").rstrip("/")
             logger.info(f"Blocking request to {request.url.path}: missing bearer token")
             return JSONResponse(
@@ -1120,4 +1140,13 @@ async def sse_events(_: None = Depends(require_auth)):
 			data = json.dumps({"type": "heartbeat", "i": i})
 			yield f"data: {data}\n\n"
 			await asyncio.sleep(5)
-	return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+# Root MCP endpoint with OAuth hand-off for browser flows
+@app.get("/mcp/")
+async def mcp_root(request: Request):
+    access_token = request.cookies.get("mcp_access")
+    auth_header = request.headers.get("authorization")
+    if access_token or (auth_header and auth_header.lower().startswith("bearer ")):
+        return {"service": settings.app_name, "version": "1.0.0", "status": "running"}
+    return RedirectResponse(url="/mcp/login", status_code=302)

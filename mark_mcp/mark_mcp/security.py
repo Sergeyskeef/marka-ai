@@ -52,27 +52,32 @@ async def _get_jwks(issuer: str) -> dict:
 
 
 async def require_auth(authorization: str | None = Header(default=None), request: Request = None) -> None:
-	# Если проверка скоупов отключена, пропускаем аутентификацию
-	if not scopes_enforced():
-		return
-	
-	# OAuth enabled path
-	if settings.oauth_enabled and settings.oauth_issuer and settings.oauth_resource:
-		if not authorization or not authorization.startswith("Bearer "):
-			# include resource parameter as requested
-			resource = (settings.oauth_resource or "https://<DOMAIN>/mcp").rstrip("/")
-			raise HTTPException(
-				status_code=status.HTTP_401_UNAUTHORIZED,
-				detail="Missing bearer token",
-				headers={
-					"WWW-Authenticate": f'Bearer authorization_uri="/.well-known/oauth-protected-resource", resource="{resource}"'
-				},
-			)
-		token = authorization.split(" ", 1)[1]
-		jwks = await _get_jwks(settings.oauth_issuer)
-		try:
-			# jose requires setting options or audience; we check later for aud/scope
-			unverified = jwt.get_unverified_header(token)
+        # Если проверка скоупов отключена, пропускаем аутентификацию
+        if not scopes_enforced():
+                return
+
+        header_token: str | None = None
+        if authorization and authorization.startswith("Bearer "):
+                header_token = authorization.split(" ", 1)[1]
+
+        cookie_token = request.cookies.get("mcp_access") if request is not None else None
+        token = header_token or cookie_token
+
+        # OAuth enabled path
+        if settings.oauth_enabled and settings.oauth_issuer and settings.oauth_resource:
+                if not token:
+                        resource = (settings.oauth_resource or "https://<DOMAIN>/mcp").rstrip("/")
+                        raise HTTPException(
+                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Missing bearer token",
+                                headers={
+                                        "WWW-Authenticate": f'Bearer authorization_uri="/.well-known/oauth-protected-resource", resource="{resource}"'
+                                },
+                        )
+                jwks = await _get_jwks(settings.oauth_issuer)
+                try:
+                        # jose requires setting options or audience; we check later for aud/scope
+                        unverified = jwt.get_unverified_header(token)
 			kid = unverified.get("kid")
 			keys = jwks.get("keys", [])
 			key = next((k for k in keys if k.get("kid") == kid), None) if kid else (keys[0] if keys else None)
@@ -101,18 +106,17 @@ async def require_auth(authorization: str | None = Header(default=None), request
 		except Exception:
 			_auth_error("Invalid token")
 	# Fallback: static token auth
-	if not authorization or not authorization.startswith("Bearer "):
-		resource = (settings.oauth_resource or "https://<DOMAIN>/mcp").rstrip("/")
-		raise HTTPException(
-			status_code=status.HTTP_401_UNAUTHORIZED,
-			detail="Missing bearer token",
-			headers={
-				"WWW-Authenticate": f'Bearer authorization_uri="/.well-known/oauth-protected-resource", resource="{resource}"'
-			},
-		)
-	token = authorization.split(" ", 1)[1]
-	if token != settings.bearer_token:
-		raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
+        if not token:
+                resource = (settings.oauth_resource or "https://<DOMAIN>/mcp").rstrip("/")
+                raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Missing bearer token",
+                        headers={
+                                "WWW-Authenticate": f'Bearer authorization_uri="/.well-known/oauth-protected-resource", resource="{resource}"'
+                        },
+                )
+        if token != settings.bearer_token:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token")
 
 
 def require_scope_write(request: Request) -> None:
