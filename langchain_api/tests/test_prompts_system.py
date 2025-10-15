@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import shutil
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 
 from app.prompts import (
@@ -22,6 +23,7 @@ from app.prompts.templates.mark_base import (
     create_mark_base_prompt, create_mark_code_expert_prompt,
     create_mark_learning_prompt
 )
+from app.agents.mark_agent import MarkAgent
 
 
 @pytest.fixture
@@ -149,21 +151,48 @@ class TestDynamicPromptRouter:
         """Тест обновления награды"""
         prompt = create_mark_base_prompt()
         await prompt_manager.save_prompt(prompt)
-        
+
         router = DynamicPromptRouter(prompt_manager)
-        
+
         context = {"query": "Привет", "complexity": 0.2}
-        
+
         # Делаем несколько выборов и обновлений
         for i in range(5):
             selected, _ = await router.select_prompt(context)
             reward = 0.8 if i % 2 == 0 else 0.4
             await router.update_reward(selected.name, context, reward)
-        
+
         # Проверяем статистику
         stats = await router.get_routing_stats()
         assert stats["total_selections"] == 5
         assert "mark_base" in stats["prompts"]
+
+
+@pytest.mark.asyncio
+async def test_mark_agent_injects_fractal_context_once(prompt_manager, monkeypatch):
+    """Проверяем, что фрактальный контекст добавляется в системное сообщение один раз."""
+
+    client = MagicMock()
+    agent = MarkAgent(client=client, prompt_manager=prompt_manager, use_dynamic_prompts=True)
+
+    # Дожидаемся завершения фоновой задачи и подготавливаем зависимости
+    await asyncio.sleep(0)
+
+    mock_prompt = MagicMock()
+    mock_prompt.name = "mock_template"
+    agent.prompt_router.select_prompt = AsyncMock(return_value=(mock_prompt, 0.9))
+    agent.context_architect.architect_context = MagicMock(return_value=("Базовый системный контекст", {"score": 1.0}))
+
+    zoom_items = [{"text": "Важный факт", "metadata": {"scale": "L1", "type": "Note"}}]
+    monkeypatch.setattr(
+        "app.agents.mark_agent.fractal_graph.retrieve_context",
+        AsyncMock(return_value=zoom_items)
+    )
+
+    messages = await agent._prepare_messages_dynamic("Что нового?", context=None, user_id="user42")
+
+    system_content = messages[0]["content"]
+    assert system_content.count("Фрактальный контекст") == 1
 
 
 class TestPromptEvolution:

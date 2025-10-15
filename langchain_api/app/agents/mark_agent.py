@@ -1246,9 +1246,6 @@ class MarkAgent:
                 fc = self._format_fractal_context(zoom_items)
                 if fc:
                     messages[0]["content"] = (fc.rstrip() + "\n\n" + messages[0]["content"]).strip()
-                fc = self._format_fractal_context(zoom_items)
-                if fc:
-                    messages[0]["content"] = (fc.rstrip() + "\n\n" + messages[0]["content"]).strip()
         except Exception as e:
             logger.warning(f"Fractal context injection failed: {e}")
         
