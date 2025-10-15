@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
+import uuid
 from starlette.responses import StreamingResponse
 
 from openai import AsyncOpenAI
@@ -42,23 +43,26 @@ async def chat(
     """
     try:
         logger.info(f"Processing chat request from user {request.user_id}")
-        
+
+        session_id = request.session_id or str(uuid.uuid4())
+
         # Route through enhanced_chat to ensure memory search + tool usage
         result = await enhanced_chat(
             question=request.message,
             chat_id=None,
             mode=str((request.context or {}).get("mode", "chat")),
             user_id=request.user_id,
+            session_id=session_id,
         )
         # Вклеим xtrace в метаданные ответа (если есть)
         meta = dict(result.get("metadata") or {})
         xt = get_last_xtrace()
         if xt:
             meta["xtrace"] = xt
-        
+
         return ChatResponse(
             response=result.get("content", ""),
-            session_id=request.session_id or "default",
+            session_id=session_id,
             metadata=meta,
             tool_calls=result.get("tool_calls")
         )
@@ -124,6 +128,7 @@ async def chat_stream(request: ChatRequest):
     """
     try:
         agent = await get_agent()
+        session_id = request.session_id or str(uuid.uuid4())
 
         # Подготовим внешний контекст (как в enhanced_chat)
         from app.agents.chat_handler import _prepare_context
@@ -151,6 +156,7 @@ async def chat_stream(request: ChatRequest):
                 "model": agent.model,
                 "user_id": request.user_id,
                 "selected_prompt": getattr(agent, "_last_prompt_name", None),
+                "session_id": session_id,
             }
             yield f"data: {_json.dumps({'type':'meta','meta':meta}, ensure_ascii=False)}\n\n"
 
@@ -242,19 +248,18 @@ async def chat_stream(request: ChatRequest):
                 # Сохраняем в Graphiti (как в enhanced_chat)
                 try:
                     from core.memory.graphiti_adapter import graphiti_adapter
-                    session_id = str(request.session_id or "stream-" + (request.user_id or "anon"))
                     await graphiti_adapter.create_session(session_id=session_id, user_id=request.user_id)
                     await graphiti_adapter.create_message(
                         session_id=session_id,
                         role="user",
                         text=request.message,
-                        metadata={"user_id": request.user_id, "mode": "chat"}
+                        metadata={"user_id": request.user_id, "mode": "chat", "session_id": session_id}
                     )
                     await graphiti_adapter.create_message(
                         session_id=session_id,
                         role="assistant",
                         text=final_text,
-                        metadata={"user_id": request.user_id, "mode": "chat"}
+                        metadata={"user_id": request.user_id, "mode": "chat", "session_id": session_id}
                     )
                 except Exception:
                     pass
