@@ -110,7 +110,8 @@ async def enhanced_chat(
     question: str,
     chat_id: Optional[int] = None,
     mode: str = "chat",
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Улучшенная функция чата на базе OpenAI Agents SDK
@@ -126,6 +127,7 @@ async def enhanced_chat(
         chat_id: ID чата
         mode: Режим работы (chat, task, analysis)
         user_id: ID пользователя
+        session_id: Идентификатор сессии (если уже создан)
         
     Returns:
         Словарь с ответом и метаданными
@@ -141,13 +143,15 @@ async def enhanced_chat(
         t_get_agent_e = time.time()
         get_agent_ms = int((t_get_agent_e - t_get_agent_s) * 1000)
         # Определяем session_id (используем chat_id как session_id, если задан)
-        session_id: str
-        if chat_id is not None:
-            session_id = str(chat_id)
+        session_key: str
+        if session_id:
+            session_key = session_id
+        elif chat_id is not None:
+            session_key = str(chat_id)
         else:
             import uuid
             # Fallback: уникальная сессия на запрос, если не передана
-            session_id = str(uuid.uuid4())
+            session_key = str(uuid.uuid4())
         
         # Подготавливаем контекст из памяти (4 компактных блока)
         context = []
@@ -205,7 +209,7 @@ async def enhanced_chat(
             # 3) Граф-снимок (узлы/рёбра) с жёстким лимитом
             try:
                 t_graph_s = time.time()
-                graph_ctx = await _prepare_graph_context(session_id, user_id)
+                graph_ctx = await _prepare_graph_context(session_key, user_id)
                 if graph_ctx:
                     context.append({"role": "system", "content": graph_ctx})
                 prep_breakdown["graph_ctx_ms"] = int((time.time() - t_graph_s) * 1000)
@@ -255,7 +259,7 @@ async def enhanced_chat(
         result = await agent.chat(
             message=question,
             user_id=user_id,
-            chat_id=session_id,
+            chat_id=session_key,
             context=context,
             use_tools=use_tools_flag,
             override_max_tokens=override_max,
@@ -269,7 +273,7 @@ async def enhanced_chat(
         # Жёсткий fallback при пустом контенте: построить краткий ответ без LLM
         if not (response.get("content") or "").strip():
             try:
-                fallback_text = await _build_fallback_answer(question, user_id, session_id)
+                fallback_text = await _build_fallback_answer(question, user_id, session_key)
             except Exception:
                 fallback_text = None
             response["content"] = fallback_text or (
@@ -281,24 +285,30 @@ async def enhanced_chat(
 
         # Персист сессии и сообщений в Graphiti
         try:
-            await graphiti_adapter.create_session(session_id=session_id, user_id=user_id)
+            await graphiti_adapter.create_session(session_id=session_key, user_id=user_id)
             await graphiti_adapter.create_message(
-                session_id=session_id,
+                session_id=session_key,
                 role="user",
                 text=question,
-                metadata={"user_id": user_id, "mode": mode}
+                metadata={"user_id": user_id, "mode": mode, "session_id": session_key}
             )
             await graphiti_adapter.create_message(
-                session_id=session_id,
+                session_id=session_key,
                 role="assistant",
                 text=response.get("content", ""),
-                metadata={"user_id": user_id, "mode": mode, "has_tools": bool(response.get("tool_calls"))}
+                metadata={
+                    "user_id": user_id,
+                    "mode": mode,
+                    "has_tools": bool(response.get("tool_calls")),
+                    "session_id": session_key,
+                }
             )
         except Exception as e:
             logger.warning(f"⚠️ Не удалось сохранить чат-сообщения в Graphiti: {e}")
         t3 = time.time()
-        
+
         # Добавляем дополнительные метаданные
+        response.setdefault("metadata", {})
         response["metadata"].update({
             "mode": mode,
             "context_used": len(context) > 0,
@@ -311,9 +321,10 @@ async def enhanced_chat(
                 "total_ms": int((t3 - t0) * 1000),
                 "get_agent_ms": get_agent_ms,
                 "breakdown": prep_breakdown,
-            }
+            },
+            "session_id": session_key,
         })
-        
+
         return response
         
     except Exception as e:
