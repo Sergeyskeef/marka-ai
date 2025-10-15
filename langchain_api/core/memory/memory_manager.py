@@ -11,7 +11,7 @@ from .graphiti_adapter import graphiti_adapter
 from .models import MemoryEntry, MemoryMetadata, MemoryResponse
 from .hybrid_search import HybridSearchEngine
 from .xtrace import build_xtrace, set_last_xtrace
-from openai import AsyncOpenAI
+from core.memory.embeddings import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -183,12 +183,7 @@ class MemoryManager:
                 # Готовим фильтры и эмбеддинг запроса
                 _filters: dict[str, Any] = dict(filters or {})
                 try:
-                    client = AsyncOpenAI()
-                    emb_resp = await client.embeddings.create(
-                        model="text-embedding-3-small",
-                        input=query
-                    )
-                    query_embedding = emb_resp.data[0].embedding
+                    query_embedding = await embed_text(query)
                     _filters["query_embedding"] = query_embedding
                 except Exception:
                     # Если эмбеддинг не доступен, продолжаем без него

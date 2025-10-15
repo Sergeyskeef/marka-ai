@@ -21,7 +21,10 @@ async def embed_text(text: str, *, model: str | None = None, dimensions: int | N
     """
     model = model or os.getenv('MARK_EMBED_MODEL', 'text-embedding-3-small')
     client = await _get_client()
-    resp = await client.embeddings.create(model=model, input=text, dimensions=dimensions) if dimensions else await client.embeddings.create(model=model, input=text)
+    if dimensions is not None:
+        resp = await client.embeddings.create(model=model, input=text, dimensions=dimensions)
+    else:
+        resp = await client.embeddings.create(model=model, input=text)
     return list(resp.data[0].embedding)
 
 async def embed_texts(texts: List[str], *, model: str | None = None, dimensions: int | None = None) -> List[List[float]]:
