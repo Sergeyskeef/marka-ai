@@ -162,18 +162,38 @@ class AutonomousAgent:
                 # Общая задача - используем основного агента
                 result = await self._handle_general_task(task)
             
+            actions_taken: List[str]
+            if isinstance(result.get("actions_taken"), list):
+                actions_taken = [str(action) for action in result["actions_taken"]]
+            elif isinstance(task.get("steps"), list):
+                actions_taken = [str(step) for step in task["steps"]]
+            else:
+                actions_taken = [f"execute_{task_type}"]
+
             # Сохраняем результат в память
-            await self.memory.create_episode(
+            episode_result = await self.memory.save_episode(
                 situation=f"Выполнение задачи: {task['name']}",
+                actions_taken=actions_taken,
                 outcome="success" if result["status"] == "completed" else "failure",
                 reasoning=result.get("reasoning", ""),
+                lesson_learned=result.get("lesson_learned", ""),
                 metadata={
                     "task": task,
                     "result": result,
                     "duration": result.get("duration", 0)
                 }
             )
-            
+
+            episode_id = episode_result.get("id")
+            if episode_result.get("success") and episode_id:
+                logger.info(f"✅ Эпизод сохранен для задачи {task['name']}: {episode_id}")
+            else:
+                logger.warning(
+                    "⚠️ Не удалось сохранить эпизод для задачи %s: %s",
+                    task["name"],
+                    episode_result.get("error")
+                )
+
             return result
 
         except Exception as e:
@@ -295,21 +315,39 @@ class AutonomousAgent:
             result: Результат выполнения
         """
         try:
+            actions_taken: List[str]
+            if isinstance(result.get("actions_taken"), list):
+                actions_taken = [str(action) for action in result["actions_taken"]]
+            elif isinstance(task.get("steps"), list):
+                actions_taken = [str(step) for step in task["steps"]]
+            else:
+                actions_taken = [f"reflect_{task.get('type', 'general')}"]
+
             # Создаем эпизод для обучения
-            episode_id = await self.memory.create_episode(
+            episode_result = await self.memory.save_episode(
                 situation=f"Completed task: {task['name']}",
+                actions_taken=actions_taken,
                 outcome="success" if result["status"] == "completed" else "failure",
                 reasoning=f"Task type: {task.get('type', 'general')}, Result: {result.get('message', '')}",
+                lesson_learned=result.get("lesson_learned", ""),
                 metadata={
                     "task": task,
                     "result": result
                 }
             )
-            
-            # Запускаем цикл обучения
-            if episode_id:
+
+            episode_id = episode_result.get("id")
+
+            # Запускаем цикл обучения после успешного сохранения
+            if episode_result.get("success") and episode_id:
                 await self.learning.reflect_on_episode(episode_id)
-                
+            else:
+                logger.warning(
+                    "⚠️ Эпизод для обучения задачи %s не был сохранен: %s",
+                    task["name"],
+                    episode_result.get("error")
+                )
+
         except Exception as e:
             logger.error(f"❌ Ошибка при обучении: {str(e)}")
     
