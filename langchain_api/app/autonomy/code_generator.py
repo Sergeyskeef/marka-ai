@@ -435,14 +435,13 @@ class CodeGenerator:
     async def _save_code_to_memory(self, code: str, description: str, language: str):
         """Сохранить успешный код в память"""
         try:
-            await self.memory.save_skill(
-                trigger=f"code_example_{language}_{description[:30]}",
-                response_template=code,
+            await self.memory.save_code_example(
+                description=description,
+                code=code,
+                language=language,
                 metadata={
-                    "code": code,
-                    "description": description,
-                    "language": language,
-                    "type": "code_example"
+                    "type": "code_example",
+                    "source": "code_generator",
                 }
             )
             logger.info("✅ Код сохранен в память")

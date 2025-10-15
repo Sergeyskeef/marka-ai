@@ -245,9 +245,9 @@ class AdvancedMemoryAdapter:
     async def save_skill(
         self,
         name: str,
-        trigger_patterns: List[str],
-        procedure: str,
-        system_prompt: str,
+        trigger_patterns: Optional[List[str]] = None,
+        procedure: str = "",
+        system_prompt: str = "",
         performance_score: float = 0.5,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -260,11 +260,13 @@ class AdvancedMemoryAdapter:
 
             embedding = await self._get_embedding(skill_text)
 
+            serialized_triggers = json.dumps(trigger_patterns or [], ensure_ascii=False)
+
             skill_data = {
                 "id": skill_id,
                 "type": MemoryType.SKILL.value,
                 "name": name,
-                "trigger_patterns": json.dumps(trigger_patterns, ensure_ascii=False),
+                "trigger_patterns": serialized_triggers,
                 "procedure": procedure,
                 "system_prompt": system_prompt,
                 "version": 1,
@@ -289,6 +291,73 @@ class AdvancedMemoryAdapter:
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения навыка: {e}")
             return {"success": False, "error": str(e)}
+
+    async def save_project_plan(
+        self,
+        plan_name: str,
+        plan: Dict[str, Any],
+        project_description: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Сохранить план проекта как процедурный навык."""
+
+        triggers = [
+            f"project_plan::{plan_name}",
+            project_description,
+            plan.get("description", ""),
+        ]
+        triggers = [pattern for pattern in triggers if pattern]
+
+        base_metadata = {
+            "skill_category": "project_plan",
+            "plan": plan,
+            "project_description": project_description,
+        }
+        combined_metadata: Dict[str, Any] = {**base_metadata, **(metadata or {})}
+
+        return await self.save_skill(
+            name=f"Project Plan: {plan_name}",
+            trigger_patterns=triggers or [plan_name],
+            procedure=json.dumps(plan, ensure_ascii=False),
+            system_prompt="Use this project plan as guidance for similar future projects.",
+            metadata=combined_metadata,
+        )
+
+    async def save_code_example(
+        self,
+        description: str,
+        code: str,
+        language: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Сохранить пример кода как процедурный навык."""
+
+        triggers = [
+            f"code_example::{language}",
+            description,
+        ]
+        triggers = [pattern for pattern in triggers if pattern]
+
+        base_metadata = {
+            "skill_category": "code_example",
+            "code": code,
+            "description": description,
+            "language": language,
+        }
+        combined_metadata: Dict[str, Any] = {**base_metadata, **(metadata or {})}
+
+        prompt_language = language or "unknown language"
+        prompt_description = description or "code example"
+
+        return await self.save_skill(
+            name=f"Code Example: {prompt_language} :: {prompt_description[:40]}",
+            trigger_patterns=triggers or [prompt_description],
+            procedure=code,
+            system_prompt=(
+                f"Reusable {prompt_language} code example generated for: {prompt_description}."
+            ),
+            metadata=combined_metadata,
+        )
     
     async def evolve_skill(
         self,
