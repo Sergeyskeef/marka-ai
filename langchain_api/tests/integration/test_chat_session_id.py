@@ -188,3 +188,8 @@ async def test_chat_reuses_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(create_message_calls) == 4
     assert all(msg["session_id"] == session_id for msg in create_message_calls)
     assert all(msg["metadata"].get("session_id") == session_id for msg in create_message_calls)
+
+    save_calls = chat_handler.memory_manager.save.await_args_list
+    assert len(save_calls) == 2
+    for call in save_calls:
+        assert call.args[1]["session_id"] == session_id

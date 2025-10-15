@@ -268,9 +268,9 @@ async def enhanced_chat(
             override_tool_calls_limit=tool_limit
         )
         t2 = time.time()
-        
+
         # Обрабатываем результат
-        response = await _process_result(result, question, user_id)
+        response = await _process_result(result, question, user_id, session_key)
         # Жёсткий fallback при пустом контенте: построить краткий ответ без LLM
         if not (response.get("content") or "").strip():
             try:
@@ -415,7 +415,8 @@ async def _prepare_context(question: str, user_id: Optional[str], mode: str = "c
 async def _process_result(
     result: Dict[str, Any],
     question: str,
-    user_id: Optional[str]
+    user_id: Optional[str],
+    session_id: Optional[str],
 ) -> Dict[str, Any]:
     """Обработка результата от агента"""
     
@@ -432,7 +433,8 @@ async def _process_result(
             "user_id": user_id,
             # Храним timestamp как целое число для совместимости с моделью
             "timestamp": int(datetime.now().timestamp()),
-            "has_tools": bool(result.get("tool_calls"))
+            "has_tools": bool(result.get("tool_calls")),
+            "session_id": session_id,
         }
         
         save_result = await memory_manager.save(dialog_text, metadata)
