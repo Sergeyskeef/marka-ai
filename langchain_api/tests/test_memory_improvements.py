@@ -12,6 +12,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
+os.environ.setdefault("SKIP_GRAPHITI_WAIT", "1")
 
 from core.memory.memory_manager import MemoryManager
 from core.memory.models import MemoryEntry, MemoryMetadata, MemoryResponse
@@ -31,17 +32,54 @@ class TestMemoryImprovements:
         # Мокаем graphiti_adapter
         with patch('core.memory.memory_manager.graphiti_adapter') as mock_adapter:
             mock_adapter.create_episode = AsyncMock(return_value={"success": True, "id": "test-123"})
-            
+
             # Вызываем метод save
             result = await memory_manager.save("Test text", {"user_id": "123"})
-            
+
             # Проверяем результат
             assert result["success"] is True
             assert result["id"] == "test-123"
-            
+
             # Проверяем, что был вызван create_episode
             mock_adapter.create_episode.assert_called_once()
-    
+
+    @pytest.mark.asyncio
+    async def test_create_episode_links_session(self):
+        """Проверяет, что при сохранении эпизода создаётся связь Session→Episode."""
+        from core.memory.graphiti_adapter import GraphitiMemoryAdapter
+
+        adapter = GraphitiMemoryAdapter(use_cache=False)
+        session_id = "session-test-001"
+
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 201
+        mock_response.json.return_value = {"id": "episode-1", "properties": {}}
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(adapter, "_get_retry_client", AsyncMock(return_value=mock_client)), \
+             patch.object(adapter, "upsert_node", AsyncMock()) as upsert_mock, \
+             patch.object(adapter, "create_edge", AsyncMock()) as create_edge_mock:
+            result = await adapter.create_episode(
+                "Session edge test",
+                {"session_id": session_id, "user_id": "user-123"},
+            )
+
+        assert result["success"] is True
+        post_calls = mock_client.post.await_args_list
+        assert post_calls, "Ожидался хотя бы один HTTP-запрос"
+        payload = post_calls[0].kwargs.get("json", {})
+        assert payload.get("properties", {}).get("session_id") == session_id
+
+        assert any(
+            call.args[0] == session_id and call.args[1] == "Session"
+            for call in upsert_mock.await_args_list
+        )
+        assert any(
+            call.args[0] == session_id and call.args[2] == "HAS_EVENT"
+            for call in create_edge_mock.await_args_list
+        )
+
     @pytest.mark.asyncio
     async def test_metadata_validation(self, memory_manager):
         """Проверяет валидацию метаданных"""

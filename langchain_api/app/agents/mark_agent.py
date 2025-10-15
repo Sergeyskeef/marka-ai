@@ -287,6 +287,12 @@ class MarkAgent:
             )
             state.progress.setdefault("started_at", datetime.now().isoformat())
             state.progress.setdefault("checkpoint_count", 0)
+            session_id_value = str(chat_id) if chat_id is not None else None
+
+            def _with_session(meta: Dict[str, Any]) -> Dict[str, Any]:
+                if session_id_value:
+                    meta.setdefault("session_id", session_id_value)
+                return meta
             # Подготавливаем сообщения
             t_build_start = __import__('time').time()
             if self.use_dynamic_prompts:
@@ -476,11 +482,11 @@ class MarkAgent:
                     if summary:
                         await memory_manager.save(
                             text=summary,
-                            metadata={
+                            metadata=_with_session({
                                 "type": "progress_checkpoint",
                                 "user_id": user_id,
                                 "timestamp": int(__import__('time').time()),
-                            }
+                            })
                         )
             except Exception:
                 pass
@@ -542,11 +548,11 @@ class MarkAgent:
                         state.progress["last_budget_snapshot"] = budget_snapshot
                         await memory_manager.save(
                             text=budget_snapshot,
-                            metadata={
+                            metadata=_with_session({
                                 "type": "budget_checkpoint",
                                 "user_id": user_id,
                                 "timestamp": int(__import__('time').time()),
-                            }
+                            })
                         )
                 except Exception:
                     pass
@@ -630,11 +636,11 @@ class MarkAgent:
                     try:
                         await memory_manager.save(
                             text=early.get("content", ""),
-                            metadata={
+                            metadata=_with_session({
                                 "type": "progress_checkpoint",
                                 "user_id": user_id,
                                 "timestamp": int(__import__('time').time()),
-                            }
+                            })
                         )
                     except Exception:
                         pass
@@ -1086,7 +1092,7 @@ class MarkAgent:
                     )
                     await memory_manager.save(
                         text=text,
-                        metadata={
+                        metadata=_with_session({
                             "type": "tool_call",
                             "tool": tool_name,
                             "success": success,
@@ -1094,7 +1100,7 @@ class MarkAgent:
                             "user_id": state.user_id,
                             "timestamp": int(__import__('time').time()),
                             "error": error_text,
-                        },
+                        }),
                     )
                 except Exception:
                     pass
@@ -1106,17 +1112,17 @@ class MarkAgent:
                 })
                 # Персист ошибки инструмента
                 try:
-                        await memory_manager.save(
-                            text=f"TOOL {tool_name}: EXCEPTION {str(e)[:400]}",
-                            metadata={
-                                "type": "tool_call",
-                                "tool": tool_name,
-                                "success": False,
-                                "user_id": state.user_id,
-                                "timestamp": int(__import__('time').time()),
-                                "error": str(e)[:800],
-                            },
-                        )
+                    await memory_manager.save(
+                        text=f"TOOL {tool_name}: EXCEPTION {str(e)[:400]}",
+                        metadata=_with_session({
+                            "type": "tool_call",
+                            "tool": tool_name,
+                            "success": False,
+                            "user_id": state.user_id,
+                            "timestamp": int(__import__('time').time()),
+                            "error": str(e)[:800],
+                        }),
+                    )
                 except Exception:
                     pass
         
