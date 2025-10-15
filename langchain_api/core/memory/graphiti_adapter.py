@@ -2,6 +2,7 @@
 GraphitiMemoryAdapter - HTTP-клиент для работы с Graphiti Memory API
 """
 
+import inspect
 import json
 import logging
 import time
@@ -519,7 +520,15 @@ class GraphitiMemoryAdapter:
             await self.client.aclose()
             self.client = None
         if self._retry_client:
-            await self._retry_client.close()
+            close_method = getattr(self._retry_client, "close", None)
+            if callable(close_method):
+                result = close_method()
+                if inspect.isawaitable(result):
+                    await result
+            else:
+                client = getattr(self._retry_client, "client", None)
+                if client:
+                    await client.aclose()
             self._retry_client = None
         logger.info("🔒 GraphitiMemoryAdapter закрыт")
 

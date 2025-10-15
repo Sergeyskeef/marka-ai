@@ -174,6 +174,38 @@ class TestRetryLogic:
         )
         assert result == {"success": True, "id": "node-1"}
 
+    @pytest.mark.asyncio
+    async def test_graphiti_adapter_close_is_idempotent(self):
+        """Убеждаемся, что закрытие адаптера работает повторно и освобождает клиента."""
+        from core.memory.graphiti_adapter import GraphitiMemoryAdapter
+
+        adapter = GraphitiMemoryAdapter()
+        adapter_http_client = AsyncMock()
+        adapter_http_client.aclose = AsyncMock()
+        adapter.client = adapter_http_client
+
+        with patch('core.error_middleware.httpx.AsyncClient') as MockAsyncClient:
+            retry_http_client = AsyncMock()
+            retry_http_client.aclose = AsyncMock()
+            MockAsyncClient.return_value = retry_http_client
+
+            retry_client = await adapter._get_retry_client()
+            await retry_client._ensure_client()
+
+            await adapter.close()
+
+            adapter_http_client.aclose.assert_awaited_once()
+            retry_http_client.aclose.assert_awaited_once()
+            assert retry_client.client is None
+            assert adapter.client is None
+            assert adapter._retry_client is None
+
+            # Повторное закрытие не должно вызывать ошибок или повторных вызовов aclose
+            await adapter.close()
+
+            adapter_http_client.aclose.assert_awaited_once()
+            retry_http_client.aclose.assert_awaited_once()
+
 
 if __name__ == "__main__":
     print("🧪 Запуск тестов улучшений памяти...")

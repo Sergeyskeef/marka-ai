@@ -194,7 +194,13 @@ class RetryableHTTPClient:
         if self.client:
             await self.client.aclose()
             self.client = None
-    
+
+    async def close(self):
+        """Закрывает и сбрасывает внутренний httpx.AsyncClient."""
+        if self.client:
+            await self.client.aclose()
+            self.client = None
+
     @retry_on_failure()
     async def get(self, url: str, **kwargs):
         """GET запрос с retry"""
