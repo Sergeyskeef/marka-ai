@@ -22,6 +22,7 @@ from .dependency_tools import DEPENDENCY_TOOLS
 from .change_tracker_tools import CHANGE_TRACKER_TOOLS
 from core.memory.memory_manager import memory_manager
 from core.memory.graphiti_adapter import graphiti_adapter
+from app.utils.fallback_queue import enqueue_payload
 from ..prompts import PromptSystemFactory
 from redis.asyncio import Redis
 import asyncio
@@ -283,32 +284,53 @@ async def enhanced_chat(
             response.setdefault("metadata", {})
             response["metadata"]["fallback_used"] = True
 
+        response.setdefault("metadata", {})
+        response["metadata"].setdefault("graphiti_fallback", False)
+
+        user_message_payload = {
+            "session_id": session_key,
+            "role": "user",
+            "text": question,
+            "metadata": {"user_id": user_id, "mode": mode, "session_id": session_key},
+        }
+        assistant_message_payload = {
+            "session_id": session_key,
+            "role": "assistant",
+            "text": response.get("content", ""),
+            "metadata": {
+                "user_id": user_id,
+                "mode": mode,
+                "has_tools": bool(response.get("tool_calls")),
+                "session_id": session_key,
+            },
+        }
+
+        fallback_payload = {
+            "session_id": session_key,
+            "user_id": user_id,
+            "mode": mode,
+            "messages": [dict(user_message_payload), dict(assistant_message_payload)],
+            "metadata": {
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        }
+
         # Персист сессии и сообщений в Graphiti
         try:
             await graphiti_adapter.create_session(session_id=session_key, user_id=user_id)
-            await graphiti_adapter.create_message(
-                session_id=session_key,
-                role="user",
-                text=question,
-                metadata={"user_id": user_id, "mode": mode, "session_id": session_key}
-            )
-            await graphiti_adapter.create_message(
-                session_id=session_key,
-                role="assistant",
-                text=response.get("content", ""),
-                metadata={
-                    "user_id": user_id,
-                    "mode": mode,
-                    "has_tools": bool(response.get("tool_calls")),
-                    "session_id": session_key,
-                }
-            )
+            await graphiti_adapter.create_message(**user_message_payload)
+            await graphiti_adapter.create_message(**assistant_message_payload)
         except Exception as e:
             logger.warning(f"⚠️ Не удалось сохранить чат-сообщения в Graphiti: {e}")
+            response["metadata"]["graphiti_fallback"] = True
+            enqueue_success = await enqueue_payload({**fallback_payload, "error": str(e)})
+            if enqueue_success:
+                response["metadata"]["graphiti_fallback_reason"] = str(e)
+            else:
+                response["metadata"]["graphiti_fallback_reason"] = f"queue_unavailable: {e}"
         t3 = time.time()
 
         # Добавляем дополнительные метаданные
-        response.setdefault("metadata", {})
         response["metadata"].update({
             "mode": mode,
             "context_used": len(context) > 0,
