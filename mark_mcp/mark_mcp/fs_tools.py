@@ -1,8 +1,12 @@
+"""Filesystem helper functions exposed via the MCP tools layer."""
+
+from __future__ import annotations
+
 import asyncio
 import fnmatch
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 from fastapi import HTTPException
 
@@ -10,86 +14,126 @@ from .config import settings
 from .repo_tools import ensure_prechange_snapshot
 
 
-_ALLOW: List[Path] = [Path(p).resolve() for p in settings.allow_paths if p]
-_PENDING_WRITES: dict[str, Tuple[Path, bytes]] = {}
+_ALLOW: Tuple[Path, ...] = tuple(Path(p).resolve() for p in settings.allow_paths)
+_PENDING_WRITES: Dict[str, Tuple[Path, bytes]] = {}
 
 
 def _is_allowed(path: Path) -> bool:
-	try:
-		res = path.resolve()
-		for base in _ALLOW:
-			if res.is_relative_to(base):  # py311
-				return True
-		return False
-	except Exception:
-		return False
+    """Check if the requested path is within one of the allow-listed roots."""
+
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    return any(resolved.is_relative_to(base) for base in _ALLOW)
 
 
-async def fs_glob(pattern: str, root: str | None = None) -> list[str]:
-	bases: List[Path] = []
-	if root:
-		root_path = Path(root)
-		if not _is_allowed(root_path):
-			raise HTTPException(status_code=403, detail="Root not allowed")
-		bases = [root_path]
-	else:
-		bases = list(_ALLOW)
+async def _walk_glob(bases: Iterable[Path], pattern: str, limit: int) -> List[str]:
+    """Collect glob matches in a background thread to avoid blocking the loop."""
 
-	items: list[str] = []
-	for base in bases:
-		for r, dnames, fnames in os.walk(base):
-			for name in fnames + dnames:
-				full = os.path.join(r, name)
-				# Match against relative to base and full path
-				rel = os.path.relpath(full, base)
-				if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(full, pattern):
-					items.append(full)
-					if len(items) >= settings.max_glob_items:
-						return items
-	return items
+    def _collect() -> List[str]:
+        matches: List[str] = []
+        for base in bases:
+            if not base.exists():
+                continue
+            for root, dnames, fnames in os.walk(base):
+                for name in [*dnames, *fnames]:
+                    full = Path(root) / name
+                    rel = full.relative_to(base)
+                    if fnmatch.fnmatch(rel.as_posix(), pattern) or fnmatch.fnmatch(
+                        full.as_posix(), pattern
+                    ):
+                        matches.append(str(full))
+                        if len(matches) >= limit:
+                            return matches
+        return matches
+
+    return await asyncio.to_thread(_collect)
+
+
+async def fs_glob(pattern: str, root: str | None = None) -> List[str]:
+    """Return files matching ``pattern`` respecting the allow-list."""
+
+    if root is not None:
+        root_path = Path(root)
+        if not _is_allowed(root_path):
+            raise HTTPException(status_code=403, detail="Root not allowed")
+        bases: Tuple[Path, ...] = (root_path.resolve(),)
+    else:
+        bases = _ALLOW
+
+    return await _walk_glob(bases, pattern, settings.max_glob_items)
 
 
 async def fs_read(path: str, max_bytes: int | None = None) -> str:
-	p = Path(path)
-	if not _is_allowed(p):
-		raise HTTPException(status_code=403, detail="Path not allowed")
-	if not p.exists() or not p.is_file():
-		raise HTTPException(status_code=404, detail="File not found")
-	limit = max_bytes or settings.max_read_bytes
-	data = await asyncio.to_thread(p.read_bytes)
-	return data[:limit].decode("utf-8", errors="replace")
+    """Read a file from the allow-list with an optional size limit."""
+
+    file_path = Path(path)
+    if not _is_allowed(file_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    limit = max_bytes or settings.max_read_bytes
+
+    def _read() -> str:
+        data = file_path.read_bytes()[:limit]
+        return data.decode("utf-8", errors="replace")
+
+    return await asyncio.to_thread(_read)
 
 
 async def security_request_write(path: str, content: str) -> dict:
-	p = Path(path)
-	if not _is_allowed(p):
-		raise HTTPException(status_code=403, detail="Path not allowed")
-	request_id = os.urandom(8).hex()
-	_PENDING_WRITES[request_id] = (p, content.encode("utf-8"))
-	return {"request_id": request_id, "dry_run": True, "path": str(p)}
+    """Request approval for a write operation (two-step write flow)."""
+
+    target = Path(path)
+    if not _is_allowed(target):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    request_id = os.urandom(8).hex()
+    _PENDING_WRITES[request_id] = (target, content.encode("utf-8"))
+    preview = content[:200]
+    return {
+        "request_id": request_id,
+        "dry_run": True,
+        "path": str(target),
+        "preview": preview,
+    }
 
 
 async def confirm_write(request_id: str, allow: bool) -> dict:
-	item = _PENDING_WRITES.pop(request_id, None)
-	if not item:
-		raise HTTPException(status_code=404, detail="Pending request not found")
-	p, data = item
-	if not allow:
-		return {"request_id": request_id, "applied": False}
-	p.parent.mkdir(parents=True, exist_ok=True)
-	await asyncio.to_thread(p.write_bytes, data)
-	return {"request_id": request_id, "applied": True, "path": str(p)}
+    """Apply or discard a pending write request."""
+
+    item = _PENDING_WRITES.pop(request_id, None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Pending request not found")
+
+    target, data = item
+    if not allow:
+        return {"request_id": request_id, "applied": False}
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(target.write_bytes, data)
+    return {"request_id": request_id, "applied": True, "path": str(target)}
 
 
 async def fs_write(path: str, content: str, mode: str = "w") -> dict:
-	p = Path(path)
-	if not _is_allowed(p):
-		raise HTTPException(status_code=403, detail="Path not allowed")
-	await ensure_prechange_snapshot()
-	p.parent.mkdir(parents=True, exist_ok=True)
-	if "b" in mode:
-		data = content.encode("utf-8")
-		await asyncio.to_thread(p.write_bytes, data)
-	else:
-		await asyncio.to_thread(p.write_text, content, "utf-8")
-	return {"path": str(p), "bytes": len(content.encode("utf-8")), "mode": mode}
+    """Write a file after taking a pre-change snapshot."""
+
+    target = Path(path)
+    if not _is_allowed(target):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    await ensure_prechange_snapshot()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _write_text() -> None:
+        target.write_text(content, encoding="utf-8")
+
+    data = content.encode("utf-8")
+    if "b" in mode:
+        await asyncio.to_thread(target.write_bytes, data)
+    else:
+        await asyncio.to_thread(_write_text)
+
+    return {"path": str(target), "bytes": len(data), "mode": mode}

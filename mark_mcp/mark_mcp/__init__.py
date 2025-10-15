@@ -1,5 +1,5 @@
-__all__ = [
-	"create_app",
-]
+"""Public package exports for the MCP server."""
 
-from .mcp_server import mcp  # re-export for convenience
+from .mcp_server import mcp
+
+__all__ = ["mcp"]
