@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Tuple
+from typing import List, Tuple
 
 from pydantic import BaseModel, Field
 
 
 def _split_env(name: str, default: str) -> Tuple[str, ...]:
-    """Split a comma separated environment variable into a tuple of paths."""
+    """Split comma separated environment variables while ignoring empties."""
 
     raw = os.getenv(name, default)
     parts = [chunk.strip() for chunk in raw.split(",") if chunk.strip()]
@@ -53,6 +53,28 @@ class Settings(BaseModel):
     )
     oauth_issuer: str | None = Field(default_factory=lambda: os.getenv("OAUTH_ISSUER"))
     oauth_resource: str | None = Field(default_factory=lambda: os.getenv("OAUTH_RESOURCE"))
+
+    # Optional write approval workflow knobs
+    require_write_approval: bool = Field(
+        default_factory=lambda: os.getenv("MCP_REQUIRE_WRITE_APPROVAL", "true").lower()
+        == "true"
+    )
+    write_preview_bytes: int = Field(
+        default_factory=lambda: int(os.getenv("MCP_WRITE_PREVIEW_BYTES", "200"))
+    )
+
+    # Optional audit / oidc integration values for backwards compatibility
+    audit_log_file: str = Field(
+        default_factory=lambda: os.getenv("MCP_AUDIT_LOG_FILE", "/var/log/mark/mcp-audit.log")
+    )
+    oidc_client_id: str = Field(default_factory=lambda: os.getenv("OIDC_CLIENT_ID", "mark-mcp"))
+    oidc_client_secret: str | None = Field(default_factory=lambda: os.getenv("OIDC_CLIENT_SECRET"))
+    oidc_redirect_uri: str | None = Field(default_factory=lambda: os.getenv("OIDC_REDIRECT_URI"))
+
+    def allow_path_list(self) -> List[str]:
+        """Return allow-list as a list for legacy callers expecting mutability."""
+
+        return list(self.allow_paths)
 
 
 @lru_cache(1)

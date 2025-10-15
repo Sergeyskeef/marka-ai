@@ -25,7 +25,14 @@ def _is_allowed(path: Path) -> bool:
         resolved = path.resolve()
     except Exception:
         return False
-    return any(resolved.is_relative_to(base) for base in _ALLOW)
+
+    for base in _ALLOW:
+        try:
+            resolved.relative_to(base)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 async def _walk_glob(bases: Iterable[Path], pattern: str, limit: int) -> List[str]:
@@ -39,7 +46,10 @@ async def _walk_glob(bases: Iterable[Path], pattern: str, limit: int) -> List[st
             for root, dnames, fnames in os.walk(base):
                 for name in [*dnames, *fnames]:
                     full = Path(root) / name
-                    rel = full.relative_to(base)
+                    try:
+                        rel = full.relative_to(base)
+                    except ValueError:
+                        rel = full
                     if fnmatch.fnmatch(rel.as_posix(), pattern) or fnmatch.fnmatch(
                         full.as_posix(), pattern
                     ):
@@ -90,14 +100,26 @@ async def security_request_write(path: str, content: str) -> dict:
     if not _is_allowed(target):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
+    data = content.encode("utf-8")
+    if not settings.require_write_approval:
+        result = await fs_write(path, content)
+        return {
+            "request_id": None,
+            "dry_run": False,
+            "path": str(target),
+            "auto_applied": True,
+            "result": result,
+        }
+
     request_id = os.urandom(8).hex()
-    _PENDING_WRITES[request_id] = (target, content.encode("utf-8"))
-    preview = content[:200]
+    _PENDING_WRITES[request_id] = (target, data)
+    preview = content[: settings.write_preview_bytes]
     return {
         "request_id": request_id,
         "dry_run": True,
         "path": str(target),
         "preview": preview,
+        "bytes": len(data),
     }
 
 
@@ -112,6 +134,7 @@ async def confirm_write(request_id: str, allow: bool) -> dict:
     if not allow:
         return {"request_id": request_id, "applied": False}
 
+    await ensure_prechange_snapshot()
     target.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(target.write_bytes, data)
     return {"request_id": request_id, "applied": True, "path": str(target)}

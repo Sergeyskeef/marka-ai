@@ -12,11 +12,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from .config import settings
 
-OIDC_ISSUER = os.getenv("OIDC_ISSUER", "https://auth.markmind.ru/realms/marka")
-CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "mark-mcp")
-CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
-REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "https://mcp.markmind.ru/mcp/callback")
+
+OIDC_ISSUER = os.getenv("OIDC_ISSUER", settings.oauth_issuer or "https://auth.markmind.ru/realms/marka")
+CLIENT_ID = settings.oidc_client_id
+CLIENT_SECRET = settings.oidc_client_secret or ""
+REDIRECT_URI = settings.oidc_redirect_uri or "https://mcp.markmind.ru/mcp/callback"
 
 AUTH_URL = f"{OIDC_ISSUER}/protocol/openid-connect/auth"
 TOKEN_URL = f"{OIDC_ISSUER}/protocol/openid-connect/token"

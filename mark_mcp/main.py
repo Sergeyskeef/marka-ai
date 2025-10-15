@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from mark_mcp.agent_tools import agent_run_task
 from mark_mcp.config import settings
 from mark_mcp.docker_tools import compose_cmd, compose_logs, container_exec, tests_run
-from mark_mcp.fs_tools import fs_glob, fs_read, fs_write
+from mark_mcp.fs_tools import confirm_write, fs_glob, fs_read, fs_write, security_request_write
 from mark_mcp.logging_config import setup_logging
 from mark_mcp.mcp_server import mcp
 from mark_mcp.memory_tools import memory_search, memory_upsert
@@ -105,6 +105,27 @@ async def tool_fs_write(payload: Dict[str, Any], request: Request) -> Dict[str, 
         payload.get("content", ""),
         payload.get("mode", "w"),
     )
+
+
+@tools_router.post("/security_request_write")
+async def tool_security_request_write(
+    payload: Dict[str, Any], request: Request
+) -> Dict[str, Any]:
+    require_scope_write(request)
+    path = payload.get("path")
+    if not path:
+        raise HTTPException(status_code=422, detail="path is required")
+    return await security_request_write(path, payload.get("content", ""))
+
+
+@tools_router.post("/confirm_write")
+async def tool_confirm_write(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
+    require_scope_write(request)
+    request_id = payload.get("request_id")
+    if not request_id:
+        raise HTTPException(status_code=422, detail="request_id is required")
+    allow = bool(payload.get("allow", False))
+    return await confirm_write(request_id, allow)
 
 
 @tools_router.post("/repo_snapshot")

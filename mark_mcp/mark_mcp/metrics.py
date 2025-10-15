@@ -6,9 +6,12 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from .config import settings
+
+
 class MetricsCollector:
     def __init__(self, audit_file: Optional[str] = None):
-        self.audit_file = audit_file or "/var/log/mark/mcp-audit.log"
+        self.audit_file = audit_file or settings.audit_log_file
         self.audit_dir = Path(self.audit_file).parent
         self.audit_dir.mkdir(parents=True, exist_ok=True)
     
