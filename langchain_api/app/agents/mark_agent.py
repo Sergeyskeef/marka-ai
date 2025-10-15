@@ -2,10 +2,12 @@
 Mark Agent - основной агент на базе OpenAI SDK
 """
 
+import copy
 import json
 import re
 import inspect
 import logging
+from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 import asyncio
@@ -26,6 +28,27 @@ from app.agents.fractal.reap import detect_incident, mine_skill
 from core.memory.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RequestState:
+    """Состояние одного запроса к агенту."""
+
+    user_id: Optional[str]
+    llm_calls: int = 0
+    llm_limit: int = 0
+    tool_calls: int = 0
+    tool_limit: int = 0
+    rounds: int = 0
+    progress_checkpoint_calls: int = 0
+    budget_checkpoint_tool_calls: int = 0
+    progress_snapshots: List[Dict[str, Any]] = field(default_factory=list)
+    progress: Dict[str, Any] = field(default_factory=dict)
+    debug_trace: Dict[str, Any] = field(default_factory=dict)
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Создать копию состояния для отладки."""
+        return asdict(self)
 
 
 class MarkAgent:
@@ -99,8 +122,33 @@ class MarkAgent:
         self.total_tokens_used = 0
         # Последняя подробная трассировка диалога для отладки
         self._last_debug: Dict[str, Any] = {}
-        
+
         logger.info(f"✅ MarkAgent инициализирован с моделью {model}")
+
+    def _update_debug_snapshot(self, state: RequestState):
+        """Обновить последний снимок отладочной информации."""
+        try:
+            debug_copy = copy.deepcopy(state.debug_trace) if state.debug_trace else {}
+            debug_copy["state"] = {
+                "user_id": state.user_id,
+                "llm_calls": state.llm_calls,
+                "llm_limit": state.llm_limit,
+                "tool_calls": state.tool_calls,
+                "tool_limit": state.tool_limit,
+                "rounds": state.rounds,
+                "progress": copy.deepcopy(state.progress),
+                "progress_snapshots": copy.deepcopy(state.progress_snapshots),
+            }
+            self._last_debug = debug_copy
+        except Exception:
+            self._last_debug = {
+                "state": {
+                    "user_id": state.user_id,
+                    "llm_calls": state.llm_calls,
+                    "tool_calls": state.tool_calls,
+                    "rounds": state.rounds,
+                }
+            }
 
     async def _get_redis(self) -> Optional[Redis]:
         """Лениво инициализировать Redis для хранения истории диалогов."""
@@ -219,20 +267,26 @@ class MarkAgent:
         try:
             # Инициализация лимитов и счётчиков для текущего запроса
             t_func_start = __import__('time').time()
-            self._current_request_llm_calls: int = 0
-            self._current_request_llm_limit: int = int(
+            llm_limit = int(
                 (override_llm_calls_limit if override_llm_calls_limit is not None else getattr(settings, "LLM_CALLS_PER_REQUEST_LIMIT", 10)) or 10
             )
-            self._current_request_tool_calls: int = 0
-            self._current_request_tool_limit: int = int(
+            tool_limit = int(
                 (override_tool_calls_limit if override_tool_calls_limit is not None else getattr(settings, "TOOL_CALLS_PER_REQUEST_LIMIT", 6)) or 6
             )
-            self._current_request_rounds: int = 0
-            self._progress_checkpoint_calls: int = int(getattr(settings, "PROGRESS_CHECKPOINT_CALLS", 2) or 2)
-            self._budget_checkpoint_tool_calls: int = int(getattr(settings, "BUDGET_CHECKPOINT_TOOL_CALLS", 2) or 2)
-            self._progress_snapshots: list[dict[str, Any]] = []
-            # Запоминаем текущего пользователя для контекста инструментов
-            self._current_user_id = user_id
+            progress_checkpoint_calls = int(getattr(settings, "PROGRESS_CHECKPOINT_CALLS", 2) or 2)
+            budget_checkpoint_tool_calls = int(getattr(settings, "BUDGET_CHECKPOINT_TOOL_CALLS", 2) or 2)
+            state = RequestState(
+                user_id=user_id,
+                llm_calls=0,
+                llm_limit=llm_limit,
+                tool_calls=0,
+                tool_limit=tool_limit,
+                rounds=0,
+                progress_checkpoint_calls=progress_checkpoint_calls,
+                budget_checkpoint_tool_calls=budget_checkpoint_tool_calls,
+            )
+            state.progress.setdefault("started_at", datetime.now().isoformat())
+            state.progress.setdefault("checkpoint_count", 0)
             # Подготавливаем сообщения
             t_build_start = __import__('time').time()
             if self.use_dynamic_prompts:
@@ -250,6 +304,8 @@ class MarkAgent:
                         "prepare_history_ms": debug_hist_ms,
                     }
                 }
+                state.debug_trace = debug_trace
+                self._update_debug_snapshot(state)
             else:
                 messages = []
                 messages.append({"role": "system", "content": self.system_prompt})
@@ -285,7 +341,7 @@ class MarkAgent:
             if use_tools and self.tools:
                 planning_hint = (
                     "Сначала краткий план действий без вызова инструментов: шаги, критерий результата, бюджет инструментов."
-                    f" Допустимый бюджет инструментов за запрос: {self._current_request_tool_limit}."
+                    f" Допустимый бюджет инструментов за запрос: {state.tool_limit}."
                     " Затем, если необходимо, переходи к инструментам."
                     " Если бюджет инструментов исчерпан или близок к исчерпанию — дай финальный краткий ответ,"
                     " зафиксируй прогресс и остановись. Избегай холостых повторов и пустых вызовов инструментов."
@@ -344,34 +400,35 @@ class MarkAgent:
                 }
             }
             # Сохраняем отладочную информацию ДО вызова LLM, чтобы видеть контекст даже при таймауте
-            self._last_debug = debug_trace
+            state.debug_trace = debug_trace
+            self._update_debug_snapshot(state)
             
             # Вызываем OpenAI API
             logger.info(f"🤖 Отправка запроса к {self.model}")
             t_llm_start = __import__('time').time()
             try:
-                response = await self._create_with_limit(**api_params)
+                response = await self._create_with_limit(state, **api_params)
             except Exception as e:
                 err_text = str(e).lower()
                 # Авто-ретраи для несовместимых параметров
                 if "temperature" in err_text and ("unsupported" in err_text or "unsupported_value" in err_text):
                     logger.warning("🔁 Повтор запроса без temperature из-за ограничений модели")
                     api_params.pop("temperature", None)
-                    response = await self._create_with_limit(**api_params)
+                    response = await self._create_with_limit(state, **api_params)
                 elif "max_tokens" in err_text and ("unsupported" in err_text or "unsupported_parameter" in err_text):
                     # Переключаемся на max_completion_tokens
                     val = api_params.pop("max_tokens", None)
                     if val is not None:
                         api_params["max_completion_tokens"] = val
                     logger.warning("🔁 Повтор запроса с max_completion_tokens вместо max_tokens")
-                    response = await self._create_with_limit(**api_params)
+                    response = await self._create_with_limit(state, **api_params)
                 elif "max_completion_tokens" in err_text and ("unsupported" in err_text or "unsupported_parameter" in err_text):
                     # Переключаемся обратно на max_tokens
                     val = api_params.pop("max_completion_tokens", None)
                     if val is not None:
                         api_params["max_tokens"] = val
                     logger.warning("🔁 Повтор запроса с max_tokens вместо max_completion_tokens")
-                    response = await self._create_with_limit(**api_params)
+                    response = await self._create_with_limit(state, **api_params)
                 elif ("rate limit" in err_text) or ("rate_limit" in err_text) or ("too many requests" in err_text) or (" 429" in err_text):
                     # Мягкая обработка 429/TPM: подождём указанное время и повторим один раз
                     try:
@@ -392,27 +449,28 @@ class MarkAgent:
                                 debug_trace["timings"] = dt
                         except Exception:
                             pass
-                        response = await self._create_with_limit(**api_params)
+                        response = await self._create_with_limit(state, **api_params)
                     except Exception as er:
                         if isinstance(er, RuntimeError) and "llm_limit_reached" in str(er):
-                            report = self._build_limit_report(rounds=0, t_start=t_llm_start, prompt_sizes={})
+                            report = self._build_limit_report(state, rounds=0, t_start=t_llm_start, prompt_sizes={})
                             return report
                         raise
                 else:
                     if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
                         # Формируем отчёт о достигнутом лимите
-                        report = self._build_limit_report(rounds=0, t_start=t_llm_start, prompt_sizes={})
+                        report = self._build_limit_report(state, rounds=0, t_start=t_llm_start, prompt_sizes={})
                         return report
                     raise
             t_llm_end = __import__('time').time()
             
             # Обрабатываем ответ
-            result = await self._process_response(response, messages)
+            result = await self._process_response(response, messages, state)
             # Сохраняем ранний прогресс в память (внутренний чекпоинт)
             try:
-                if self._current_request_llm_calls >= self._progress_checkpoint_calls:
-                    snapshot = self._build_progress_checkpoint(rounds=1, t_start=t_llm_start, prompt_sizes=prompt_sizes)
-                    self._progress_snapshots.append(snapshot)
+                if state.llm_calls >= state.progress_checkpoint_calls:
+                    snapshot = self._build_progress_checkpoint(state, rounds=1, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                    state.progress_snapshots.append(snapshot)
+                    state.progress["checkpoint_count"] = len(state.progress_snapshots)
                     # Персист краткого прогресса в память
                     summary = snapshot.get("content", "")
                     if summary:
@@ -431,26 +489,27 @@ class MarkAgent:
             # но ограничиваемся MAX_CONCURRENT_TOOLS*2 раундами для безопасности
             max_rounds = max(3, int(getattr(settings, "MAX_CONCURRENT_TOOLS", 5)) * 2)
             rounds = 1
+            state.rounds = rounds
             while use_tools and self.tools and (result.get("tool_calls") or []) and rounds < max_rounds:
                 rounds += 1
-                self._current_request_rounds = rounds
+                state.rounds = rounds
                 # После каждого исполнения инструментов модель уже запрашивала финальный текст.
                 # Если финальный текст пустой и снова есть намерение вызвать инструменты — позволим ещё один цикл
                 last_messages = list(messages)
                 # Принудительно просим модель продолжить решение до завершения или запроса подтверждения
                 # Инъекция состояния бюджета инструментов
-                budget_left = max(0, self._current_request_tool_limit - self._current_request_tool_calls)
+                budget_left = max(0, state.tool_limit - state.tool_calls)
                 budget_hint = (
-                    f"Бюджет инструментов на этот запрос: всего {self._current_request_tool_limit}, осталось {budget_left}. "
+                    f"Бюджет инструментов на этот запрос: всего {state.tool_limit}, осталось {budget_left}. "
                     "Вызывай инструменты только если нужно для следующего проверяемого шага."
                 )
                 last_messages.append({"role": "system", "content": budget_hint})
                 api_loop = {"model": self.model, "messages": last_messages, "tools": self.tools, "tool_choice": "auto"}
                 try:
-                    response = await self._create_with_limit(**api_loop)
+                    response = await self._create_with_limit(state, **api_loop)
                 except Exception as e:
                     if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
-                        report = self._build_limit_report(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                        report = self._build_limit_report(state, rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
                         return report
                     # Обработка 429/TPM и здесь
                     err_text = str(e).lower()
@@ -464,10 +523,10 @@ class MarkAgent:
                             wait_s = 10.0
                         logger.warning(f"⏳ Rate limit in tools loop, sleep {wait_s:.2f}s and retry")
                         await asyncio.sleep(wait_s)
-                        response = await self._create_with_limit(**api_loop)
+                        response = await self._create_with_limit(state, **api_loop)
                     else:
                         raise
-                result = await self._process_response(response, last_messages)
+                result = await self._process_response(response, last_messages, state)
                 # Логируем прогресс циклов
                 try:
                     loop_ms = int((__import__('time').time() - t_llm_start) * 1000)
@@ -476,10 +535,11 @@ class MarkAgent:
                     pass
                 # Чекпоинт бюджета инструментов с персистом
                 try:
-                    if self._current_request_tool_calls % max(1, self._budget_checkpoint_tool_calls) == 0:
+                    if state.tool_calls % max(1, state.budget_checkpoint_tool_calls) == 0 and state.tool_calls != 0:
                         budget_snapshot = (
-                            f"Бюджет инструментов: использовано {self._current_request_tool_calls} из {self._current_request_tool_limit}."
+                            f"Бюджет инструментов: использовано {state.tool_calls} из {state.tool_limit}."
                         )
+                        state.progress["last_budget_snapshot"] = budget_snapshot
                         await memory_manager.save(
                             text=budget_snapshot,
                             metadata={
@@ -530,6 +590,8 @@ class MarkAgent:
                     "llm_call_ms": int((t_llm_end - t_llm_start) * 1000)
                 }
             })
+            state.debug_trace = debug_trace
+            self._update_debug_snapshot(state)
             
             # Если контент пустой, делаем один принудительный повтор без инструментов
             if not (result.get("content") or "").strip():
@@ -548,21 +610,22 @@ class MarkAgent:
                     if self.tools:
                         retry_kwargs["tools"] = self.tools
                         retry_kwargs["tool_choice"] = "none"
-                    response_retry = await self._create_with_limit(**retry_kwargs)
-                    result = await self._process_response(response_retry, messages_retry)
+                    response_retry = await self._create_with_limit(state, **retry_kwargs)
+                    result = await self._process_response(response_retry, messages_retry, state)
                 except Exception as e:
                     if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
-                        report = self._build_limit_report(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                        report = self._build_limit_report(state, rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
                         return report
                     logger.warning(f"Повтор без инструментов не удался: {e}")
 
             # Ранний чекпоинт прогресса: если инструментов не было и количество вызовов достигло порога
             try:
-                if self._current_request_tool_calls == 0 and self._current_request_llm_calls >= self._progress_checkpoint_calls:
-                    early = self._build_progress_checkpoint(rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
+                if state.tool_calls == 0 and state.llm_calls >= state.progress_checkpoint_calls:
+                    early = self._build_progress_checkpoint(state, rounds=rounds, t_start=t_llm_start, prompt_sizes=prompt_sizes)
                     # Вставляем краткий отчёт в начало ответа
                     result["content"] = (early["content"] + "\n\n" + (result.get("content") or "")).strip()
                     result.setdefault("metadata", {}).update({"progress_checkpoint": True})
+                    state.progress.setdefault("early_checkpoint", True)
                     # Персистим отчёт
                     try:
                         await memory_manager.save(
@@ -597,16 +660,16 @@ class MarkAgent:
                     "agent_total_ms": int((t_total_end - t_func_start) * 1000),
                     **({"tools_phase_ms": tools_phase_ms} if tools_phase_ms is not None else {}),
                 },
-                "rounds": getattr(self, "_current_request_rounds", None),
-                "tool_calls_count": getattr(self, "_current_request_tool_calls", 0),
-                "llm_calls": getattr(self, "_current_request_llm_calls", 0),
+                "rounds": state.rounds,
+                "tool_calls_count": state.tool_calls,
+                "llm_calls": state.llm_calls,
                 "selected_prompt": getattr(self, "_last_prompt_name", None),
                 "router_context": getattr(self, "_last_router_context", None),
             }
             # Встраиваем собранные чекпоинты в метаданные
-            if getattr(self, "_progress_snapshots", None):
+            if state.progress_snapshots:
                 try:
-                    result["metadata"]["progress_snapshots"] = [s.get("content") for s in self._progress_snapshots][:3]
+                    result["metadata"]["progress_snapshots"] = [s.get("content") for s in state.progress_snapshots][:3]
                 except Exception:
                     pass
             # REAP: Reflect/Extract/Apply/Persist — минимальная встройка
@@ -659,20 +722,27 @@ class MarkAgent:
                 "chat_id": chat_id,
                 "timestamp": datetime.now().isoformat(),
             })
-            self._last_debug = debug_trace
-            
+            state.debug_trace = debug_trace
+            self._update_debug_snapshot(state)
+
             return result
-            
+
         except Exception as e:
             # Специальная обработка лимита, чтобы вернуть краткий отчёт вместо сырой ошибки
             try:
                 if isinstance(e, RuntimeError) and "llm_limit_reached" in str(e):
                     report = self._build_limit_report(
-                        rounds=getattr(self, "_current_request_rounds", 0),
+                        state,
+                        rounds=state.rounds,
                         t_start=locals().get("t_llm_start", None),
                         prompt_sizes=locals().get("prompt_sizes", {})
                     )
                     return report
+            except Exception:
+                pass
+            try:
+                state.debug_trace.setdefault("error", str(e))
+                self._update_debug_snapshot(state)
             except Exception:
                 pass
             logger.error(f"❌ Ошибка в chat: {str(e)}")
@@ -727,27 +797,27 @@ class MarkAgent:
 
         return ""
 
-    async def _create_with_limit(self, **kwargs) -> ChatCompletion:
+    async def _create_with_limit(self, state: RequestState, **kwargs) -> ChatCompletion:
         """Обертка над client.chat.completions.create с лимитом вызовов за запрос."""
         try:
-            limit = getattr(self, "_current_request_llm_limit", None)
-            calls = getattr(self, "_current_request_llm_calls", 0)
+            limit = state.llm_limit
+            calls = state.llm_calls
             if limit is not None and calls >= int(limit):
                 raise RuntimeError("llm_limit_reached")
-            self._current_request_llm_calls = calls + 1
+            state.llm_calls = calls + 1
             return await self.client.chat.completions.create(**kwargs)
         except Exception:
             raise
 
-    def _build_limit_report(self, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_limit_report(self, state: RequestState, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
         """Сформировать краткий отчёт при достижении лимита LLM-вызовов."""
         try:
             elapsed_ms = int((__import__('time').time() - t_start) * 1000) if t_start else None
         except Exception:
             elapsed_ms = None
-        calls = getattr(self, "_current_request_llm_calls", 0)
-        limit = getattr(self, "_current_request_llm_limit", 0)
-        tools_used = getattr(self, "_current_request_tool_calls", 0)
+        calls = state.llm_calls
+        limit = state.llm_limit
+        tools_used = state.tool_calls
         content = (
             f"⏹ Достигнут лимит вызовов LLM: {calls} из {limit}.\n"
             f"Что сделано:\n- Раундов инструментов: {rounds}\n- Вызовы инструментов: {tools_used}\n"
@@ -766,31 +836,41 @@ class MarkAgent:
             }
         }
 
-    def _build_progress_checkpoint(self, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_progress_checkpoint(self, state: RequestState, rounds: int, t_start: float, prompt_sizes: Dict[str, Any]) -> Dict[str, Any]:
         """Короткий промежуточный отчёт о прогрессе, чтобы не ждать лимита."""
         try:
             elapsed_ms = int((__import__('time').time() - t_start) * 1000) if t_start else None
         except Exception:
             elapsed_ms = None
-        calls = getattr(self, "_current_request_llm_calls", 0)
-        tools_used = getattr(self, "_current_request_tool_calls", 0)
+        calls = state.llm_calls
+        tools_used = state.tool_calls
         content = (
             f"⏸ Промежуточный отчёт: LLM-вызовов {calls}, инструментов {tools_used}, раундов {rounds}."
             + (f" Время: ~{elapsed_ms} мс." if elapsed_ms is not None else "")
         )
-        return {"content": content, "tool_calls": [], "metadata": {"checkpoint": True, "llm_calls": calls, "tool_calls_count": tools_used, "prompt_sizes": prompt_sizes}}
+        return {
+            "content": content,
+            "tool_calls": [],
+            "metadata": {
+                "checkpoint": True,
+                "llm_calls": calls,
+                "tool_calls_count": tools_used,
+                "prompt_sizes": prompt_sizes,
+            },
+        }
     
     async def _process_response(
-        self, 
+        self,
         response: ChatCompletion,
-        messages: List[Dict[str, str]]
+        messages: List[Dict[str, str]],
+        state: RequestState,
     ) -> Dict[str, Any]:
         """Обработка ответа от OpenAI API"""
         message = response.choices[0].message
-        
+
         # Если есть вызовы инструментов
         if message.tool_calls:
-            tool_results = await self._execute_tools(message.tool_calls)
+            tool_results = await self._execute_tools(state, message.tool_calls)
             
             # Добавляем результаты инструментов в историю
             messages.append(message.model_dump())
@@ -809,7 +889,7 @@ class MarkAgent:
             if self.tools:
                 final_kwargs["tools"] = self.tools
                 final_kwargs["tool_choice"] = "none"
-            final_response = await self._create_with_limit(**final_kwargs)
+            final_response = await self._create_with_limit(state, **final_kwargs)
             
             final_message = final_response.choices[0].message
             # Защитный фолбэк: если контент пуст, вернем метаданные причины
@@ -844,7 +924,8 @@ class MarkAgent:
         self,
         tool_name: str,
         function: callable,
-        args: Optional[Dict[str, Any]]
+        args: Optional[Dict[str, Any]],
+        state: Optional[RequestState] = None,
     ) -> Dict[str, Any]:
         """Подготовить аргументы для вызова инструмента согласно его сигнатуре."""
         normalized_args: Dict[str, Any] = {}
@@ -867,7 +948,7 @@ class MarkAgent:
             metadata = normalized_args.get("metadata") or {}
             if not isinstance(metadata, dict):
                 metadata = {}
-            current_user = getattr(self, "_current_user_id", None)
+            current_user = state.user_id if state else None
             if current_user:
                 metadata.setdefault("owner_id", current_user)
                 metadata.setdefault("user_id", current_user)
@@ -879,7 +960,8 @@ class MarkAgent:
     async def call_tool(
         self,
         tool_name: str,
-        arguments: Optional[Union[str, Dict[str, Any]]] = None
+        arguments: Optional[Union[str, Dict[str, Any]]] = None,
+        state: Optional[RequestState] = None,
     ) -> Any:
         """Вызвать зарегистрированный инструмент напрямую."""
         if not isinstance(tool_name, str) or not tool_name.strip():
@@ -900,7 +982,7 @@ class MarkAgent:
             parsed_args = {}
 
         function = self.tool_functions[normalized_name]
-        filtered_args = self._prepare_tool_call_arguments(normalized_name, function, parsed_args)
+        filtered_args = self._prepare_tool_call_arguments(normalized_name, function, parsed_args, state)
 
         logger.info(f"🔧 Вызов инструмента: {normalized_name}")
         try:
@@ -910,10 +992,11 @@ class MarkAgent:
                 outcome = function(**filtered_args)
                 result = await outcome if inspect.iscoroutine(outcome) else outcome
 
-            try:
-                self._current_request_tool_calls = getattr(self, "_current_request_tool_calls", 0) + 1
-            except Exception:
-                pass
+            if state is not None:
+                try:
+                    state.tool_calls += 1
+                except Exception:
+                    pass
 
             return result
         except Exception as exc:
@@ -922,6 +1005,7 @@ class MarkAgent:
 
     async def _execute_tools(
         self,
+        state: RequestState,
         tool_calls: List[ChatCompletionMessageToolCallUnion]
     ) -> List[Any]:
         """Выполнение вызовов инструментов"""
@@ -938,7 +1022,7 @@ class MarkAgent:
                 continue
             # Проверяем бюджет инструментов
             try:
-                if self._current_request_tool_calls >= self._current_request_tool_limit:
+                if state.tool_calls >= state.tool_limit:
                     logger.warning("⏹ Достигнут лимит инструментов на запрос — пропускаю выполнение.")
                     results.append({"error": "tool_budget_exhausted"})
                     continue
@@ -965,7 +1049,7 @@ class MarkAgent:
                 function = self.tool_functions[tool_name]
 
                 # Корректно обрабатываем async/sync
-                filtered_args = self._prepare_tool_call_arguments(tool_name, function, args)
+                filtered_args = self._prepare_tool_call_arguments(tool_name, function, args, state)
                 t0 = __import__('time').time()
                 if inspect.iscoroutinefunction(function):
                     result = await function(**filtered_args)
@@ -976,10 +1060,10 @@ class MarkAgent:
                     else:
                         result = res
                 duration_ms = int((__import__('time').time() - t0) * 1000)
-                
-                self._current_request_tool_calls += 1
+
+                state.tool_calls += 1
                 results.append(result)
-                
+
                 # Логируем вызов инструмента в память (для прозрачности и обучения)
                 try:
                     # Определяем успех по отсутствию ключа error
@@ -1007,7 +1091,7 @@ class MarkAgent:
                             "tool": tool_name,
                             "success": success,
                             "duration_ms": duration_ms,
-                            "user_id": getattr(self, "_current_user_id", None),
+                            "user_id": state.user_id,
                             "timestamp": int(__import__('time').time()),
                             "error": error_text,
                         },
@@ -1022,17 +1106,17 @@ class MarkAgent:
                 })
                 # Персист ошибки инструмента
                 try:
-                    await memory_manager.save(
-                        text=f"TOOL {tool_name}: EXCEPTION {str(e)[:400]}",
-                        metadata={
-                            "type": "tool_call",
-                            "tool": tool_name,
-                            "success": False,
-                            "user_id": getattr(self, "_current_user_id", None),
-                            "timestamp": int(__import__('time').time()),
-                            "error": str(e)[:800],
-                        },
-                    )
+                        await memory_manager.save(
+                            text=f"TOOL {tool_name}: EXCEPTION {str(e)[:400]}",
+                            metadata={
+                                "type": "tool_call",
+                                "tool": tool_name,
+                                "success": False,
+                                "user_id": state.user_id,
+                                "timestamp": int(__import__('time').time()),
+                                "error": str(e)[:800],
+                            },
+                        )
                 except Exception:
                     pass
         
