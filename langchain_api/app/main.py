@@ -17,6 +17,7 @@ except Exception as _e:
 
 from app.api.chat import router as chat_router
 from app.api.prompts_api import register_prompts_api
+from app.utils.fallback_queue import fallback_worker_loop
 from core.monitoring import metrics, update_memory_usage
 from core.memory.graphiti_adapter import graphiti_adapter
 
@@ -83,14 +84,18 @@ except Exception:
 
 @app.on_event("startup")
 async def _start_metrics_bg_task():
-    async def _bg():
+    async def _metrics_bg():
         while True:
             try:
                 update_memory_usage()
             except Exception:
                 pass
             await asyncio.sleep(10)
-    asyncio.create_task(_bg())
+
+    asyncio.create_task(_metrics_bg())
+
+    if os.getenv("DISABLE_GRAPHITI_FALLBACK_WORKER", "0") != "1":
+        asyncio.create_task(fallback_worker_loop())
 
 @app.get("/health")
 async def health_check():
