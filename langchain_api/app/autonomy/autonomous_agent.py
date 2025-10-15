@@ -92,13 +92,15 @@ class AutonomousAgent:
             self.current_tasks = plan["tasks"]
             
             # Сохраняем план в память
-            await self.memory.save_skill(
-                trigger=f"project_plan_{datetime.now().isoformat()}",
-                response_template=str(plan),
+            await self.memory.save_project_plan(
+                plan_name=plan.get("project_name", "autonomous_plan"),
+                plan=plan,
+                project_description=project_description,
                 metadata={
                     "project": project_description,
-                    "task_count": len(plan["tasks"]),
-                    "estimated_hours": plan.get("estimated_hours", 0)
+                    "task_count": len(plan.get("tasks", [])),
+                    "estimated_hours": plan.get("estimated_hours", 0),
+                    "source": "autonomous_agent",
                 }
             )
             

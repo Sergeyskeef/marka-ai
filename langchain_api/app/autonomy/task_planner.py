@@ -206,15 +206,17 @@ class TaskPlanner:
     async def _save_plan_to_memory(self, plan: Dict[str, Any], project_description: str):
         """Сохранить план в память"""
         try:
-            await self.memory.save_skill(
-                trigger=f"project_plan_{plan.get('project_name', 'unknown')}",
-                response_template=json.dumps(plan, ensure_ascii=False),
+            await self.memory.save_project_plan(
+                plan_name=plan.get("project_name", "unknown"),
+                plan=plan,
+                project_description=project_description,
                 metadata={
                     "project_name": plan.get("project_name"),
                     "description": project_description,
                     "task_count": len(plan.get("tasks", [])),
                     "estimated_hours": plan.get("estimated_hours", 0),
-                    "created_at": plan.get("created_at")
+                    "created_at": plan.get("created_at"),
+                    "source": "task_planner",
                 }
             )
             logger.info(f"✅ План сохранен в память")
