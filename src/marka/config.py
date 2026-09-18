@@ -21,6 +21,7 @@ class Settings:
     task_max_calls: int = 64
     task_max_seconds: int = 900
     semantic_search: bool = True
+    timezone: str = "UTC"
 
     @property
     def workspace(self) -> Path:
@@ -69,6 +70,9 @@ class Settings:
         settings.codex_binary = os.environ.get("MARKA_CODEX_BIN", settings.codex_binary)
         settings.sandbox_socket = os.environ.get("MARKA_SANDBOX_SOCKET", settings.sandbox_socket)
         settings.model = os.environ.get("MARKA_MODEL", settings.model)
+        settings.timezone = os.environ.get("MARKA_TIMEZONE", settings.timezone)
+        from .scheduling import owner_timezone
+        owner_timezone(settings.timezone)
         if not 1 <= settings.max_steps <= 50 or not 1 <= settings.daily_calls <= 10000:
             raise ValueError("Invalid work budget")
         if not 10 <= settings.provider_timeout <= 900 or settings.retention_days < 0:

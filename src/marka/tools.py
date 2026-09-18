@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import sandbox, web
 from .redact import redact
+from .scheduling import clock_context, schedule_due
 
 
 class ToolInputError(ValueError):
@@ -40,7 +41,7 @@ CATALOG = {
     "task.list": '{}',
     "task.plan": '{"steps":[{"title":"step","status":"pending|running|completed|blocked","evidence":"source or artifact"}],"summary":"current progress"}; persist <=12 steps for the current task; completion still requires observed outcomes',
     "task.progress": '{"id":"optional current task id"}; durable plan, checks, artifacts and remaining budget',
-    "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; only when owner requested later/recurring work, 1–100 runs, minimum recurring interval 300 seconds',
+    "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; alternatively replace delay_seconds with due_at="2026-10-01T09:00:00+03:00"; exactly one time form, explicit offset for due_at; owner-requested only, 1–100 runs, minimum recurring interval 300 seconds',
     "consult": '{"question":"self-contained bounded subproblem including necessary evidence","role":"researcher|critic|engineer"}; separate read-only model consultation, no tools or delegated authority',
     "self.inspect": '{"path":"src/marka/module.py or tests/test_module.py; empty for index","start_line":1,"end_line":160}; read public source of this Mark installation',
     "self.experiment": '{"objective":"specific improvement","changes":{"src/marka/module.py":"complete updated code"},"regression_test":"optional unittest source, applied to baseline AND candidate"}; test <=3 changed modules in isolated copies, archive both results and export patch/report; never installs the candidate',
@@ -339,15 +340,33 @@ class Tools:
                 raise ValueError("Task is no longer active")
             return self.queue.progress(job["id"])
         if name == "task.schedule":
-            delay = int(args.get("delay_seconds", 0))
-            if not 1 <= delay <= 366 * 86400 or job["chat_id"] <= 0:
-                raise ValueError("Scheduled tasks require Telegram ownership and a delay of 1 second–1 year")
+            now = time.time()
+            try:
+                due = schedule_due(args, now=now)
+            except ValueError as exc:
+                raise ToolInputError(str(exc)) from None
+            if job["chat_id"] <= 0:
+                raise ToolInputError("Scheduled tasks require Telegram ownership")
             if job.get("kind") == "scheduled":
-                raise ValueError("A scheduled job cannot create more schedules")
-            identifier = self.queue.enqueue(str(args["prompt"]), job["chat_id"], kind="scheduled",
-                                             source=f"schedule:{job['id']}:{step}", due=time.time() + delay,
-                                             interval_seconds=int(args.get("interval_seconds", 0)), runs=int(args.get("runs", 1)))
-            return {"task_id": identifier, "delay_seconds": delay, "status": "queued"}
+                raise ToolInputError("A scheduled job cannot create more schedules")
+            if not isinstance(args.get("prompt"), str):
+                raise ToolInputError("Scheduled task prompt must be text")
+            interval = args.get("interval_seconds", 0)
+            if type(interval) is not int or not (interval == 0 or 300 <= interval <= 366 * 86400):
+                raise ToolInputError("Recurring interval must be an integer: 300 seconds–366 days, or 0")
+            # Validate the configured timezone before any queue mutation.
+            clock_context(self.settings.timezone, now=due)
+            try:
+                identifier = self.queue.enqueue(args["prompt"], job["chat_id"], kind="scheduled",
+                                                source=f"schedule:{job['id']}:{step}", due=due,
+                                                interval_seconds=interval, runs=args.get("runs", 1))
+            except ValueError as exc:
+                raise ToolInputError(str(exc)) from None
+            saved = self.queue.get(identifier)
+            timing = clock_context(self.settings.timezone, now=saved["due"])
+            return {"task_id": identifier, "delay_seconds": max(0, saved["due"] - now), "status": saved["state"],
+                    "due_at": timing["utc"], "local_time": timing["local"], "timezone": timing["timezone"],
+                    "interval_seconds": saved["interval_seconds"], "runs_left": saved["runs_left"]}
         if name == "consult" and self.consultation:
             return await self.consultation(str(args["question"])[:14000], str(args.get("role", "critic")))
         if name.startswith("self."):

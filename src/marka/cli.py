@@ -145,6 +145,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     setup = commands.add_parser("setup", help="Enter bot token privately and create pairing code")
     setup.add_argument("--model", help="Optional Codex model; omit to use CLI default")
+    setup.add_argument("--timezone", help="Owner timezone: UTC+03:00 or installed IANA zone; default UTC")
     commands.add_parser("login", help="Sign in to Codex with device authentication")
     commands.add_parser("pair", help="Issue a new owner pairing code before first pairing")
     commands.add_parser("run", help="Run the Telegram gateway and durable worker")
@@ -168,6 +169,10 @@ def main(argv=None):
     try:
         settings = Settings.load(args.data)
         if args.command == "setup":
+            if args.timezone:
+                from .scheduling import owner_timezone
+                owner_timezone(args.timezone)
+                settings.timezone = args.timezone
             token = settings.token or getpass.getpass("Токен нового Telegram-бота (ввод скрыт): ").strip()
             if not re.fullmatch(r"\d{6,12}:[A-Za-z0-9_-]{25,}", token):
                 raise ValueError("Некорректный формат токена Telegram")

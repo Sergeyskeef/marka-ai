@@ -459,7 +459,13 @@ class Application:
                 text += "\nЕсть неподтверждённые/неудачные доставки. Результат сохранён; /tasks покажет номера, /result номер повторно выдаст ответ."
             self.reply(message, text)
         elif command == "/tasks":
-            self.reply(message, "\n".join(f"{x['id']} [{x['state']}] {x['prompt'][:100]}" for x in self.queue.list()) or "Задач пока нет.")
+            from .scheduling import clock_context
+            rows = []
+            for task in self.queue.list():
+                due = (" · " + clock_context(self.settings.timezone, now=task["due"])["local"]
+                       if task["kind"] == "scheduled" and task["state"] == "queued" else "")
+                rows.append(f"{task['id']} [{task['state']}]{due} {task['prompt'][:100]}")
+            self.reply(message, "\n".join(rows) or "Задач пока нет.")
         elif command == "/progress":
             latest = self.queue.list(1)
             identifier = argument or self.current_id or (latest[0]["id"] if latest else None)
