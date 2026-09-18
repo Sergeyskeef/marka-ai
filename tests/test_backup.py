@@ -17,6 +17,11 @@ DAY = datetime(2026, 9, 1, 12, tzinfo=timezone.utc).timestamp()
 
 class BackupTests(unittest.TestCase):
     def setUp(self):
+        # The suite also runs in a 128 MiB tmpfs sandbox. This fixture models a
+        # disk with room for backups; explicit low-space tests override it.
+        disk = patch('marka.backup.shutil.disk_usage', return_value=type('Usage', (), {'free': 8 * 1024**3})())
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
