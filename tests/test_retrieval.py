@@ -42,6 +42,16 @@ class TestRetrieval(unittest.TestCase):
         self.assertEqual(hits[1]["id"], generic)
         self.assertGreater(hits[0]["score"], hits[1]["score"])
 
+    def test_query_coverage_counts_normalized_terms_and_hashes_full_memory(self):
+        text = "Предыдущий контекст. " * 220 + "Настройки серверов Telegram"
+        memory = self.remember(text)
+        hit = self.store.search("настройками сервера телеграм отсутствует")[0]
+        self.assertEqual(hit["id"], memory)
+        self.assertEqual(hit["match"]["query_term_count"], 4)
+        self.assertEqual(hit["match"]["coverage"], 0.75)
+        self.assertEqual(hit["content_hash"], hashlib.sha256(text.encode()).hexdigest())
+        self.assertEqual(hit["content_hash"], self.store.get_memory(memory, limit=20)["content_hash"])
+
     def test_long_source_returns_matching_tail_and_exact_pages(self):
         text = ("Предыдущая строка без нужного ответа. " * 700) + "\nРедкаяошибка: починить индекс ЖУРАВЛЬ.\nКонец."
         identifier = self.store.event("tool", text)

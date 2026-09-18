@@ -353,6 +353,7 @@ class Store:
     @staticmethod
     def _memory(db: sqlite3.Connection, row: sqlite3.Row) -> dict:
         result = dict(row)
+        result["content_hash"] = hashlib.sha256(result["content"].encode("utf-8")).hexdigest()
         result["key"] = result.pop("memory_key")
         snapshots = [dict(source) for source in db.execute(
             "SELECT event_id,role,content,content_hash,captured_at FROM memory_sources "

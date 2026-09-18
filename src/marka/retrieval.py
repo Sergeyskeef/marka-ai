@@ -268,11 +268,14 @@ def matched_chunks(db: sqlite3.Connection, query: str, kind: str, *, statuses: t
                       " WHERE retrieval_fts MATCH ? AND c.source_kind=? " + condition +
                       " ORDER BY fts_rank,c.source_id DESC LIMIT 600", args).fetchall()
     best = {}
+    query_term_count = len(tokens(query, query=True))
     for row in rows:
         score, matched = rank(query, row["content"], level=row["level"])
         if score <= 0:
             continue
         item = {"source_id": row["source_id"], "score": score, "matched_terms": matched,
+                "query_term_count": query_term_count,
+                "coverage": len(matched) / max(1, query_term_count),
                 "start_char": row["start_char"], "end_char": row["end_char"],
                 "excerpt": row["content"], "retrieval": "lexical_normalized_alias"}
         old = best.get(row["source_id"])

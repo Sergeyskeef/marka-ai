@@ -194,12 +194,60 @@ class SemanticTests(unittest.TestCase):
         semantic = [{"id":2,"content":"semantic-two"}, {"id":3,"content":"semantic-three"}]
         result = hybrid(lexical, semantic)
         self.assertEqual([row["id"] for row in result], [2,1,3])
-        self.assertEqual(result[0]["content"], "both")
+        self.assertEqual(result[0]["content"], "semantic-two")
         repeated = hybrid([lexical[0]] * 9, [])
         self.assertEqual(repeated[0]["hybrid_score"], round(1/31, 6))
         self.assertEqual(hybrid(lexical, semantic, limit=0), [])
         mixed = hybrid([{"id":1,"content":"fact"}], [{"id":1,"role":"user","session":"main","content":"event"}])
         self.assertEqual(len(mixed), 2)
+
+    def test_weak_lexical_overlap_does_not_displace_semantic_evidence(self):
+        lexical = [{"id": i, "content": "generic context", "match": {"coverage": 0.4}}
+                   for i in range(2, 6)]
+        semantic = [{"id": i, "content": f"semantic passage {i}", "semantic_score": 0.9 - i * 0.01}
+                    for i in range(1, 6)]
+        self.assertEqual([row["id"] for row in hybrid(lexical, semantic, 4)], [1, 2, 3, 4])
+        # A complete lexical match still adds independent support, even when it
+        # matched normalized forms rather than literal words.
+        lexical[0]["match"]["coverage"] = 1.0
+        self.assertEqual(hybrid(lexical, semantic, 1)[0]["id"], 2)
+        exact_identifier = {"id": 20, "content": "port 5544", "match": {"coverage": 1.0}}
+        self.assertEqual(hybrid([exact_identifier], semantic, 1)[0]["id"], 20)
+
+    def test_fusion_preserves_selected_passage_and_its_unverified_origin(self):
+        common = {"id": 1, "role": "assistant", "session": "archive", "content_hash": "same",
+                  "meta": {"trust": "historical_unverified"}}
+        lexical = dict(common, content="unrelated opening", offset=0, match={"coverage": 0.25})
+        semantic = dict(common, content="responsive tail", offset=4000, matched_offset=4000,
+                        semantic_score=0.8, origin={"external_id": "old-source"})
+        result = hybrid([lexical], [semantic])[0]
+        self.assertEqual(result["content"], "responsive tail")
+        self.assertEqual(result["offset"], 4000)
+        self.assertEqual(result["origin"], semantic["origin"])
+        self.assertEqual(result["meta"]["trust"], "historical_unverified")
+        self.assertNotIn("match", result)
+        self.assertNotIn("hybrid_score", semantic)  # inputs are never mutated
+
+    def test_conflicting_versions_roles_and_withdrawal_are_not_fused(self):
+        lexical = {"id": 1, "content": "same source", "content_hash": "before",
+                   "status": "accepted", "match": {"coverage": 1.0}}
+        semantic = dict(lexical, semantic_score=0.9)
+        for change in ({"content_hash": "after"}, {"status": "candidate"},
+                       {"status": "forgotten"}, {"status": "superseded"}, {"inactive": True}):
+            with self.subTest(change=change):
+                self.assertEqual(hybrid([lexical], [dict(semantic, **change)]), [])
+        event = dict(lexical, role="user", session="archive")
+        self.assertEqual(hybrid([event], [dict(event, role="assistant", semantic_score=0.9)]), [])
+
+    def test_missing_invalid_coverage_and_duplicate_rows_do_not_inflate_rank(self):
+        semantic = [{"id": 1, "semantic_score": 0.9}, {"id": 2, "semantic_score": 0.8}]
+        for score in (None, "invalid", float("nan"), float("inf"), 0):
+            self.assertEqual(hybrid([{"id": 2, "score": score}], semantic)[0]["id"], 1)
+        for coverage in (None, "invalid", float("nan"), float("inf"), -1):
+            self.assertEqual(hybrid([{"id": 2, "match": {"coverage": coverage}}], semantic)[0]["id"], 1)
+        rows = [{"id": 1, "score": 1}, {"id": 2, "score": 0.5}]
+        self.assertEqual(hybrid([rows[0]] * 5 + [rows[1]], []), hybrid(rows, []))
+        self.assertEqual([row["id"] for row in hybrid(rows, [])], [1, 2])
 
     def test_local_ort_derivative_install_reuse_and_corruption_repair(self):
         directory = self.directory / "model"

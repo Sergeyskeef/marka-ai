@@ -486,17 +486,66 @@ class SemanticIndex:
 
 
 def hybrid(lexical: list[dict], semantic: list[dict], limit=8):
-    """Reciprocal-rank fusion never merges a source into a different assertion."""
+    """Fuse independent retrieval evidence and keep its actual source passage.
+
+    A partial bag-of-words match is not a full second vote for a semantic hit.
+    When coverage is available, lexical support starts above half the query and
+    reaches full strength only when every query term matched (including normalized
+    forms/aliases). Squaring this bounded support limits weak corroboration.
+    Scores are ranking signals, not probabilities or a change in source authority.
+    """
     limit = max(0, min(int(limit), 100))
-    values, scores = {}, {}
-    for rows in (lexical, semantic):
+    if not limit:
+        return []
+    groups = {}
+    scored = any("semantic_score" in row for row in semantic)
+    for method, rows in (("lexical", lexical), ("semantic", semantic)):
         seen = set()
-        for rank, row in enumerate(rows, 1):
+        rank = 0
+        for row in rows:
             source_kind = "event" if "session" in row and "role" in row else "memory"
             identifier = (source_kind, row["id"])
             if identifier in seen:
                 continue
             seen.add(identifier)
-            scores[identifier] = scores.get(identifier, 0) + 1 / (30 + rank)
-            values.setdefault(identifier, row)
-    return [dict(values[key], hybrid_score=round(scores[key], 6)) for key in sorted(scores, key=scores.get, reverse=True)[:limit]]
+            rank += 1
+            weight = 1.0
+            if method == "lexical" and semantic and scored:
+                match = row.get("match") or {}
+                coverage = match.get("coverage")
+                try:
+                    if coverage is None:
+                        # Compatibility with pre-upgrade results. A complete exact
+                        # match scores 8; related episodes without match evidence
+                        # contribute no extra vote.
+                        coverage = float(row.get("score", 0)) / 8
+                    coverage = float(coverage)
+                    if not math.isfinite(coverage):
+                        coverage = 0.0
+                except (TypeError, ValueError, OverflowError):
+                    coverage = 0.0
+                support = max(0.0, min(1.0, 2 * coverage - 1))
+                weight = support * support
+            contribution = weight / (30 + rank)
+            group = groups.setdefault(identifier, {"score": 0.0, "views": [], "hashes": set(),
+                                                   "states": set(), "roles": set(), "inactive": False})
+            group["score"] += contribution
+            group["views"].append((contribution, row))
+            if row.get("content_hash"):
+                group["hashes"].add(row["content_hash"])
+            if source_kind == "memory" and row.get("status"):
+                group["states"].add(row["status"])
+            if source_kind == "event":
+                group["roles"].add(row["role"])
+            group["inactive"] |= row.get("inactive") is True or row.get("status") in {"forgotten", "superseded"}
+    result = []
+    for group in sorted(groups.values(), key=lambda item: item["score"], reverse=True):
+        # Never combine evidence from two versions or conceal withdrawal/status
+        # disagreement during concurrent reads. A subsequent search can refresh it.
+        if group["inactive"] or any(len(group[key]) > 1 for key in ("hashes", "states", "roles")):
+            continue
+        _, selected = max(group["views"], key=lambda item: item[0])
+        result.append(dict(selected, hybrid_score=round(group["score"], 6)))
+        if len(result) == limit:
+            break
+    return result
