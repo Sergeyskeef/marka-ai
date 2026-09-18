@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import Engine
+from .backup import DailyBackups
 from .provider import CodexProvider
 from .queue import Queue
 from .redact import redact
@@ -94,6 +95,7 @@ class Application:
         self.client = client or TelegramClient(settings.token)
         self.provider = provider or CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout)
         self.engine = Engine(settings, self.store, self.queue, self.provider, self.progress)
+        self.backups = DailyBackups(self.store, settings.data_dir)
         self.stopping = asyncio.Event()
         self.current: asyncio.Task | None = None
         self.current_id: str | None = None
@@ -405,6 +407,14 @@ class Application:
             text = f"Марк работает. Память: {stats['by_status']['accepted']} принятых, {stats['by_status']['candidate']} кандидатов.\nВызовы Codex за сутки UTC: {stats['budget_used']}/{self.settings.daily_calls}.\n"
             text += f"Текущая задача: {self.current_id or 'нет'}. " + self.last_status
             text += "\nОбучение: " + self.engine.learning.policy()["mode"]
+            backup = self.backups.status()
+            if backup.get("last_success_at"):
+                date = datetime.fromtimestamp(backup["last_success_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                text += "\nПоследняя автоматическая копия базы памяти: " + date
+            else:
+                text += "\nАвтоматическая копия базы памяти: ожидает свободного времени."
+            if backup.get("state") in {"failed", "deferred"}:
+                text += "\nПоследняя попытка копирования не удалась; проверь свободное место. Повтор будет автоматически."
             issues = self.queue.delivery_issues()
             if issues:
                 text += "\nЕсть неподтверждённые/неудачные доставки. Результат сохранён; /tasks покажет номера, /result номер повторно выдаст ответ."
@@ -567,6 +577,9 @@ class Application:
             return db.execute("SELECT 1 FROM jobs WHERE state='running' OR (state='queued' AND due<=?) LIMIT 1", (time.time(),)).fetchone() is None
 
     async def maintain_once(self):
+        if not self._idle():
+            return {"status": "busy"}
+        await asyncio.to_thread(self.backups.run_due)
         if not self._idle():
             return {"status": "busy"}
         index = self.engine.tools.semantic
