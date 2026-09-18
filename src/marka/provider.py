@@ -19,6 +19,8 @@ import signal
 import subprocess
 import tempfile
 
+from .media import image_inputs
+
 
 class ProviderError(RuntimeError):
     """A safe, user-visible provider failure; never includes raw CLI output."""
@@ -227,7 +229,7 @@ class CodexProvider:
         self._validated_binary = executable
         return executable
 
-    def _arguments(self, binary: str, directory: Path) -> list[str]:
+    def _arguments(self, binary: str, directory: Path, images=()) -> list[str]:
         args = [
             binary, "-a", "never", "exec", "--ignore-user-config", "--ignore-rules",
             "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
@@ -235,6 +237,8 @@ class CodexProvider:
             "--output-schema", str(directory / "schema.json"),
             "--output-last-message", str(directory / "response.json"),
         ]
+        for path in images:
+            args.extend(["--image", str(path)])
         for setting in (
             'web_search="disabled"', "tools.view_image=false", "project_doc_max_bytes=0",
         ):
@@ -260,7 +264,7 @@ class CodexProvider:
                 return {"version": self._version, "authenticated": rc == 0 and chatgpt,
                         "auth_method": "chatgpt" if rc == 0 and chatgpt else "unavailable"}
 
-    async def complete(self, prompt: str, schema: dict) -> dict:
+    async def complete(self, prompt: str, schema: dict, *, images=()) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be nonempty text")
         encoded = prompt.encode("utf-8")
@@ -268,6 +272,7 @@ class CodexProvider:
             raise ProviderError("Prompt exceeded the provider size limit.")
         if not isinstance(schema, dict) or schema.get("type") != "object":
             raise ValueError("schema must describe a JSON object")
+        pictures = image_inputs(images)
         async with self._lock:
             with tempfile.TemporaryDirectory(prefix="marka-codex-") as temporary:
                 directory = Path(temporary)
@@ -280,8 +285,14 @@ class CodexProvider:
                 if rc or b"using chatgpt" not in (out + err).lower():
                     raise ProviderError("ChatGPT login is required. Run marka login on the host.")
                 (directory / "schema.json").write_text(json.dumps(schema), encoding="utf-8")
+                paths = []
+                for index, picture in enumerate(pictures):
+                    path = directory / f"image-{index}.{picture.extension}"
+                    path.write_bytes(picture.data)
+                    path.chmod(0o600)
+                    paths.append(path)
                 rc, out, err = await self._run(
-                    self._arguments(binary, directory), cwd=directory, env=env, prompt=encoded,
+                    self._arguments(binary, directory, paths), cwd=directory, env=env, prompt=encoded,
                 )
                 if rc:
                     raise _safe_failure(out + err, exit_code=rc)

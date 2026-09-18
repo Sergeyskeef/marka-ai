@@ -9,7 +9,7 @@ description = "A persistent personal Telegram agent powered by your Codex login"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = []
+dependencies = ["Pillow==12.3.0"]
 
 [project.optional-dependencies]
 semantic = ["onnxruntime==1.30.0", "tokenizers==0.23.2", "numpy==2.3.5"]

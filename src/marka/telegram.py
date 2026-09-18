@@ -21,6 +21,7 @@ import urllib.request
 
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 512 * 1024
+MAX_IMAGE_DOWNLOAD_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MESSAGE_UNITS = 3500
 _READ_METHODS = frozenset({"getMe", "getUpdates", "getWebhookInfo", "getFile"})
@@ -164,6 +165,33 @@ def attachment_problem(attachment: Attachment) -> str | None:
     if Path(attachment.file_name).suffix.lower() not in TEXT_ATTACHMENT_EXTENSIONS:
         return "Supported attachments are UTF-8 text, Markdown, CSV, JSON and source-code files; PDF, images and audio are not supported"
     return None
+
+
+def parse_image(update: Any) -> Attachment | None:
+    """Metadata only. A selected Telegram photo variant or original PNG/JPEG document."""
+    envelope = _message_envelope(update)
+    if envelope is None:
+        return None
+    raw, sender, chat = envelope
+    if chat.get("type") != "private" or chat["id"] != sender["id"]:
+        return None
+    document = parse_attachment(update)
+    if document and (document.mime_type.casefold() in {"image/png", "image/jpeg"}
+                     or Path(document.file_name).suffix.casefold() in {".png", ".jpg", ".jpeg"}):
+        return document
+    photos = raw.get("photo")
+    if not isinstance(photos, list) or not 1 <= len(photos) <= 20:
+        return None
+    candidates = [item for item in photos if isinstance(item, dict)
+                  and _is_int(item.get("width")) and _is_int(item.get("height"))
+                  and 1 <= item["width"] <= 4096 and 1 <= item["height"] <= 4096
+                  and item["width"] * item["height"] <= 8_000_000
+                  and (item.get("file_size") is None or (_is_int(item["file_size"]) and 0 <= item["file_size"] <= MAX_IMAGE_DOWNLOAD_BYTES))]
+    if not candidates:
+        return None
+    selected = max(candidates, key=lambda item: item["width"] * item["height"])
+    return parse_attachment(update | {"message": raw | {"document": selected | {
+        "file_name": "photo.jpg", "mime_type": "image/jpeg"}}})
 
 
 def decode_text_attachment(attachment: Attachment, data: bytes) -> str:
@@ -312,14 +340,16 @@ class TelegramClient:
             raise TelegramError("Telegram returned invalid updates")
         return result
 
-    async def download_file(self, file_id: str, *, max_bytes=MAX_ATTACHMENT_BYTES, expected_size=None) -> bytes:
+    async def download_file(self, file_id: str, *, max_bytes=MAX_ATTACHMENT_BYTES, expected_size=None,
+                            image=False) -> bytes:
         """Download a bounded original file from Telegram, after owner validation.
 
         The file URL follows the official getFile contract. No redirect or
         custom API origin is accepted for downloads containing the bot token.
         """
         if (not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", file_id)
-                or not _is_int(max_bytes) or not 1 <= max_bytes <= MAX_ATTACHMENT_BYTES):
+                or type(image) is not bool or not _is_int(max_bytes)
+                or not 1 <= max_bytes <= (MAX_IMAGE_DOWNLOAD_BYTES if image else MAX_ATTACHMENT_BYTES)):
             raise TelegramError("Invalid Telegram attachment request", permanent=True)
         if expected_size is not None and (not _is_int(expected_size) or not 0 <= expected_size <= max_bytes):
             raise TelegramError("Attachment exceeds the download limit", permanent=True)

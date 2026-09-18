@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import patch
 
 from marka.provider import CodexProvider, ProviderError
+from marka.media import validate_image
+from image_fixtures import png, JPEG
 
 
 SCHEMA = {
@@ -47,7 +49,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     def _write_fake(self, version="0.144.1", login="Logged in using ChatGPT"):
         self.script.write_text(
-            "import json,os,pathlib,sys,time\n"
+            "import json,os,pathlib,sys,time,hashlib\n"
             "sys.stdin.reconfigure(encoding='utf-8')\n"
             "args=sys.argv[1:]\n"
             f"record=pathlib.Path({str(self.record)!r})\n"
@@ -60,7 +62,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             "if args==['login','status']:\n"
             f" print({login!r},file=sys.stderr);sys.exit(0)\n"
             "prompt=sys.stdin.read()\n"
-            "record.write_text(json.dumps({'args':args,'env':dict(os.environ),'prompt':prompt,'cwd':os.getcwd(),'pid':os.getpid()}))\n"
+            "images=[pathlib.Path(args[i+1]) for i,x in enumerate(args) if x=='--image']\n"
+            "record.write_text(json.dumps({'args':args,'env':dict(os.environ),'prompt':prompt,'cwd':os.getcwd(),'pid':os.getpid(),'images':[{'path':str(p),'bytes':len(p.read_bytes()),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in images]}))\n"
             "if prompt=='timeout': time.sleep(10)\n"
             "if prompt=='secret-error':\n"
             " print('401 my-bot-token and PRIVATE PROMPT',file=sys.stderr);sys.exit(1)\n"
@@ -109,6 +112,42 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         })
         self._write_fake(version="0.154.0-alpha.6.2")
         self.assertEqual((await self.provider().status())["version"], "0.154.0-alpha.6.2")
+
+    async def test_images_are_copied_to_isolated_temp_and_all_tool_guards_remain(self):
+        images = [validate_image(png()), validate_image(JPEG)]
+        await self.provider().complete("Describe these images", SCHEMA, images=images)
+        record = json.loads(self.record.read_text())
+        self.assertEqual([item["sha256"] for item in record["images"]], [image.sha256 for image in images])
+        self.assertEqual(len(record["images"]), 2)
+        for item in record["images"]:
+            self.assertEqual(Path(item["path"]).parent, Path(record["cwd"]))
+            self.assertFalse(Path(item["path"]).exists(), "Temporary image bytes must be removed")
+        self.assertIn("tools.view_image=false", record["args"])
+        self.assertIn("--output-schema", record["args"])
+        self.assertIn("--ignore-user-config", record["args"])
+        self.assertIn("--ignore-rules", record["args"])
+        self.assertEqual(record["args"][-1], "-")
+
+    async def test_images_cannot_enable_native_tools_or_accept_filesystem_paths(self):
+        with self.assertRaisesRegex(ValueError, "never filesystem paths"):
+            await self.provider().complete("read secret", SCHEMA, images=[self.home / "auth.json"])
+        self.assertFalse(self.record.exists())
+        with self.assertRaisesRegex(ProviderError, "native tool"):
+            await self.provider().complete("native-tool", SCHEMA, images=[validate_image(png())])
+
+    async def test_cancelling_image_inference_removes_temp_image(self):
+        task = asyncio.create_task(self.provider().complete("timeout", SCHEMA, images=[validate_image(png())]))
+        for _ in range(200):
+            if self.record.exists():
+                break
+            await asyncio.sleep(0.01)
+        self.assertTrue(self.record.exists())
+        record = json.loads(self.record.read_text())
+        self.assertTrue(Path(record["images"][0]["path"]).exists())
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertFalse(Path(record["images"][0]["path"]).exists())
 
     async def test_api_key_login_is_refused(self):
         self._write_fake(login="Logged in using an API key")

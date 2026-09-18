@@ -10,17 +10,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
 import http.server
 import json
 from pathlib import Path
 import tempfile
 import threading
+import struct
+import zlib
 
 from marka.provider import CodexProvider, ProviderError
 
 
-async def probe(binary: str, timeout: float = 45) -> dict:
+async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
     captured: list[dict] = []
+    if type(images) is not int or not 0 <= images <= 2:
+        raise ValueError("Probe supports zero, one or two synthetic images")
+    def chunk(kind, value):
+        return struct.pack(">I", len(value)) + kind + value + struct.pack(">I", zlib.crc32(kind + value) & 0xffffffff)
+    synthetic = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+    synthetic += chunk(b"IDAT", zlib.compress(b"\0\xff\0\0")) + chunk(b"IEND", b"")
+    expected_image = "data:image/png;base64," + base64.b64encode(synthetic).decode("ascii")
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -39,9 +50,14 @@ async def probe(binary: str, timeout: float = 45) -> dict:
                 return
             try:
                 request = json.loads(self.rfile.read(length))
+                pictures = [part.get("image_url") for item in request.get("input", []) if isinstance(item, dict)
+                            for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "input_image"]
                 captured.append({"path": self.path, "tools": request.get("tools", []),
-                                 "tools_field": "present" if "tools" in request else "omitted"})
-            except (ValueError, UnicodeError, AttributeError):
+                                 "tools_field": "present" if "tools" in request else "omitted",
+                                 "images": len(pictures), "images_exact": pictures == [expected_image] * images,
+                                 "schema": request.get("text", {}).get("format", {}).get("type") == "json_schema",
+                                 "authorization_present": bool(self.headers.get("Authorization"))})
+            except (ValueError, UnicodeError, AttributeError, TypeError):
                 captured.append({"error": "unreadable_request"})
             self.send_response(400)
             self.send_header("Content-Type", "application/json")
@@ -67,7 +83,12 @@ async def probe(binary: str, timeout: float = 45) -> dict:
                 "type": "object", "properties": {"reply": {"type": "string"}},
                 "required": ["reply"], "additionalProperties": False,
             }), encoding="utf-8")
-            args = provider._arguments(executable, work)
+            image_paths = []
+            for index in range(images):
+                target = work / f"synthetic-{index}.png"
+                target.write_bytes(synthetic)
+                image_paths.append(target)
+            args = provider._arguments(executable, work, image_paths)
             args.pop()  # stdin marker follows the probe-specific config below
             for setting in (
                 'model_provider="marka_contract_probe"',
@@ -87,13 +108,18 @@ async def probe(binary: str, timeout: float = 45) -> dict:
         server.server_close()
         thread.join(timeout=2)
     response_requests = [row for row in captured if row.get("path", "").endswith("/responses")]
-    ok = bool(response_requests) and all(row.get("tools") == [] for row in response_requests)
+    ok = bool(response_requests) and all(row.get("tools") == [] and row.get("images_exact") and row.get("schema")
+                                        and not row.get("authorization_present") for row in response_requests)
     return {
         "ok": ok, "version": version, "requests": len(response_requests),
         "tool_counts": [len(row["tools"]) if isinstance(row.get("tools"), list) else None
                         for row in response_requests],
         "tools_fields": [row.get("tools_field") for row in response_requests],
-        "error": None if ok else "Expected no tools in every Responses request (omitted or an empty array).",
+        "image_counts": [row["images"] for row in response_requests],
+        "synthetic_image_sha256": hashlib.sha256(synthetic).hexdigest() if images else None,
+        "schema_preserved": all(row.get("schema") for row in response_requests),
+        "authorization_present": any(row.get("authorization_present") for row in response_requests),
+        "error": None if ok else "Expected no tools or authorization, exact synthetic images, and a structured schema in every Responses request.",
     }
 
 
@@ -101,10 +127,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="codex")
     parser.add_argument("--timeout", type=float, default=45)
+    parser.add_argument("--images", type=int, choices=(0, 1, 2), default=0,
+                        help="Verify native PNG image parts as well as the empty tool inventory")
     args = parser.parse_args()
     if args.timeout <= 0 or args.timeout > 120:
         parser.error("--timeout must be between 0 and 120 seconds")
-    result = asyncio.run(probe(args.binary, args.timeout))
+    result = asyncio.run(probe(args.binary, args.timeout, args.images))
     print(json.dumps(result))
     return 0 if result["ok"] else 1
 

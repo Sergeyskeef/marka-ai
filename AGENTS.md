@@ -1,6 +1,6 @@
 # Mark runtime
 
-Use Python 3.11+ and the standard library for the core runtime. The optional semantic extra uses pinned ONNX Runtime, tokenizers and NumPy; it must not become a requirement for canonical memory or offline tests. Run `python -m unittest discover -s tests -v` after behavioral changes. Never run legacy code from Git history as a setup step.
+Use Python 3.11+ and prefer the standard library for the core runtime. Pinned Pillow is required for bounded PNG/JPEG pixel validation: JPEG headers alone do not detect corrupt image data. Keep this decoder outside the model's executable tools. The optional semantic extra uses pinned ONNX Runtime, tokenizers and NumPy; it must not become a requirement for canonical memory or offline tests. Run `python -m unittest discover -s tests -v` after behavioral changes. Never run legacy code from Git history as a setup step.
 
 Private state, Telegram tokens, Codex credentials, imported memories, and user workspaces must stay outside Git. This repository is public. Do not copy private server implementations into it.
 
