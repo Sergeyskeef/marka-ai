@@ -41,6 +41,12 @@
   файлы, Python/Node/Bash, закрытые state/auth, отсутствие сети, отказ рекурсивного
   вызова runner, удаление отсоединённого потомка, лимиты вывода/времени/файлов и
   работоспособность после отказов. Telegram gateway при этом не запускался.
+- Финальный Linux runtime прошёл 130 unit/integration tests (1 ожидаемый skip).
+  `scripts/evolution_smoke.py` сравнил 131 одинаковый тест для baseline/candidate
+  через реальный runner: candidate исправил единственный добавленный regression
+  case с заведомо фиктивным Slack token, `improved_on_provided_case`.
+  Patch сохранён, установленный runtime не изменён; это проверка конкретного
+  улучшения, а не доказательство общего роста интеллекта.
 
 ## Изоляция модели
 
