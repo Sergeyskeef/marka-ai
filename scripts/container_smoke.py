@@ -80,13 +80,19 @@ def main() -> int:
     assert json.loads(network["output"])["network_denied"] is True
     checks.append("outbound_network_denied")
 
+    recursive_marker = "/tmp/marka-recursive-" + secrets.token_hex(8)
+    recursive_code = "from pathlib import Path;Path(" + repr(recursive_marker) + ").write_text('executed')"
     python(
         "import socket,json\n"
         f"s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect({socket_path!r})\n"
-        "s.sendall(json.dumps({'argv':['python','-c','print(1)'],'timeout':1,'files':{}}).encode()+b'\\n')\n"
-        "response=json.loads(s.recv(8192));s.close()\n"
-        "assert 'forbidden' in response.get('error','');print('RECURSIVE_REQUEST_DENIED')\n"
+        "try:\n"
+        f" s.sendall(json.dumps({{'argv':['python','-c',{recursive_code!r}],'timeout':1,'files':{{}}}}).encode()+b'\\n')\n"
+        " response=json.loads(s.recv(8192));assert 'forbidden' in response.get('error','')\n"
+        "except (BrokenPipeError,ConnectionResetError):\n pass\n"
+        "finally:\n s.close()\n"
+        "print('RECURSIVE_REQUEST_DENIED')\n"
     )
+    python(f"from pathlib import Path;assert not Path({recursive_marker!r}).exists();print('NO_RECURSIVE_EFFECT')")
     checks.append("recursive_runner_access_denied")
 
     leaked = "/tmp/marka-detached-" + secrets.token_hex(8)
