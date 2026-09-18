@@ -1,0 +1,28 @@
+[Unit]
+Description=Mark personal Telegram agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marka
+Group=marka
+WorkingDirectory=/opt/marka-ai
+Environment=MARKA_DATA=/var/lib/marka
+Environment=PATH=/opt/marka-ai/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/marka-ai/.venv/bin/marka run
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/marka
+StateDirectory=marka
+MemoryMax=1G
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

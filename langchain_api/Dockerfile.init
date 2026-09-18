@@ -1,8 +1,0 @@
-FROM python:3.10
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY weaviate_tools/init_schema.py .
-
-CMD ["python3", "init_schema.py"] 

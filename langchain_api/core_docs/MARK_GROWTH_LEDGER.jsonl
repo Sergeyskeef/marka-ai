@@ -1,8 +1,0 @@
-{"ts":"2025-09-28T00:00:00Z","event":"init","who":"assistant","notes":"Созданы ядро идентичности и дорожная карта v0.1"}
-{"ts": "2025-09-28T20:25:09Z", "event": "memory_audit_init", "who": "assistant", "notes": "Создан аудит памяти v0.1 и старт работ"}
-{"ts": "2025-09-28T20:25:54Z", "event": "roadmap_update", "who": "assistant", "notes": "Добавлен раздел DoD и режим работы"}
-{"ts": "2025-09-28T20:26:41Z", "event": "memory_spec_added", "who": "assistant", "notes": "Добавлена спецификация MemoryService v0.1"}
-{"ts": "2025-09-28T20:27:27Z", "event": "memory_service_scaffold", "who": "assistant", "notes": "Добавлены core/memory/embeddings.py и service.py (без встраивания)"}
-{"ts": "2025-09-28T20:39:37Z", "event": "roadmap_methodology_update", "who": "assistant", "notes": "Добавлен принцип: сначала анализ + Decision Gates"}
-{"ts": "2025-09-28T20:51:04Z", "event": "memory_facade_enabled", "who": "assistant", "notes": "MemoryService facade shim active by default (MARK_MEMORY_FACADE=1); RetryableHTTPClient http2 toggled via HTTPX_HTTP2"}
-{"ts": "2025-09-28T21:10:26Z", "event": "memory_xtrace_added", "who": "assistant", "notes": "xtrace integrated: API /api/memory/xtrace/last and ChatResponse.metadata[xtrace]"}

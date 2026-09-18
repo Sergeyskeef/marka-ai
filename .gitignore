@@ -1,40 +1,20 @@
+.venv/
 __pycache__/
-*.pyc
-
-# Environment files (never commit real secrets)
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
 .env
 .env.*
-*.env
 !.env.example
-!.env.sample
-!.env.template
-
-# Secret keys and credentials
-*.key
-*.pem
-*.p12
-*.pfx
-*.crt
-id_rsa
-id_rsa.pub
-id_dsa
-id_ecdsa
-*.keystore
-credentials.json
+state/
+.marka/
+private/
 auth.json
-secrets.*
-*.token
-
-# Local overrides
-*.local
-config.local.*
-secrets.yaml
-secrets.yml
-.envrc
-
-# Python virtualenv
-.venv/
-
-# Docker local overrides
-docker-compose.override.yml
-cursor_memory/
+*.sqlite3*
+*.db*
+*.log
+settings.json
+test-results/

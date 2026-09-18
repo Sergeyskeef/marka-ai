@@ -1,0 +1,48 @@
+name: marka
+services:
+  mark:
+    build:
+      context: .
+      target: bot
+    image: marka-ai:2
+    restart: unless-stopped
+    depends_on:
+      - sandbox
+    volumes:
+      - state:/state
+      - runner:/run/marka
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  sandbox:
+    build:
+      context: .
+      target: sandbox
+    image: marka-sandbox:2
+    restart: unless-stopped
+    network_mode: none
+    volumes:
+      - runner:/run/marka
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /workspace:size=128m,uid=10001,gid=10001,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+volumes:
+  state:
+  runner:
