@@ -61,3 +61,21 @@ research proof of concept includes SICA among the examined systems.
 Mark's initial extension is a concrete code-edit/evaluate/archive workflow. It is
 not a reproduction of SICA's benchmark results, automatic model training, or
 automatic production self-replacement.
+
+## Reading earlier experiments
+
+`history(limit=8)` reads summaries from the private canonical `state/evolution`
+archive, including rejected candidates and evaluation failures. Editable workspace
+copies are not evidence. Incomplete or corrupt reports are counted and skipped;
+history examines at most 1000 archive directory entries and reports truncation.
+
+`read_experiment(id, artifact, path, offset, limit)` reads the canonical report,
+patch, baseline or candidate. Text is paged in blocks up to 8000 characters with
+full-content hashes and a next offset. A baseline/candidate request without a
+path lists its source manifest as paged JSON; a path reads the exact source.
+Snapshots are checked against their archived manifest. New experiments also
+record a patch hash; older patches without one are explicitly labeled.
+
+Archive reads reject symlinks, unsafe IDs/paths, oversized artifacts and malformed
+reports. Reading previous failures can inform a new proposal, but neither reading
+nor a successful experiment installs code or upgrades its evidence strength.

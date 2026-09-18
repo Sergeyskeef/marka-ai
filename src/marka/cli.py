@@ -77,7 +77,8 @@ def import_memory(settings, source: Path, accept=False) -> int:
     for row in payload:
         if not isinstance(row, dict) or not isinstance(row.get("content"), str) or not row["content"].strip() or not 1 <= len(row["content"]) <= 6000:
             raise ValueError("Each record needs content of 1–6000 characters")
-        if not isinstance(row.get("kind", "fact"), str) or row.get("kind", "fact") not in {"fact", "lesson", "skill", "preference"} or type(row.get("level", 1)) is not int or row.get("level", 1) not in {0, 1, 2}:
+        default_level = 2 if row.get("kind") == "lesson" else 1
+        if not isinstance(row.get("kind", "fact"), str) or row.get("kind", "fact") not in {"fact", "lesson", "skill", "preference"} or type(row.get("level", default_level)) is not int or row.get("level", default_level) not in {0, 1, 2}:
             raise ValueError("Invalid imported memory kind or level")
         if row.get("key") is not None and (not isinstance(row["key"], str) or not row["key"].strip()):
             raise ValueError("Invalid imported memory key")
@@ -92,7 +93,7 @@ def import_memory(settings, source: Path, accept=False) -> int:
         source_id = store.event("user" if accept else "import", row["content"], session="import",
                                 meta={"source": (row.get("source") or source.name)[:512],
                                       "import_file": source.name, "owner_reviewed": accept})
-        store.remember(row["content"], kind=row.get("kind", "fact"), level=row.get("level", 1), key=row.get("key"),
+        store.remember(row["content"], kind=row.get("kind", "fact"), level=row.get("level", 2 if row.get("kind") == "lesson" else 1), key=row.get("key"),
                        sources=[source_id], status="accepted" if accept else "candidate", actor="owner" if accept else "import", evidence_kind="direct_fact" if accept else "third_party_claim")
     return len(payload)
 
@@ -104,10 +105,38 @@ async def chat(settings, text: str):
         if any(job["state"] in {"queued", "running"} for job in queue.list(10000)):
             raise ValueError("Use an idle or separate --data directory for CLI chat")
         identifier = queue.enqueue(text, 0)
+        queue.configure_task(identifier, max_steps=settings.task_max_steps, max_model_calls=settings.task_max_calls,
+                             max_seconds=settings.task_max_seconds)
         job = queue.claim()
         if job is None or job["id"] != identifier:
             raise ValueError("There are earlier queued tasks. Use a fresh --data directory for a CLI smoke test.")
-        print(await Engine(settings, store, queue, provider(settings)).run(job))
+        engine = Engine(settings, store, queue, provider(settings))
+        while job is not None:
+            result = await engine.run(job)
+            current = queue.get(identifier)
+            if current["state"] != "queued":
+                print(result or current["result"] or current["error"])
+                break
+            job = queue.claim()
+            if job is None or job["id"] != identifier:
+                raise ValueError("Task continuation was not available; progress remains saved")
+
+
+def models(settings, action, limit=64):
+    from .semantic import SemanticIndex, install_model
+    if type(limit) is not int or not 1 <= limit <= 10000:
+        raise ValueError("Index limit must be 1–10000 source records")
+    directory = settings.data_dir / "models" / "multilingual-minilm"
+    if action == "install":
+        with instance_lock(settings.data_dir / "index.lock"):
+            return install_model(directory)
+    index = SemanticIndex(Store(settings.database), directory)
+    if action == "status":
+        return index.stats()
+    if action == "index":
+        with instance_lock(settings.data_dir / "index.lock"):
+            return index.update(max_sources=limit)
+    raise ValueError("Unknown models action")
 
 
 def main(argv=None):
@@ -126,6 +155,12 @@ def main(argv=None):
     importer = commands.add_parser("import-memory", help="Import private knowledge records from JSON")
     importer.add_argument("path", type=Path)
     importer.add_argument("--accept", action="store_true", help="Explicitly mark these owner-reviewed records accepted")
+    archive_parser = commands.add_parser("import-archive", help="Import private JSONL history as unverified source events")
+    archive_parser.add_argument("path", type=Path)
+    archive_parser.add_argument("--source", required=True, help="Stable private archive source label for deduplication")
+    model_parser = commands.add_parser("models", help="Install or inspect the optional local multilingual retrieval model")
+    model_parser.add_argument("action", choices=("install", "status", "index"))
+    model_parser.add_argument("--limit", type=int, default=64, help="Maximum sources to index in this invocation (1–10000)")
     chat_parser = commands.add_parser("chat", help="One CLI interaction without Telegram")
     chat_parser.add_argument("text")
     args = parser.parse_args(argv)
@@ -153,6 +188,11 @@ def main(argv=None):
             print(Store(settings.database).backup(args.path))
         elif args.command == "import-memory":
             print(f"Imported records: {import_memory(settings, args.path, args.accept)}")
+        elif args.command == "import-archive":
+            from .archive import import_archive
+            print(json.dumps(import_archive(Store(settings.database), args.path, args.source), ensure_ascii=False, indent=2))
+        elif args.command == "models":
+            print(json.dumps(models(settings, args.action, args.limit), ensure_ascii=False, indent=2))
         elif args.command == "chat":
             asyncio.run(chat(settings, args.text))
         elif args.command == "run":

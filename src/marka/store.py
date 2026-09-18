@@ -10,12 +10,14 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Iterator
 
-from .redact import redact
+from .redact import redact, redact_value
+from . import retrieval
 
 
 _KINDS = {"fact", "lesson", "skill", "preference"}
@@ -27,13 +29,7 @@ def _now() -> str:
 
 
 def _clean(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact(value)
-    if isinstance(value, dict):
-        return {str(k): _clean(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_clean(v) for v in value]
-    return value
+    return redact_value(value)
 
 
 class Store:
@@ -105,6 +101,21 @@ class Store:
             """)
             if not had_event_index:
                 db.execute("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
+            retrieval.initialize(db)
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS event_origins (
+                    source TEXT NOT NULL, external_id TEXT NOT NULL,
+                    event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+                    original_role TEXT NOT NULL, original_timestamp TEXT NOT NULL,
+                    content_hash TEXT NOT NULL, origin_meta TEXT NOT NULL,
+                    imported_at TEXT NOT NULL, PRIMARY KEY(source,external_id)
+                );
+                CREATE INDEX IF NOT EXISTS event_origin_id ON event_origins(event_id);
+                CREATE TRIGGER IF NOT EXISTS event_origin_immutable
+                    BEFORE UPDATE OF source,external_id,original_role,original_timestamp,
+                        content_hash,origin_meta,imported_at ON event_origins
+                    BEGIN SELECT RAISE(ABORT,'import origin is immutable'); END;
+            """)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -126,8 +137,9 @@ class Store:
               meta: dict | None = None) -> int:
         if not role or not session or not isinstance(content, str):
             raise ValueError("role, session and string content are required")
-        if len(content) > 40000:
-            raise ValueError("event content exceeds 40000 characters")
+        maximum = 250000 if role == "tool" else 40000
+        if len(content) > maximum:
+            raise ValueError(f"event content exceeds {maximum} characters")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             # Preserve monotonic IDs even when upgrading a pre-AUTOINCREMENT
@@ -144,16 +156,152 @@ class Store:
                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(identifier),))
             return int(result.lastrowid)
 
-    def history(self, session: str = "main", limit: int = 12) -> list[dict]:
+    def history(self, session: str = "main", limit: int = 12, *, before_id: int | None = None) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
-                "SELECT * FROM events WHERE session=? ORDER BY id DESC LIMIT ?",
-                (session, self._limit(limit)),
+                "SELECT e.* FROM events e WHERE session=? AND " + retrieval.visible_events() +
+                " AND (? IS NULL OR e.id<?) ORDER BY e.id DESC LIMIT ?",
+                (session, before_id, before_id, self._limit(limit)),
             ).fetchall()
         result = [dict(row) for row in reversed(rows)]
         for row in result:
             row["meta"] = json.loads(row["meta"])
         return result
+
+    @staticmethod
+    def _page(content: str, offset: int, limit: int) -> dict:
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 8000:
+            raise ValueError("page offset must be nonnegative and limit must be 1–8000 characters")
+        end = min(len(content), offset + limit)
+        return {"content": content[offset:end], "offset": offset, "total_chars": len(content),
+                "next_offset": end if end < len(content) else None,
+                "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest()}
+
+    def get_event(self, event_id: int, *, offset: int = 0, limit: int = 4000,
+                  include_inactive: bool = False) -> dict | None:
+        """Exact canonical text page. Inactive evidence is opt-in for owner audit."""
+        self._page("", offset, limit)
+        with self._connect() as db:
+            row = db.execute("SELECT e.*, (" + retrieval.visible_events() +
+                             ") AS visible FROM events e WHERE id=?", (event_id,)).fetchone()
+            if row is None or (not row["visible"] and not include_inactive):
+                return None
+            item = dict(row)
+            item["inactive"] = not bool(item.pop("visible"))
+            item["meta"] = json.loads(item["meta"])
+            item["trust"] = "historical_unverified" if item["meta"].get("imported") else "observed_episode_not_accepted_knowledge"
+            item.update(self._page(item["content"], offset, limit))
+            origin = db.execute("SELECT source,external_id,original_role,original_timestamp,content_hash,imported_at "
+                                "FROM event_origins WHERE event_id=?", (event_id,)).fetchone()
+            if origin:
+                item["origin"] = dict(origin)
+            return item
+
+    def get_memory(self, memory_id: int, *, offset: int = 0, limit: int = 4000,
+                   source_id: int | None = None, include_inactive: bool = False) -> dict | None:
+        """Page a knowledge record, or one immutable evidence snapshot by ID.
+
+        Snapshot content is loaded only when requested. Hashes refer to the
+        complete canonical text, never to an abridged model-produced summary.
+        """
+        self._page("", offset, limit)
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+            if row is None or (row["status"] in {"forgotten", "superseded"} and not include_inactive):
+                return None
+            item = dict(row)
+            item["key"] = item.pop("memory_key")
+            evidence = db.execute("SELECT event_id,role,content_hash,captured_at,length(content) AS total_chars "
+                                  "FROM memory_sources WHERE memory_id=? ORDER BY event_id", (memory_id,)).fetchall()
+            item["sources"] = [source["event_id"] for source in evidence]
+            item["source_snapshots"] = [dict(source) for source in evidence]
+            item["record_type"] = "memory"
+            if source_id is not None:
+                source = db.execute("SELECT * FROM memory_sources WHERE memory_id=? AND event_id=?",
+                                    (memory_id, source_id)).fetchone()
+                if source is None:
+                    return None
+                item.update({"record_type": "source_snapshot", "event_id": source["event_id"],
+                             "role": source["role"], "captured_at": source["captured_at"],
+                             "content": source["content"]})
+            item.update(self._page(item["content"], offset, limit))
+            return item
+
+    @staticmethod
+    def _import_timestamp(value: Any) -> tuple[str, str]:
+        raw = str(value)
+        if isinstance(value, (float, int)) and not isinstance(value, bool):
+            if not math.isfinite(value):
+                raise ValueError("import timestamp must be finite")
+            parsed = datetime.fromtimestamp(value, timezone.utc)
+        elif isinstance(value, str) and value.strip():
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("import timestamps require an explicit timezone")
+        else:
+            raise ValueError("import record requires created_at or timestamp")
+        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds"), raw
+
+    def import_events(self, records, source: str) -> dict:
+        """Atomically import up to 1000 historical records without reusing IDs.
+
+        Originals are low-trust data. Duplicate origins are durable even after
+        explicit retention; conflicting reuse is rejected instead of rewriting
+        a source that a later knowledge record may rely upon.
+        """
+        if not isinstance(source, str) or not source.strip() or len(source) > 512:
+            raise ValueError("import source must be a nonempty string of at most 512 characters")
+        source = redact(source.strip())
+        prepared = []
+        for record in records:
+            if len(prepared) >= 1000:
+                raise ValueError("import batch limit is 1000 records")
+            if not isinstance(record, dict):
+                raise ValueError("import records must be objects")
+            external = record.get("external_id", record.get("id"))
+            if isinstance(external, bool) or not isinstance(external, (str, int)) or not str(external).strip() or len(str(external)) > 512:
+                raise ValueError("import record requires a bounded external_id")
+            role, content = record.get("role"), record.get("content")
+            if not isinstance(role, str) or not role.strip() or len(role) > 64:
+                raise ValueError("import role must contain 1–64 characters")
+            if not isinstance(content, str) or len(content) > 40000:
+                raise ValueError("import content must be a string of at most 40000 characters")
+            when, original_timestamp = self._import_timestamp(record.get("created_at", record.get("timestamp")))
+            session = record.get("session") or "import:" + source
+            if not isinstance(session, str) or len(session) > 1024:
+                raise ValueError("import session must be a string of at most 1024 characters")
+            content, role, external, session = (redact(str(value)) for value in (content, role, external, session))
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            origin_meta = json.dumps(_clean(record.get("meta") or {}), ensure_ascii=False, sort_keys=True)
+            if len(origin_meta) > 16000:
+                raise ValueError("import metadata exceeds 16000 characters")
+            prepared.append((external,role,content,when,original_timestamp,session,digest,origin_meta))
+        imported = skipped = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT value FROM meta WHERE key='_event_high_watermark'").fetchone()
+            identifier = max(int(json.loads(previous[0])) if previous else 0,
+                             db.execute("SELECT coalesce(max(id),0) FROM events").fetchone()[0],
+                             db.execute("SELECT coalesce(max(event_id),0) FROM memory_sources").fetchone()[0])
+            for external,role,content,when,original_timestamp,session,digest,origin_meta in prepared:
+                existing = db.execute("SELECT original_role,original_timestamp,content_hash FROM event_origins "
+                                      "WHERE source=? AND external_id=?", (source,external)).fetchone()
+                if existing is not None:
+                    if tuple(existing) != (role,original_timestamp,digest):
+                        raise ValueError("conflicting content for an existing import origin")
+                    skipped += 1
+                    continue
+                identifier += 1
+                metadata = {"imported": True, "trust": "historical_unverified", "source": source,
+                            "external_id": external, "origin_meta": json.loads(origin_meta)}
+                db.execute("INSERT INTO events(id,role,content,session,created_at,meta) VALUES(?,?,?,?,?,?)",
+                           (identifier,role,content,session,when,json.dumps(metadata,ensure_ascii=False)))
+                db.execute("INSERT INTO event_origins VALUES(?,?,?,?,?,?,?,?)",
+                           (source,external,identifier,role,original_timestamp,digest,origin_meta,_now()))
+                imported += 1
+            db.execute("INSERT INTO meta(key,value) VALUES('_event_high_watermark',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(identifier),))
+        return {"imported": imported, "skipped": skipped}
 
     def remember(self, content: str, *, kind: str = "fact", level: int = 1,
                  status: str = "candidate", sources: list[int], key: str | None = None,
@@ -225,17 +373,15 @@ class Store:
                     "ORDER BY level DESC, id DESC LIMIT ?", (*statuses, bounded),
                 ).fetchall()
             else:
-                tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)[:16]
-                if not tokens:
-                    return []
-                # Each term is quoted. User input never becomes an FTS operator.
-                expression = " OR ".join('"' + token[:64] + '"' for token in tokens)
-                rows = db.execute(
-                    "SELECT m.* FROM memories_fts JOIN memories m ON m.id=memories_fts.rowid "
-                    f"WHERE memories_fts MATCH ? AND m.status IN ({placeholders}) "
-                    "ORDER BY m.level DESC, bm25(memories_fts), m.id DESC LIMIT ?",
-                    (expression, *statuses, bounded),
-                ).fetchall()
+                hits = retrieval.matched_chunks(db, query, "memory", statuses=statuses, limit=bounded)
+                result = []
+                for hit in hits:
+                    row = db.execute("SELECT * FROM memories WHERE id=?", (hit["source_id"],)).fetchone()
+                    item = self._memory(db, row)
+                    item["match"] = hit
+                    item["score"] = hit["score"]
+                    result.append(item)
+                return result
             return [self._memory(db, row) for row in rows]
 
     def recall_events(self, query: str, limit: int = 5) -> list[dict]:
@@ -247,21 +393,13 @@ class Store:
         bounded = min(self._limit(limit), 12)
         if not bounded:
             return []
-        excluded = """e.id NOT IN (
-            SELECT ms.event_id FROM memory_sources ms JOIN memories m ON m.id=ms.memory_id
-            WHERE m.status IN ('forgotten','superseded')
-        )"""
+        excluded = retrieval.visible_events()
         with self._connect() as db:
+            hit_by_id = {}
             if query.strip():
-                tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)[:16]
-                if not tokens:
-                    return []
-                expression = " OR ".join('"' + token[:64] + '"' for token in tokens)
-                matches = db.execute(
-                    "SELECT e.* FROM events_fts JOIN events e ON e.id=events_fts.rowid "
-                    f"WHERE events_fts MATCH ? AND {excluded} "
-                    "ORDER BY bm25(events_fts),e.id DESC LIMIT ?", (expression, bounded),
-                ).fetchall()
+                hits = retrieval.matched_chunks(db, query, "event", limit=bounded)
+                hit_by_id = {hit["source_id"]: hit for hit in hits}
+                matches = [db.execute("SELECT * FROM events WHERE id=?", (hit["source_id"],)).fetchone() for hit in hits]
             else:
                 matches = db.execute(f"SELECT e.* FROM events e WHERE {excluded} ORDER BY e.id DESC LIMIT ?",
                                      (bounded,)).fetchall()
@@ -292,21 +430,119 @@ class Store:
                     break
             result = []
             for row in rows[:bounded]:
-                item = dict(row)
-                item["meta"] = json.loads(item["meta"])
-                item["truncated"] = len(item["content"]) > 2000
-                item["content"] = item["content"][:2000]
-                item["trust"] = "observed_episode_not_accepted_knowledge"
+                item = self._episode(row, hit_by_id.get(row["id"]))
                 result.append(item)
             return result
 
-    def list_memories(self, status: str = "candidate", limit: int = 10) -> list[dict]:
+    @staticmethod
+    def _episode(row: sqlite3.Row, hit: dict | None = None) -> dict:
+        item = dict(row)
+        item["meta"] = json.loads(item["meta"])
+        content = item["content"]
+        start = hit["start_char"] if hit else 0
+        # Give the matching passage, not an unrelated prefix of a long source.
+        start = min(start, max(0, len(content) - 2000))
+        item.update(Store._page(content, start, 2000))
+        item["truncated"] = len(content) > 2000
+        item["trust"] = "historical_unverified" if item["meta"].get("imported") else "observed_episode_not_accepted_knowledge"
+        if hit:
+            item["match"] = hit
+            item["score"] = hit["score"]
+        return item
+
+    def list_memories(self, status: str = "candidate", limit: int = 10, *, before_id: int | None = None) -> list[dict]:
         if status not in _STATUSES:
             raise ValueError("unknown memory status")
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM memories WHERE status=? ORDER BY id DESC LIMIT ?",
-                              (status, self._limit(limit))).fetchall()
+            rows = db.execute("SELECT * FROM memories WHERE status=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?",
+                              (status, before_id, before_id, self._limit(limit))).fetchall()
             return [self._memory(db, row) for row in rows]
+
+    def memory_page(self, status: str = "candidate", limit: int = 10, *, before_id: int | None = None) -> dict:
+        bounded = self._limit(limit)
+        rows = self.list_memories(status, bounded, before_id=before_id)
+        more = bool(rows and self.list_memories(status, 1, before_id=rows[-1]["id"]))
+        return {"items": rows, "next_cursor": rows[-1]["id"] if more else None}
+
+    def related_events(self, event_id: int, limit: int = 8) -> list[dict]:
+        """Read-only links: same task/session, then literal entity co-mentions.
+
+        A shared label is only a navigation hint; it never asserts that two
+        people, projects or facts are the same real-world entity.
+        """
+        bounded = min(self._limit(limit), 20)
+        if not bounded:
+            return []
+        with self._connect() as db:
+            source = db.execute("SELECT e.* FROM events e WHERE e.id=? AND " + retrieval.visible_events(), (event_id,)).fetchone()
+            if source is None:
+                return []
+            retrieval.sync(db)
+            metadata = json.loads(source["meta"])
+            sessions = {source["session"]}
+            if metadata.get("job"):
+                sessions.add("work:" + str(metadata["job"]))
+            placeholders = ",".join("?" for _ in sessions)
+            result = []
+            seen = {event_id}
+            # Avoid treating the entire long-lived main/import archive as one
+            # task: only nearest neighbors are useful for those sessions.
+            rows = db.execute("SELECT e.* FROM events e WHERE e.session IN (" + placeholders +
+                              ") AND e.id<>? AND " + retrieval.visible_events() +
+                              " ORDER BY abs(e.id-?),e.id LIMIT ?", (*sorted(sessions),event_id,event_id,bounded)).fetchall()
+            for row in rows:
+                item = self._episode(row)
+                item["relationship"] = "same_task" if row["session"].startswith("work:") else "session_neighbor"
+                item["related_to"] = event_id
+                result.append(item)
+                seen.add(row["id"])
+            if len(result) < bounded:
+                rows = db.execute("""SELECT e.*,group_concat(DISTINCT target.entity) AS shared_entities
+                    FROM retrieval_mentions target JOIN retrieval_mentions other ON target.entity=other.entity
+                    JOIN events e ON e.id=other.source_id
+                    WHERE target.source_kind='event' AND target.source_id=? AND other.source_kind='event'
+                    AND e.id<>? AND """ + retrieval.visible_events() +
+                    " GROUP BY e.id ORDER BY count(DISTINCT target.entity) DESC,e.id DESC LIMIT ?",
+                    (event_id,event_id,bounded * 2)).fetchall()
+                for row in rows:
+                    if row["id"] in seen:
+                        continue
+                    item = self._episode(row)
+                    item["relationship"] = "literal_entity_co_mention"
+                    item["related_to"] = event_id
+                    item["shared_entities"] = item["shared_entities"].split(",")[:10]
+                    result.append(item)
+                    if len(result) >= bounded:
+                        break
+            return result
+
+    def entity_links(self, query: str = "", limit: int = 20) -> list[dict]:
+        """Bounded mention projection with exact evidence IDs and source hashes."""
+        bounded = min(self._limit(limit), 50)
+        if not bounded:
+            return []
+        with self._connect() as db:
+            retrieval.sync(db)
+            query = retrieval.normalize(query).strip()
+            rows = db.execute("""SELECT r.* FROM retrieval_mentions r
+                LEFT JOIN events e ON r.source_kind='event' AND e.id=r.source_id
+                LEFT JOIN memories m ON r.source_kind='memory' AND m.id=r.source_id
+                WHERE (?='' OR instr(r.entity,?)>0)
+                AND ((r.source_kind='event' AND e.id IS NOT NULL AND """ + retrieval.visible_events() +
+                ") OR (r.source_kind='memory' AND m.status='accepted')) "
+                "ORDER BY r.source_id DESC,r.entity LIMIT 1000", (query,query)).fetchall()
+            grouped = {}
+            for row in rows:
+                key = row["entity"]
+                if key not in grouped:
+                    if len(grouped) >= bounded:
+                        continue
+                    grouped[key] = {"entity": key, "label": row["label"], "kind": row["kind"],
+                                    "trust": "literal_mention_projection_not_asserted_fact", "sources": []}
+                if len(grouped[key]["sources"]) < 10:
+                    grouped[key]["sources"].append({"source_kind": row["source_kind"], "id": row["source_id"],
+                        "start_char": row["start_char"], "end_char": row["end_char"], "content_hash": row["content_hash"]})
+            return list(grouped.values())
 
     @staticmethod
     def _accept(db: sqlite3.Connection, memory_id: int) -> None:
@@ -397,9 +633,12 @@ class Store:
                 target.close()
         return destination
 
-    def prune(self, days: int = 90) -> int:
-        if days < 0:
+    def prune(self, days: int = 0) -> int:
+        """Apply an explicit positive-day retention policy; zero keeps all L0."""
+        if type(days) is not int or days < 0:
             raise ValueError("retention days cannot be negative")
+        if days == 0:
+            return 0
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="microseconds")
         with self._connect() as db:
             result = db.execute(

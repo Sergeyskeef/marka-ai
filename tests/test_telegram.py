@@ -9,7 +9,9 @@ import urllib.error
 
 from marka.telegram import (HTTPResponse, TelegramClient,
                             TelegramError, TelegramRetryAfter, parse_message,
-                            split_message, valid_private_message)
+                            split_message, valid_private_message, parse_attachment,
+                            attachment_problem, decode_text_attachment, MAX_ATTACHMENT_BYTES,
+                            _http_request, _NoRedirect)
 
 
 TOKEN = "123456:" + "fake-token-for-tests-only-12345678"
@@ -39,6 +41,155 @@ def update(**changes):
            "chat": {"id": 17, "type": "private"}, "text": "Привет"}}
     raw["message"].update(changes)
     return raw
+
+
+def document_update(**changes):
+    raw = update(text=None, caption="Проверь этот файл", document={
+        "file_id": "FILE_ID_1", "file_unique_id": "UNIQUE_1", "file_name": "report.txt",
+        "mime_type": "text/plain", "file_size": 5,
+    })
+    raw["message"]["document"].update(changes)
+    return raw
+
+
+class AttachmentParsingTests(unittest.TestCase):
+    def test_original_private_document_metadata_and_caption(self):
+        item = parse_attachment(document_update())
+        self.assertEqual((item.update_id, item.chat_id, item.user_id), (41, 17, 17))
+        self.assertEqual(item.file_name, "report.txt")
+        self.assertEqual(item.caption, "Проверь этот файл")
+        self.assertTrue(valid_private_message(item))
+        self.assertIsNone(attachment_problem(item))
+        self.assertEqual(decode_text_attachment(item, b"hello"), "hello")
+
+    def test_forwarded_edited_bot_group_mismatched_and_malformed_inputs_rejected(self):
+        examples = []
+        for key, value in (("forward_origin", {}), ("forward_date", 1), ("via_bot", {}),
+                           ("sender_chat", {}), ("from", {"id": 17, "is_bot": True}),
+                           ("chat", {"id": -17, "type": "group"}),
+                           ("chat", {"id": 18, "type": "private"}),
+                           ("chat", {"id": 17, "type": []})):
+            raw = document_update()
+            raw["message"][key] = value
+            examples.append(raw)
+        raw = document_update()
+        raw["edited_message"] = raw.pop("message")
+        examples.append(raw)
+        examples += [None, [], {"update_id": True}, document_update(file_size=True),
+                     document_update(file_size=-1), document_update(file_id="https://elsewhere/"),
+                     document_update(file_name="broken\ud800.txt")]
+        for raw in examples:
+            with self.subTest(raw_type=type(raw).__name__):
+                self.assertIsNone(parse_attachment(raw))
+
+    def test_unsupported_and_oversized_files_get_safe_problem_before_download(self):
+        self.assertIn("PDF", attachment_problem(parse_attachment(document_update(file_name="report.pdf"))))
+        self.assertIn("512 KiB", attachment_problem(parse_attachment(document_update(file_size=MAX_ATTACHMENT_BYTES + 1))))
+        self.assertIn("supported", attachment_problem(parse_attachment(document_update(file_name="archive.zip"))))
+
+    def test_filename_is_basename_and_does_not_inject_path(self):
+        item = parse_attachment(document_update(file_name="../../private\\settings.txt"))
+        self.assertNotIn("/", item.file_name)
+        self.assertNotIn("\\", item.file_name)
+        self.assertFalse(item.file_name.startswith("."))
+
+    def test_utf8_bom_unknown_size_and_binary_rejection(self):
+        item = parse_attachment(document_update(file_size=None, file_name="script.py"))
+        self.assertEqual(decode_text_attachment(item, b"\xef\xbb\xbfprint('hello')"), "print('hello')")
+        for payload in (b"not utf8\xff", b"binary\x00payload", b"escape\x1bpayload", b"x" * (MAX_ATTACHMENT_BYTES + 1)):
+            with self.assertRaises(TelegramError):
+                decode_text_attachment(item, payload)
+        with self.assertRaises(TelegramError):
+            decode_text_attachment(parse_attachment(document_update()), b"shorter than declared")
+
+
+class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
+    def metadata(self, **changes):
+        return response({"file_id": "FILE_ID_1", "file_path": "documents/file_42.txt", "file_size": 5, **changes})
+
+    async def test_download_uses_getfile_then_same_official_origin_get(self):
+        fake = FakeHTTP(self.metadata(), HTTPResponse(200, b"hello"))
+        client = TelegramClient(TOKEN, transport=fake)
+        self.assertEqual(await client.download_file("FILE_ID_1", expected_size=5), b"hello")
+        self.assertEqual(len(fake.requests), 2)
+        self.assertTrue(fake.requests[0][0].full_url.endswith("/getFile"))
+        self.assertEqual(json.loads(fake.requests[0][0].data), {"file_id": "FILE_ID_1"})
+        request = fake.requests[1][0]
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(request.full_url, f"https://api.telegram.org/file/bot{TOKEN}/documents/file_42.txt")
+        self.assertEqual(request._marka_response_limit, MAX_ATTACHMENT_BYTES)
+
+    async def test_download_refuses_nontelegram_origin_before_getfile(self):
+        fake = FakeHTTP()
+        client = TelegramClient(TOKEN, api_base="https://example.org", transport=fake)
+        with self.assertRaises(TelegramError):
+            await client.download_file("FILE_ID_1")
+        self.assertFalse(fake.requests)
+
+    async def test_unsafe_getfile_paths_never_reach_download(self):
+        for path in ("/documents/file.txt", "//evil.test/file", "https://evil.test/a", "../private",
+                     "documents/../auth.json", "documents/%2e%2e/file", "documents/file?x=1",
+                     "documents/file#fragment", "documents\\file", "documents//file", "documents/.hidden"):
+            fake = FakeHTTP(self.metadata(file_path=path))
+            with self.subTest(path=path), self.assertRaises(TelegramError):
+                await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1")
+            self.assertEqual(len(fake.requests), 1)
+
+    async def test_invalid_metadata_and_declared_oversize_stop_before_download(self):
+        for changes in ({"file_id": "OTHER_ID"}, {"file_size": MAX_ATTACHMENT_BYTES + 1},
+                        {"file_size": True}, {"file_size": -1}, {"file_size": 6}):
+            fake = FakeHTTP(self.metadata(**changes))
+            with self.subTest(changes=changes), self.assertRaises(TelegramError):
+                await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1", expected_size=5)
+            self.assertEqual(len(fake.requests), 1)
+
+    async def test_actual_payload_and_truncated_body_are_checked(self):
+        for data in (b"x" * (MAX_ATTACHMENT_BYTES + 1), b"four", b"sixsix"):
+            fake = FakeHTTP(self.metadata(), HTTPResponse(200, data))
+            with self.assertRaises(TelegramError):
+                await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1")
+
+    async def test_missing_optional_size_still_enforces_actual_limit(self):
+        fake = FakeHTTP(response({"file_id": "FILE_ID_1", "file_path": "documents/file.txt"}), HTTPResponse(200, b"hello"))
+        self.assertEqual(await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1"), b"hello")
+
+    async def test_download_redirect_and_network_errors_are_safe_and_not_sends(self):
+        for result in (HTTPResponse(302, TOKEN.encode()), HTTPResponse(500, TOKEN.encode()),
+                       urllib.error.URLError("https://api.telegram.org/file/bot" + TOKEN)):
+            fake = FakeHTTP(self.metadata(), result)
+            with self.assertRaises(TelegramError) as caught:
+                await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1")
+            self.assertNotIn(TOKEN, str(caught.exception))
+            self.assertFalse(caught.exception.uncertain)
+        self.assertIsNone(_NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.test"))
+
+    async def test_input_limits_are_checked_before_any_request(self):
+        for arguments in ({"expected_size": MAX_ATTACHMENT_BYTES + 1}, {"expected_size": True},
+                          {"max_bytes": MAX_ATTACHMENT_BYTES + 1}, {"max_bytes": 0}):
+            fake = FakeHTTP()
+            with self.assertRaises(TelegramError):
+                await TelegramClient(TOKEN, transport=fake).download_file("FILE_ID_1", **arguments)
+            self.assertEqual(fake.requests, [])
+
+    def test_default_transport_bounds_actual_read_not_only_buffer_afterwards(self):
+        class FileResponse:
+            code = 200
+            read_limit = None
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit):
+                self.read_limit = limit
+                return b"x" * limit
+        class Opener:
+            def open(self, request, timeout): return file_response
+        file_response = FileResponse()
+        import urllib.request
+        request = urllib.request.Request("https://api.telegram.org/file/example")
+        request._marka_response_limit = 1024
+        with patch("marka.telegram.urllib.request.build_opener", return_value=Opener()):
+            with self.assertRaises(ValueError):
+                _http_request(request, 5)
+        self.assertEqual(file_response.read_limit, 1025)
 
 
 class ParseTests(unittest.TestCase):

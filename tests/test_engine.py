@@ -293,7 +293,9 @@ class EngineAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         request = self.store.event("user", job["prompt"], meta={"job": job["id"]})
         self.queue.checkpoint(job["id"], [{"kind": "request", "event_id": request}])
         self.queue.finish(job["id"], "blocked", "later")
-        self.store.prune(0)
+        with self.store._connect() as db:
+            db.execute("UPDATE events SET created_at='2000-01-01T00:00:00+00:00' WHERE id=?", (request,))
+        self.store.prune(1)
         self.queue.resume(job["id"])
         engine, _ = self.engine(final(lesson="Проверяемый кандидат"))
         await engine.run(self.queue.claim())

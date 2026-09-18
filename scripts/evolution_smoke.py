@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise code evolution with the real runner and an explicitly fake token.
 
-The current installed redactor does not handle Slack bot tokens. This fixture
+The fixture introduces a deliberately synthetic credential format. It
 tests a candidate that adds that behavior without installing it. Both runs use
 the same shipped tests plus the same supplied regression case. No LLM/auth is
 involved, and a passing case makes no claim of broader agent improvement.
@@ -24,16 +24,16 @@ async def smoke() -> dict:
     source = Path(marka.redact.__file__)
     before = source.read_bytes()
     original = before.decode("utf-8").replace("\r\n", "\n")
-    insertion = '    (re.compile(r"\\bxoxb-[A-Za-z0-9-]{16,}\\b"), "[REDACTED_SLACK_TOKEN]"),\n'
+    insertion = '    (re.compile(r"\\bevalkey-[A-Za-z0-9-]{16,}\\b"), "[REDACTED_EVAL_FIXTURE]"),\n'
     candidate = original.replace("_PATTERNS = (\n", "_PATTERNS = (\n" + insertion, 1)
     if candidate == original:
         raise RuntimeError("The redactor fixture no longer matches the installed source")
     regression = '''import unittest
 from marka.redact import redact
-class SlackRedactionRegression(unittest.TestCase):
-    def test_fake_slack_bot_token_is_redacted(self):
-        token = "xoxb-" + "000000000000-000000000000-FAKENOTAREALSECRET012345"
-        self.assertEqual(redact("value=" + token), "value=[REDACTED_SLACK_TOKEN]")
+class SyntheticRedactionRegression(unittest.TestCase):
+    def test_synthetic_fixture_is_redacted(self):
+        token = "evalkey-" + "000000000000-FAKENOTAREALSECRET012345"
+        self.assertEqual(redact("value=" + token), "value=[REDACTED_EVAL_FIXTURE]")
 '''
     with tempfile.TemporaryDirectory(prefix="marka-evolution-smoke-") as directory:
         settings = Settings(Path(directory), sandbox_socket=os.environ.get(
@@ -41,7 +41,7 @@ class SlackRedactionRegression(unittest.TestCase):
         workspace = Workspace(settings.workspace)
         evolution = Evolution(settings, workspace)
         result = await evolution.experiment(
-            "Regression fixture: redact explicitly fake Slack bot token without changing other redaction behavior",
+            "Regression fixture: support synthetic evalkey format without changing other redaction behavior",
             {"src/marka/redact.py": candidate}, regression,
         )
         report_path = settings.data_dir / "evolution" / result["id"] / "report.json"

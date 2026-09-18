@@ -4,12 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "marka-ai"
-version = "2.0.0"
+version = "2.1.0"
 description = "A persistent personal Telegram agent powered by your Codex login"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = []
+
+[project.optional-dependencies]
+semantic = ["onnxruntime==1.30.0", "tokenizers==0.23.2", "numpy==2.3.5"]
 
 [project.scripts]
 marka = "marka.cli:main"

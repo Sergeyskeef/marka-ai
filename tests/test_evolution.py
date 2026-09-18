@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import zlib
 from unittest.mock import patch
 
 from marka.config import Settings
@@ -68,6 +69,18 @@ class EvolutionTests(unittest.IsolatedAsyncioTestCase):
 
     def archive(self, result):
         return self.settings.data_dir / "evolution" / result["id"]
+
+    def test_large_complete_report_uses_bounded_compression_without_losing_cases(self):
+        cases = {f"test_module.LongMeaningfulClass.test_behavior_{number:04d}_with_real_evidence": "passed" for number in range(700)}
+        value = result_for("nonce", cases)
+        raw = value["output"][len(_MARKER):].strip().encode()
+        self.assertGreater(len(raw), 32000)
+        value["output"] = _MARKER + json.dumps({"encoding": "zlib-base64", "data": base64.b64encode(zlib.compress(raw)).decode()})
+        self.assertLess(len(value["output"]), 32000)
+        self.assertEqual(Evolution._parse(value, "nonce")["outcomes"], cases)
+        value["output"] = _MARKER + json.dumps({"encoding": "zlib-base64", "data": base64.b64encode(zlib.compress(b"x" * 300000)).decode()})
+        with self.assertRaises(ValueError):
+            Evolution._parse(value, "nonce")
 
     def test_inspection_only_exposes_public_snapshot(self):
         evolution = self.evolution(FakeSandbox())

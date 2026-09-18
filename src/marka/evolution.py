@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import uuid
+import zlib
 
 from . import sandbox
 from .redact import redact
@@ -29,7 +30,7 @@ _LIMITATION = ("Regression evidence only: imported candidate code shares unittes
 # This harness comes from the installed trusted runtime, not from a proposal.
 # Keep its stdout short enough to survive the code runner's 32 KB output bound.
 _HARNESS = r'''
-import contextlib, hashlib, io, json, pathlib, sys, unittest
+import base64, contextlib, hashlib, io, json, pathlib, sys, unittest, zlib
 root = pathlib.Path.cwd()
 manifest = json.loads((root / "eval_manifest.json").read_text("utf-8"))
 sys.path.insert(0, str(root / "src"))
@@ -77,7 +78,8 @@ report = {"nonce": manifest["nonce"], "discovered_count": len(discovered),
           "successful": results.wasSuccessful(), "log": capture.text(),
           "failures": [{"id": test.id(), "traceback": text[-600:]}
                        for test, text in (results.failures + results.errors)[:4]]}
-print("MARKA_EVAL_REPORT=" + json.dumps(report, ensure_ascii=False), flush=True)
+packed = base64.b64encode(zlib.compress(json.dumps(report, ensure_ascii=False).encode("utf-8"))).decode("ascii")
+print("MARKA_EVAL_REPORT=" + json.dumps({"encoding": "zlib-base64", "data": packed}), flush=True)
 sys.exit(0 if results.wasSuccessful() else 1)
 '''
 
@@ -98,6 +100,155 @@ class Evolution:
         default_tests = self.source_root.parent.parent / "tests"
         self.test_root = Path(test_root or os.environ.get("MARKA_EVAL_TESTS", default_tests)).resolve()
         self.runner = runner or sandbox.run_client
+
+    def _archive_root(self) -> Path:
+        root = Path(self.settings.data_dir) / "evolution"
+        if root.is_symlink() or (root.exists() and not root.is_dir()):
+            raise ValueError("Evolution archive must be a real directory, not a symlink")
+        return root
+
+    def _archive_file(self, identifier: str, name: str, maximum: int) -> bytes:
+        if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
+            raise ValueError("Experiment identifier must be its 32-character lowercase hexadecimal ID")
+        root = self._archive_root()
+        directory = root / identifier
+        path = directory / name
+        if (directory.is_symlink() or not directory.is_dir() or path.is_symlink()
+                or not path.is_file() or not path.resolve().is_relative_to(root.resolve())):
+            raise ValueError("Experiment artifact is missing or has an unsafe archive path")
+        if path.stat().st_size > maximum:
+            raise ValueError("Experiment artifact exceeds the archive reading limit")
+        with path.open("rb") as stream:
+            data = stream.read(maximum + 1)
+        if len(data) > maximum:
+            raise ValueError("Experiment artifact exceeds the archive reading limit")
+        return data
+
+    def _read_report(self, identifier: str) -> tuple[dict, bytes]:
+        data = self._archive_file(identifier, "report.json", 512 * 1024)
+        try:
+            report = json.loads(data)
+        except (ValueError, UnicodeError):
+            raise ValueError("Experiment report is not valid JSON") from None
+        statuses = {"evaluation_failed", "rejected", "regression_passed", "improved_on_provided_case"}
+        if (not isinstance(report, dict) or report.get("id") != identifier or not isinstance(report.get("status"), str)
+                or report["status"] not in statuses
+                or report.get("promotion") != "none" or not isinstance(report.get("objective"), str)
+                or len(report["objective"]) > 2000 or not isinstance(report.get("created_at"), str)
+                or not isinstance(report.get("changed_paths"), list) or not 1 <= len(report["changed_paths"]) <= 3):
+            raise ValueError("Experiment report has invalid identity or metadata")
+        try:
+            created = datetime.fromisoformat(report["created_at"])
+        except ValueError:
+            raise ValueError("Experiment report has an invalid timestamp") from None
+        if created.tzinfo is None or any(not isinstance(path, str) or not re.fullmatch(r"src/marka/[A-Za-z_][A-Za-z0-9_]*\.py", path)
+                                          for path in report["changed_paths"]):
+            raise ValueError("Experiment report has invalid source paths or timestamp")
+        for label in ("baseline", "candidate"):
+            hashes = report.get(label + "_hashes")
+            if not isinstance(hashes, dict) or not 1 <= len(hashes) <= 1000:
+                raise ValueError("Experiment report has no bounded source manifest")
+            for path, digest in hashes.items():
+                self._source_path(path)
+                if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                    raise ValueError("Experiment report contains an invalid source digest")
+        return report, data
+
+    @staticmethod
+    def _source_path(path: str) -> str:
+        sandbox._safe_name(path)
+        if not (re.fullmatch(r"src/marka/[A-Za-z_][A-Za-z0-9_]*\.py", path)
+                or path == "src/marka/identity.md" or (path.startswith("tests/") and path.endswith(".py"))):
+            raise ValueError("Only archived public modules, identity and test source may be read")
+        return path
+
+    def history(self, limit: int = 8) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 30:
+            raise ValueError("Experiment history limit must be 1–30")
+        root = self._archive_root()
+        if not root.exists():
+            return {"experiments": [], "skipped_corrupt": 0, "errors": [], "truncated": False,
+                    "promotion": "none", "limitation": _LIMITATION}
+        candidates, capped = [], False
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if not re.fullmatch(r"[0-9a-f]{32}", entry.name):
+                    continue
+                if len(candidates) >= 1000:
+                    capped = True
+                    break
+                try:
+                    candidates.append((entry.stat(follow_symlinks=False).st_mtime, entry.name))
+                except OSError:
+                    candidates.append((0, entry.name))
+        items, errors, skipped, inspected = [], [], 0, 0
+        for _, identifier in sorted(candidates, reverse=True):
+            inspected += 1
+            try:
+                report, data = self._read_report(identifier)
+                items.append({"id": identifier, "objective": report["objective"], "status": report["status"],
+                              "created_at": report["created_at"], "changed_paths": report["changed_paths"],
+                              "reason": str(report.get("reason", ""))[:1000], "report_sha256": _hash(data),
+                              "promotion": "none"})
+            except (ValueError, OSError):
+                skipped += 1
+                if len(errors) < 8:
+                    errors.append({"id": identifier, "error": "Archive entry is incomplete, corrupt or unsafe"})
+            if len(items) >= limit:
+                break
+        return {"experiments": items, "skipped_corrupt": skipped, "errors": errors,
+                "truncated": capped or inspected < len(candidates), "promotion": "none", "limitation": _LIMITATION}
+
+    def read_experiment(self, identifier: str, artifact: str = "report", path: str = "", *,
+                        offset: int = 0, limit: int = 8000) -> dict:
+        if not isinstance(artifact, str) or artifact not in {"report", "patch", "candidate", "baseline"}:
+            raise ValueError("Read report, patch, candidate or baseline")
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 8000:
+            raise ValueError("Archive reading requires a nonnegative offset and limit 1–8000")
+        if not isinstance(path, str) or (path and artifact in {"report", "patch"}):
+            raise ValueError("A source path is supported only for candidate or baseline snapshots")
+        report, report_data = self._read_report(identifier)
+        meta = {"id": identifier, "artifact": artifact, "status": report["status"], "promotion": "none",
+                "report_sha256": _hash(report_data), "trust": "archived_experiment_data", "limitation": _LIMITATION}
+        if artifact == "report":
+            data = report_data
+        elif artifact == "patch":
+            data = self._archive_file(identifier, "candidate.patch", 1024 * 1024)
+            if report.get("patch_sha256") and report["patch_sha256"] != _hash(data):
+                raise ValueError("Experiment patch does not match its recorded digest")
+            meta["integrity"] = "matched_report_digest" if report.get("patch_sha256") else "legacy_archive_without_recorded_patch_digest"
+        else:
+            if path:
+                self._source_path(path)
+            data = self._archive_file(identifier, artifact + ".json", 4 * 1024 * 1024)
+            try:
+                sources = json.loads(data)
+            except (ValueError, UnicodeError):
+                raise ValueError("Experiment source bundle is not valid JSON") from None
+            expected = report[artifact + "_hashes"]
+            if not isinstance(sources, dict) or set(sources) != set(expected):
+                raise ValueError("Experiment source bundle does not match its report manifest")
+            for name, text in sources.items():
+                if not isinstance(text, str) or _hash(text.encode("utf-8")) != expected[name]:
+                    raise ValueError("Experiment source bytes do not match their recorded digest")
+            meta["integrity"] = "matched_report_manifest"
+            if not path:
+                meta.update(manifest_listing=True, total_files=len(sources), bundle_sha256=_hash(data))
+                data = _canonical([{"path": name, "sha256": expected[name], "bytes": len(sources[name].encode("utf-8"))}
+                                   for name in sorted(sources)])
+            else:
+                if path not in sources:
+                    raise ValueError("Requested source is not part of this experiment")
+                meta["path"] = path
+                data = sources[path].encode("utf-8")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeError:
+            raise ValueError("Experiment artifact is not UTF-8 text") from None
+        end = min(len(text), offset + limit)
+        return meta | {"content": text[offset:end], "sha256": _hash(data), "offset": offset,
+                       "total_chars": len(text), "next_offset": end if end < len(text) else None,
+                       "truncated": bool(offset or end < len(text))}
 
     def _snapshot(self) -> dict[str, bytes]:
         files = {}
@@ -162,7 +313,17 @@ class Evolution:
             raise ValueError("Evaluation requires exactly one structured summary")
         try:
             report = json.loads(lines[0])
-        except json.JSONDecodeError:
+            if isinstance(report, dict) and report.get("encoding") == "zlib-base64":
+                data = report.get("data")
+                if not isinstance(data, str) or len(data) > 50000:
+                    raise ValueError("Invalid compressed evaluation report")
+                packed = base64.b64decode(data, validate=True)
+                decoder = zlib.decompressobj()
+                unpacked = decoder.decompress(packed, 262145)
+                if len(unpacked) > 262144 or not decoder.eof or decoder.unused_data:
+                    raise ValueError("Evaluation report exceeds its bounded decoded size")
+                report = json.loads(unpacked)
+        except (ValueError, zlib.error, UnicodeError):
             raise ValueError("Evaluation summary is not valid JSON") from None
         if not isinstance(report, dict) or report.get("nonce") != nonce:
             raise ValueError("Evaluation summary does not match the run")
@@ -262,6 +423,7 @@ class Evolution:
                   "created_at": datetime.now(timezone.utc).isoformat(), "changed_paths": sorted(edits),
                   "baseline_hashes": baseline_hashes, "candidate_hashes": candidate_hashes,
                   "tests_sha256": tests_hash, "harness_sha256": _hash(_HARNESS.encode("utf-8")),
+                  "patch_sha256": _hash(patch_text.encode("utf-8")),
                   "model_proposed_test": bool(regression_test.strip()), "promotion": "none",
                   "limitation": _LIMITATION, "baseline": None, "candidate": None, "improved_tests": []}
         try:

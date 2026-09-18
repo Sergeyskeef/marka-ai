@@ -8,6 +8,9 @@ if ! docker compose run --rm --no-deps --entrypoint python mark -c 'import async
   docker compose run --rm --no-deps mark login
 fi
 docker compose run --rm --no-deps mark doctor --live
+if [ "${MARKA_SKIP_SEMANTIC:-0}" != "1" ]; then
+  docker compose run --rm --no-deps mark models install
+fi
 docker compose up -d
 docker compose ps
 echo 'Марк запущен. Отправь своему боту /start с кодом, выданным setup.'

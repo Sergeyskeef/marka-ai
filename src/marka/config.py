@@ -15,8 +15,12 @@ class Settings:
     max_steps: int = 12
     daily_calls: int = 200
     provider_timeout: int = 180
-    retention_days: int = 90
+    retention_days: int = 0
     sandbox_socket: str = ""
+    task_max_steps: int = 48
+    task_max_calls: int = 64
+    task_max_seconds: int = 900
+    semantic_search: bool = True
 
     @property
     def workspace(self) -> Path:
@@ -67,7 +71,11 @@ class Settings:
         settings.model = os.environ.get("MARKA_MODEL", settings.model)
         if not 1 <= settings.max_steps <= 50 or not 1 <= settings.daily_calls <= 10000:
             raise ValueError("Invalid work budget")
-        if not 10 <= settings.provider_timeout <= 900 or settings.retention_days < 1:
+        if not 10 <= settings.provider_timeout <= 900 or settings.retention_days < 0:
             raise ValueError("Invalid timeout or retention")
+        if not 1 <= settings.task_max_steps <= 500 or not 1 <= settings.task_max_calls <= 1000 or not 60 <= settings.task_max_seconds <= 86400:
+            raise ValueError("Invalid total task budget")
+        if type(settings.semantic_search) is not bool:
+            raise ValueError("Invalid memory settings")
         settings.prepare()
         return settings

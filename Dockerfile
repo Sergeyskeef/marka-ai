@@ -21,7 +21,8 @@ ENTRYPOINT ["python", "-m", "marka.sandbox"]
 
 FROM base AS bot
 ARG CODEX_VERSION=0.144.1
-RUN npm install --global --ignore-scripts @openai/codex@${CODEX_VERSION} \
+RUN pip install --no-cache-dir '.[semantic]' \
+    && npm install --global --ignore-scripts @openai/codex@${CODEX_VERSION} \
     && codex --version
 COPY scripts ./scripts
 COPY tests ./tests
