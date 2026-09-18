@@ -48,8 +48,9 @@ class SyntheticRedactionRegression(unittest.TestCase):
         report = json.loads(report_path.read_text("utf-8"))
         assert result["status"] == "improved_on_provided_case", json.dumps({
             "result": result,
-            "baseline_failures": report["baseline"].get("failures"),
-            "candidate_failures": report["candidate"].get("failures"),
+            "reason": report.get("reason"),
+            "baseline_failures": (report.get("baseline") or {}).get("failures"),
+            "candidate_failures": (report.get("candidate") or {}).get("failures"),
         })
         assert result["promotion"] == "none"
         assert result["baseline_tests"] == result["candidate_tests"]

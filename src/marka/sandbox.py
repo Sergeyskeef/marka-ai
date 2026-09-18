@@ -25,7 +25,7 @@ MAX_FILES = 200
 MAX_FILE_BYTES = 512 * 1024
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
-_ALLOWED = {"python": "/usr/local/bin/python", "python3": "/usr/local/bin/python",
+_ALLOWED = {"python": "/opt/venv/bin/python", "python3": "/opt/venv/bin/python",
             "node": "/usr/bin/node", "bash": "/bin/bash"}
 _RESERVED = {"con", "prn", "aux", "nul", "clock$", *[f"com{i}" for i in range(1, 10)],
              *[f"lpt{i}" for i in range(1, 10)], *[prefix + digit for prefix in ("com", "lpt") for digit in "¹²³"]}
@@ -249,7 +249,7 @@ def execute(argv, timeout, workspace: Path, files: dict[str, str] | None = None)
                     [sys.executable, "-I", "-c", _LIMIT_WRAPPER, str(timeout), _ALLOWED[argv[0]], *argv[1:]],
                     cwd=work, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                     start_new_session=True,
-                    env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home),
+                    env={"PATH": "/opt/venv/bin:/usr/local/bin:/usr/bin:/bin", "HOME": str(home),
                          "TMPDIR": str(scratch), "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"},
                 )
                 try:

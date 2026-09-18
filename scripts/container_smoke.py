@@ -48,6 +48,16 @@ def main() -> int:
     assert bash.get("exit_code") == 0 and bash["output"] == "BASH_OK"
     checks.append("python_node_bash")
 
+    # A symlink outside the venv can silently select system Python and lose
+    # installed dependencies. Exercise both aliases and shell PATH, not just
+    # the supervisor's own interpreter.
+    environment = "import sys,PIL; assert sys.prefix=='/opt/venv'; assert PIL.__version__=='12.3.0'; print('PINNED_ENV_OK')"
+    for argv in (["python", "-c", environment], ["python3", "-c", environment],
+                 ["bash", "-c", "python -c \"" + environment + "\""]):
+        result = run_client(socket_path, argv, 10)
+        assert result.get("exit_code") == 0 and result.get("output", "").strip() == "PINNED_ENV_OK"
+    checks.append("pinned_python_environment")
+
     private = Path(os.environ.get("MARKA_DATA", "/state")) / ("smoke-private-" + secrets.token_hex(8))
     private.write_text("private fixture - must not cross to the runner", encoding="utf-8")
     try:
