@@ -99,6 +99,32 @@ class SemanticTests(unittest.TestCase):
         self.assertEqual(self.index.update(), {"indexed": 0, "available": False})
         self.assertEqual(self.index.index_path.read_bytes(), damaged)
 
+    def test_fresh_stats_reports_corruption_and_new_instance_sees_manual_repair(self):
+        self.store.event("user", "alpha")
+        self.index.update()
+        healthy = self.index.index_path.read_bytes()
+        damaged = b"damaged optional SQLite index"
+        self.index.index_path.write_bytes(damaged)
+        broken = SemanticIndex(self.store, self.directory / "missing-model", encoder=self.encoder)
+        status = broken.stats()
+        self.assertFalse(status["available"])
+        self.assertEqual(status["error"], "sqlite_unavailable")
+        self.assertIsNone(status["sources"])
+        self.assertIsNone(status["chunks"])
+        self.assertEqual(self.index.index_path.read_bytes(), damaged)
+        self.index.index_path.write_bytes(healthy)  # Explicit external repair.
+        self.assertFalse(broken.stats()["available"])
+        reopened = SemanticIndex(self.store, self.directory / "missing-model", encoder=self.encoder)
+        self.assertTrue(reopened.stats()["available"])
+        self.assertEqual(reopened.stats()["sources"], 1)
+
+    def test_stats_does_not_hide_canonical_pending_queue_error(self):
+        self.index.index_path.touch()
+        with patch.object(self.index, "_prepare_pending", side_effect=sqlite3.DatabaseError("canonical damaged")):
+            with self.assertRaisesRegex(sqlite3.DatabaseError, "canonical damaged"):
+                self.index.stats()
+        self.assertFalse(self.index._disabled)
+
     def test_candidates_never_index_as_accepted_and_status_changes_gate_cached_vectors(self):
         _, accepted = self.remember("alpha accepted")
         _, candidate = self.remember("alpha candidate", accepted=False)

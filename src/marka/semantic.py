@@ -360,20 +360,30 @@ class SemanticIndex:
                 _ENCODERS[key] = LocalEncoder(self.model_dir)
             return _ENCODERS[key]
 
+    def _unavailable_stats(self):
+        return {"available": False, "model": MODEL, "revision": REVISION,
+                "pipeline": PIPELINE, "sources": None, "chunks": None,
+                "error": "sqlite_unavailable"}
+
     def stats(self):
         if self._disabled:
-            return {"available": False, "model": MODEL, "revision": REVISION,
-                    "pipeline": PIPELINE, "sources": None, "chunks": None,
-                    "error": "sqlite_unavailable"}
+            return self._unavailable_stats()
         if not self.index_path.exists():
             return {"available": self.available(), "model": MODEL, "revision": REVISION,
                     "pipeline": PIPELINE, "sources": 0, "chunks": 0}
-        self._initialize()
-        with self._db() as db:
-            return {"available": self.available(), "model": MODEL, "revision": REVISION,
-                    "pipeline": PIPELINE,
-                    "sources": db.execute("SELECT count(*) FROM indexed").fetchone()[0],
-                    "chunks": db.execute("SELECT count(*) FROM vectors").fetchone()[0]}
+        try:
+            self._initialize()
+            with self._db() as db:
+                return {"available": self.available(), "model": MODEL, "revision": REVISION,
+                        "pipeline": PIPELINE,
+                        "sources": db.execute("SELECT count(*) FROM indexed").fetchone()[0],
+                        "chunks": db.execute("SELECT count(*) FROM vectors").fetchone()[0]}
+        except sqlite3.Error:
+            if not self._disabled:
+                # _prepare_pending touches canonical storage outside _db.
+                # Its failures must not look like an optional index problem.
+                raise
+            return self._unavailable_stats()
 
     @staticmethod
     def chunks(text: str):
