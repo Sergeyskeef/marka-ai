@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+if [ -f /etc/marka-guardian/config.json ] || docker inspect marka-bridge-1 >/dev/null 2>&1; then
+  echo 'Protected installation detected. Use docs/SELF_UPGRADES.md; ordinary Compose replaces its protective mounts.' >&2
+  exit 1
+fi
 echo 'Настройка отдельного Марка рядом с существующими сервисами.'
 docker compose build
 docker compose run --rm --no-deps mark setup

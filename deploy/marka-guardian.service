@@ -1,0 +1,29 @@
+[Unit]
+Description=Independent Mark release guardian
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I /opt/marka-guardian/guardian.py --config /etc/marka-guardian/config.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+Environment=HOME=/var/lib/marka-guardian/controller DOCKER_CONFIG=/var/lib/marka-guardian/controller/docker
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/marka-guardian /var/lib/docker/volumes/marka_state/_data
+RestrictAddressFamilies=AF_UNIX
+TimeoutStopSec=30
+KillMode=control-group
+MemoryMax=512M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

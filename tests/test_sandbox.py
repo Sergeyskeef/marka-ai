@@ -70,8 +70,10 @@ class SandboxTests(unittest.TestCase):
             sandbox._decode_files({f"file-{index}": "" for index in range(201)})
         with self.assertRaisesRegex(ValueError, "512"):
             sandbox._decode_files({"large.bin": encoded(b"x" * (sandbox.MAX_FILE_BYTES + 1))})
-        with self.assertRaisesRegex(ValueError, "1024"):
-            sandbox._decode_files({f"file-{index}": encoded(b"x" * 400000) for index in range(3)})
+        accepted = {f"file-{index}": encoded(b"x" * sandbox.MAX_FILE_BYTES) for index in range(4)}
+        self.assertEqual(sum(len(value) for value in sandbox._decode_files(accepted).values()), 2 * 1024 * 1024)
+        with self.assertRaisesRegex(ValueError, "2048"):
+            sandbox._decode_files({f"file-{index}": encoded(b"x" * 400000) for index in range(6)})
 
     def test_only_changed_and_new_binary_outputs_are_returned(self):
         (self.root / "same.txt").write_bytes(b"same")

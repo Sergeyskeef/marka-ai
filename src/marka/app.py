@@ -7,12 +7,14 @@ import json
 import logging
 import re
 import secrets
+import signal
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import Engine
+from .health import Heartbeat, delivery_effect
 from .backup import DailyBackups
 from .media import MAX_IMAGE_BYTES, validate_image
 from .provider import CodexProvider
@@ -96,8 +98,8 @@ class Application:
         self.settings = settings
         self.store = Store(settings.database)
         self.queue = Queue(settings.database)
-        self.client = client or TelegramClient(settings.token)
-        self.provider = provider or CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout)
+        self.client = client or settings.telegram()
+        self.provider = provider or settings.provider()
         self.engine = Engine(settings, self.store, self.queue, self.provider, self.progress)
         self.backups = DailyBackups(self.store, settings.data_dir)
         self.voices = VoiceStore(settings, self.store)
@@ -108,6 +110,8 @@ class Application:
         self.last_status = ""
         self.work_available = asyncio.Event()
         self.reflection_task: asyncio.Task | None = None
+        self.heartbeat = Heartbeat(settings.data_dir)
+        self.bridge_capabilities = None
 
     def wake_worker(self):
         self.work_available.set()
@@ -120,6 +124,7 @@ class Application:
                                          max_seconds=self.settings.task_max_seconds)
 
     async def progress(self, job, message):
+        self.heartbeat.progress(job)
         self.last_status = message
         # Work summaries only, not private model reasoning or every tool call.
         if job["chat_id"] > 0 and time.monotonic() - self.last_progress > 45:
@@ -205,6 +210,9 @@ class Application:
                 raise ValueError("В очереди уже 100 задач. Дождись выполнения или используй /stop")
         if identifier is None:
             identifier = self.queue.enqueue(prompt, chat_id, source=source, kind=kind)
+        owner = self.store.get_meta("owner_id")
+        if type(owner) is int and owner == chat_id and re.fullmatch(r"telegram:[0-9]+", source):
+            self.store.set_meta("owner-request:" + source, {"job_id": identifier, "owner_id": owner, "source": source})
         self.configure_task(identifier)
         self.wake_worker()
         return identifier
@@ -233,7 +241,12 @@ class Application:
         owner = self.store.get_meta("owner_id")
         if not valid_private_message(item) or item.user_id != owner or item.chat_id != owner:
             raise VoiceError("Голосовые принимаются только из личного чата владельца")
-        if not self.settings.voice_key_file.is_file() or self.settings.voice_key_file.is_symlink():
+        if self.settings.bridge_socket:
+            await self.refresh_bridge_status()
+            configured = bool((self.bridge_capabilities or {}).get("voice_available"))
+        else:
+            configured = self.settings.voice_key_file.is_file() and not self.settings.voice_key_file.is_symlink()
+        if not configured:
             raise VoiceError("Распознавание через OpenAI не настроено. Пришли поручение текстом; голосовое не скачивалось")
         if not 0 < item.duration <= MAX_VOICE_SECONDS or (item.file_size is not None and item.file_size > MAX_VOICE_BYTES):
             raise VoiceError("Голосовое должно длиться 1–60 секунд и занимать не больше 2 MiB")
@@ -475,10 +488,35 @@ class Application:
         return text
 
     def voice_status(self):
+        if self.settings.bridge_socket:
+            if self.bridge_capabilities is None:
+                return "Голосовые: OpenAI API через защищённый шлюз; доступность ещё не проверена."
+            if not self.bridge_capabilities.get("voice_available"):
+                return "Голосовые: защищённый шлюз не подтвердил доступность OpenAI API. Пришли поручение текстом."
+            return "Голосовые: OpenAI API через защищённый шлюз; до 60 секунд и 2 MiB. Аудио передаётся в OpenAI."
         path = self.settings.voice_key_file
         if path.is_symlink() or not path.is_file():
             return "Голосовые: OpenAI API не настроен. Пришли поручение текстом."
         return "Голосовые: OpenAI API настроен; до 60 секунд и 2 MiB. Аудио передаётся в OpenAI."
+
+    async def refresh_bridge_status(self):
+        if self.settings.bridge_socket:
+            from .bridge_client import bridge_status
+            try:
+                self.bridge_capabilities = await bridge_status(self.settings.bridge_socket)
+                self.engine.provider_details = {key: self.bridge_capabilities.get(key)
+                                                for key in ("model_requested", "model_resolved")}
+            except Exception:
+                self.bridge_capabilities = None
+                self.engine.provider_details = None
+
+    def voice_retry(self, identifier, update_id):
+        job = self.queue.get(identifier)
+        if job and job["state"] in {"blocked", "failed", "cancelled"}:
+            attempt = "owner-" + str(update_id)
+            self.store.set_meta("model-attempt:" + identifier, attempt)
+            if job["kind"] == "voice":
+                self.store.set_meta("voice-attempt:" + job["source"], attempt)
 
     async def command(self, message) -> bool:
         command, _, argument = message.text.partition(" ")
@@ -487,11 +525,18 @@ class Application:
         if command in {"/start", "/help"}:
             self.reply(message, HELP + "\n\n" + self.voice_status())
         elif command == "/status":
+            await self.refresh_bridge_status()
             stats = self.store.stats()
             text = f"Марк работает. Память: {stats['by_status']['accepted']} принятых, {stats['by_status']['candidate']} кандидатов.\nВызовы Codex за сутки UTC: {stats['budget_used']}/{self.settings.daily_calls}.\n"
             text += f"Текущая задача: {self.current_id or 'нет'}. " + self.last_status
             text += "\nОбучение: " + self.engine.learning.policy()["mode"]
             text += "\n" + self.voice_status()
+            configured_model = (self.engine.provider_details or {}).get("model_requested", self.settings.model)
+            text += "\nМодель в настройках: " + (configured_model or "выбор Codex по умолчанию") + "; точное внутреннее имя не подтверждено."
+            if self.settings.guarded_upgrades:
+                from .promotion import Promotion
+                upgrade = Promotion(self.settings, self.store, self.queue, self.engine.tools.workspace).status()
+                text += "\nСамообновления с восстановлением: " + upgrade["phase"]
             backup = self.backups.status()
             if backup.get("last_success_at"):
                 date = datetime.fromtimestamp(backup["last_success_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -527,6 +572,7 @@ class Application:
                                      extra_model_calls=self.settings.task_max_calls, extra_seconds=self.settings.task_max_seconds,
                                      source=f"telegram:extend:{message.update_id}")
             if job["state"] in {"blocked", "failed", "cancelled"}:
+                self.voice_retry(argument, message.update_id)
                 self.queue.resume(argument)
             self.wake_worker()
             self.reply(message, "Бюджет задачи увеличен.\n" + self.progress_text(argument))
@@ -543,6 +589,8 @@ class Application:
                 self.current.cancel()
             self.reply(message, f"Остановлено/отменено задач: {len(ids)}. Результаты и журнал сохранены.")
         elif command == "/resume":
+            if argument:
+                self.voice_retry(argument, message.update_id)
             if not argument or not self.queue.resume(argument):
                 raise ValueError("Нужен номер остановленной/неудачной задачи из /tasks")
             self.configure_task(argument)
@@ -613,7 +661,9 @@ class Application:
             self.reply(message, "Принял задачу " + identifier + ". /stop — остановить, /status — проверить ход.")
         elif command == "/evolve":
             identifier = self._enqueue_owner(argument, message.chat_id, kind="self_improve", source=f"telegram:{message.update_id}")
-            self.reply(message, "Принял улучшение " + identifier + ". Подготовлю кандидат изменения моего кода, сравню результаты тестов и выдам патч с отчётом. Установка изменения потребует отдельного решения.")
+            ending = ("После успешного эксперимента передам точный кандидат независимому защитному процессу для проверки, установки и наблюдения с возможностью восстановления."
+                      if self.settings.guarded_upgrades else "Подготовлю патч и отчёт. Установка изменения не настроена и потребует отдельного решения.")
+            self.reply(message, "Принял улучшение " + identifier + ". Сравню результаты исходной версии и кандидата. " + ending)
         else:
             self.reply(message, "Неизвестная команда. /help — список. Поручение можно написать обычным текстом.")
         return True
@@ -667,8 +717,19 @@ class Application:
                             self.queue.finish(job["id"], "blocked", lease=job["lease"], error=
                                 f"Время задачи истекло до отправки аудио. /extend {job['id']} — добавить бюджет; API не вызывался.")
                             return
-                    result = await transcribe(self.settings.voice_key_file, receipt["audio"],
-                                             duration=receipt["declared_duration"], timeout=min(STT_TIMEOUT, remaining))
+                    if self.settings.bridge_socket:
+                        from .bridge_client import bridge_transcribe
+                        attempt = self.store.get_meta("voice-attempt:" + job["source"], "0")
+                        limit = min(STT_TIMEOUT, remaining)
+                        try:
+                            result = await asyncio.wait_for(bridge_transcribe(self.settings.bridge_socket, receipt["audio"],
+                                                                            source=job["source"], attempt=attempt,
+                                                                            duration=receipt["declared_duration"], timeout=limit), timeout=limit)
+                        except TimeoutError:
+                            raise VoiceError("Время распознавания истекло; запрос OpenAI мог обработаться. Его квитанция сохранена в защищённом шлюзе") from None
+                    else:
+                        result = await transcribe(self.settings.voice_key_file, receipt["audio"],
+                                                 duration=receipt["declared_duration"], timeout=min(STT_TIMEOUT, remaining))
                     self.voices.save_transcript(job, result)
                 if not result["text"].strip():
                     raise VoiceError("В голосовом не удалось распознать речь. Исходник сохранён; пришли поручение текстом или запиши голосовое заново")
@@ -694,6 +755,7 @@ class Application:
             self.configure_task(job["id"])
             job = self.queue.get(job["id"])
             self.current_id = job["id"]
+            self.heartbeat.progress(job)
             if self.reflection_task and not self.reflection_task.done():
                 self.reflection_task.cancel()
                 await asyncio.gather(self.reflection_task, return_exceptions=True)
@@ -708,6 +770,7 @@ class Application:
             finally:
                 self.current, self.current_id = None, None
                 self.last_status = ""
+                self.heartbeat.progress()
 
     def _idle(self):
         if self.current_id is not None or self.stopping.is_set():
@@ -760,9 +823,21 @@ class Application:
             try:
                 if item["document"]:
                     target = self.engine.tools.workspace.path(item["document"])
-                    await self.client.send_document(item["chat_id"], target, caption=item["text"][:800])
+                    kwargs = {}
+                    if self.settings.bridge_socket:
+                        from .telegram import MAX_DOCUMENT_BYTES
+                        if target.stat().st_size > MAX_DOCUMENT_BYTES:
+                            raise ValueError("Artifact exceeds delivery limit")
+                        with target.open("rb") as stream:
+                            content = stream.read(MAX_DOCUMENT_BYTES + 1)
+                        if len(content) > MAX_DOCUMENT_BYTES:
+                            raise ValueError("Artifact exceeds delivery limit")
+                        kwargs["effect_id"] = delivery_effect(item, document=content)
+                        kwargs["content"] = content
+                    await self.client.send_document(item["chat_id"], target, caption=item["text"][:800], **kwargs)
                 else:
-                    await self.client.send_message(item["chat_id"], item["text"])
+                    kwargs = {"effect_id": delivery_effect(item)} if self.settings.bridge_socket else {}
+                    await self.client.send_message(item["chat_id"], item["text"], **kwargs)
                 self.queue.delivery_result(item["id"], "sent")
             except TelegramRetryAfter as exc:
                 if exc.sent_message_ids:
@@ -783,22 +858,39 @@ class Application:
 
     async def run(self):
         with instance_lock(self.settings.data_dir / "gateway.lock"):
+            self.heartbeat.write()
             await self.client.get_me()
             hook = await self.client.call("getWebhookInfo", {})
             if hook.get("url"):
                 raise RuntimeError("This bot already has a webhook. Use a new bot token or remove that webhook deliberately.")
             self.queue.recover()
             self.store.prune(self.settings.retention_days)
+            await self.refresh_bridge_status()
+            self.heartbeat.phase = "running"
+            loop = asyncio.get_running_loop()
+            handlers = []
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(signum, self.stopping.set)
+                    handlers.append(signum)
+                except (NotImplementedError, RuntimeError, ValueError):
+                    pass
             tasks = [asyncio.create_task(self.polling()), asyncio.create_task(self.worker()), asyncio.create_task(self.delivery()),
-                     asyncio.create_task(self.maintenance())]
+                     asyncio.create_task(self.maintenance()), asyncio.create_task(self.heartbeat.run(self.stopping))]
+            stop_task = asyncio.create_task(self.stopping.wait())
             try:
-                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                done, _ = await asyncio.wait([*tasks, stop_task], return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     task.result()
             finally:
                 self.stopping.set()
+                self.heartbeat.phase = "stopping"
                 for task in tasks:
                     task.cancel()
                 if self.current:
                     self.current.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                stop_task.cancel()
+                await asyncio.gather(*tasks, stop_task, return_exceptions=True)
+                self.heartbeat.write()
+                for signum in handlers:
+                    loop.remove_signal_handler(signum)

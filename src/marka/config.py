@@ -22,6 +22,27 @@ class Settings:
     task_max_seconds: int = 900
     semantic_search: bool = True
     timezone: str = "UTC"
+    bridge_socket: str = ""
+    upgrade_inbox: str = ""
+    upgrade_status: str = ""
+
+    @property
+    def guarded_upgrades(self) -> bool:
+        return bool(self.bridge_socket and self.upgrade_inbox and self.upgrade_status)
+
+    def provider(self):
+        if self.bridge_socket:
+            from .bridge_client import BridgeProvider
+            return BridgeProvider(self.bridge_socket, timeout=self.provider_timeout + 10)
+        from .provider import CodexProvider
+        return CodexProvider(self.codex_binary, self.codex_home, self.model, self.provider_timeout)
+
+    def telegram(self):
+        if self.bridge_socket:
+            from .bridge_client import BridgeTelegramClient
+            return BridgeTelegramClient(self.bridge_socket)
+        from .telegram import TelegramClient
+        return TelegramClient(self.token)
 
     @property
     def workspace(self) -> Path:
@@ -40,9 +61,9 @@ class Settings:
         return self.data_dir / "marka.sqlite3"
 
     def prepare(self) -> None:
-        if self.workspace.is_symlink() or self.codex_home.is_symlink():
+        if self.workspace.is_symlink() or (not self.bridge_socket and self.codex_home.is_symlink()):
             raise ValueError("Workspace and Codex home must not be symlinks")
-        for directory in (self.data_dir, self.workspace, self.codex_home):
+        for directory in ((self.data_dir, self.workspace) if self.bridge_socket else (self.data_dir, self.workspace, self.codex_home)):
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             directory.chmod(0o700)
         if self.workspace.resolve() == self.data_dir.resolve():
@@ -75,6 +96,14 @@ class Settings:
         settings.sandbox_socket = os.environ.get("MARKA_SANDBOX_SOCKET", settings.sandbox_socket)
         settings.model = os.environ.get("MARKA_MODEL", settings.model)
         settings.timezone = os.environ.get("MARKA_TIMEZONE", settings.timezone)
+        settings.bridge_socket = os.environ.get("MARKA_BRIDGE_SOCKET", settings.bridge_socket)
+        settings.upgrade_inbox = os.environ.get("MARKA_UPGRADE_INBOX", settings.upgrade_inbox)
+        settings.upgrade_status = os.environ.get("MARKA_UPGRADE_STATUS", settings.upgrade_status)
+        for value in (settings.bridge_socket, settings.upgrade_inbox, settings.upgrade_status):
+            if not isinstance(value, str) or len(value) > 4096 or "\0" in value:
+                raise ValueError("Invalid protected runtime paths")
+        if settings.bridge_socket:
+            settings.token = ""  # Credentials belong exclusively to the protected bridge.
         from .scheduling import owner_timezone
         owner_timezone(settings.timezone)
         if not 1 <= settings.max_steps <= 50 or not 1 <= settings.daily_calls <= 10000:

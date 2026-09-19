@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir '.[semantic]' \
     && codex --version
 COPY scripts ./scripts
 COPY tests ./tests
+COPY deploy ./deploy
 ENV MARKA_DATA=/state MARKA_SANDBOX_SOCKET=/run/marka/runner.sock MARKA_EVAL_TESTS=/app/tests
 USER 10001:10001
 ENTRYPOINT ["marka"]

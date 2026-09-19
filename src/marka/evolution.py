@@ -158,7 +158,7 @@ class Evolution:
     def _source_path(path: str) -> str:
         sandbox._safe_name(path)
         if not (re.fullmatch(r"src/marka/[A-Za-z_][A-Za-z0-9_]*\.py", path)
-                or path == "src/marka/identity.md" or (path.startswith("tests/") and path.endswith(".py"))):
+                or path in {"src/marka/identity.md", "deploy/guardian.py"} or (path.startswith("tests/") and path.endswith(".py"))):
             raise ValueError("Only archived public modules, identity and test source may be read")
         return path
 
@@ -271,6 +271,9 @@ class Evolution:
             raise ValueError("Canonical tests conflict with the reserved proposed-test filename")
         if not any(name.startswith("src/marka/") for name in files):
             raise ValueError("No installed public source was found")
+        guardian = self.test_root.parent / "deploy" / "guardian.py"
+        if guardian.is_file() and not guardian.is_symlink():
+            files["deploy/guardian.py"] = guardian.read_bytes()
         return files
 
     def inspect(self, path: str = "") -> dict:
@@ -365,7 +368,7 @@ class Evolution:
     async def _evaluate(self, files: dict[str, bytes], nonce: str) -> dict:
         manifest = {"nonce": nonce,
                     "sources": {name: _hash(data) for name, data in files.items() if name.startswith("src/")},
-                    "tests": {name: _hash(data) for name, data in files.items() if name.startswith("tests/")}}
+                    "tests": {name: _hash(data) for name, data in files.items() if name.startswith(("tests/", "deploy/"))}}
         payload = files | {"eval_runner.py": _HARNESS.encode("utf-8"), "eval_manifest.json": _canonical(manifest)}
         encoded = {name: base64.b64encode(data).decode("ascii") for name, data in payload.items()}
         sandbox._decode_files(encoded)  # Validate the exact shared runner size/path contract first.

@@ -40,7 +40,10 @@ provided case, a rejected candidate, and an evaluation failure. A green existing
 test suite alone does not establish that an agent is smarter, better at new
 tasks, or cheaper. Runtime, model-call cost and future task quality need separate
 measurements. The patch remains reviewable; an experiment never installs itself
-into the running service or changes credentials, identity, tools or permissions.
+into the running service. In guarded mode, a separate `self.request_upgrade` call
+submits the archived source to the independent host guardian described in
+[SELF_UPGRADES.md](SELF_UPGRADES.md). Credentials and recovery components remain
+outside the mutable bot.
 
 ## Evaluation limits
 
@@ -60,7 +63,8 @@ research proof of concept includes SICA among the examined systems.
 
 Mark's initial extension is a concrete code-edit/evaluate/archive workflow. It is
 not a reproduction of SICA's benchmark results, automatic model training, or
-automatic production self-replacement.
+unrestricted production self-replacement. Guarded installation is a separate
+controller operation with its own checks and rollback.
 
 ## Reading earlier experiments
 

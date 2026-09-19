@@ -48,6 +48,8 @@ CATALOG = {
     "self.experiment": '{"objective":"specific improvement","changes":{"src/marka/module.py":"complete updated code"},"regression_test":"optional unittest source, applied to baseline AND candidate"}; test <=3 changed modules in isolated copies, archive both results and export patch/report; never installs the candidate',
     "self.history": '{"limit":8}; read prior improvement experiment outcomes and identifiers from the original archive',
     "self.read_experiment": '{"id":"experiment ID","artifact":"report|patch|candidate|baseline","path":"optional source path for candidate/baseline","offset":0,"limit":8000}; paged original evidence for reusing an experiment; no installation',
+    "self.request_upgrade": '{"id":"passing experiment ID"}; submit exact archived candidate for independently checked installation and recovery, only in an original owner task when the operator enabled the guardian',
+    "self.upgrade_status": '{}; read the independent guardian installation or recovery status; requested does not mean installed',
 }
 
 
@@ -376,6 +378,12 @@ class Tools:
         if name.startswith("self."):
             from .evolution import Evolution
             evolution = Evolution(self.settings, self.workspace)
+            if name in {"self.request_upgrade", "self.upgrade_status"}:
+                from .promotion import Promotion
+                promotion = Promotion(self.settings, self.store, self.queue, self.workspace, evolution=evolution)
+                if name == "self.upgrade_status":
+                    return await asyncio.to_thread(promotion.status)
+                return await asyncio.to_thread(promotion.request, args["id"], job, sources)
             if name == "self.inspect":
                 result = evolution.inspect(args.get("path", ""))
                 if "content" in result:

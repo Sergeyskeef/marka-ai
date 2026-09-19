@@ -21,6 +21,8 @@ from .telegram import TelegramClient, TelegramError
 
 
 def provider(settings) -> CodexProvider:
+    if settings.bridge_socket:
+        return settings.provider()
     return CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout)
 
 
@@ -29,7 +31,16 @@ async def doctor(settings, live=False) -> bool:
     with store._connect() as connection:
         database_ok = connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     result = {"database_ok": database_ok, "owner_paired": bool(store.get_meta("owner_id")),
-              "telegram_token_configured": bool(settings.token), "code_runner_socket": bool(settings.sandbox_socket and Path(settings.sandbox_socket).exists())}
+              "telegram_token_configured": bool(settings.token), "protected_bridge": bool(settings.bridge_socket),
+              "code_runner_socket": bool(settings.sandbox_socket and Path(settings.sandbox_socket).exists())}
+    if settings.bridge_socket:
+        from .bridge_client import bridge_status
+        try:
+            status = await bridge_status(settings.bridge_socket)
+            result["bridge"] = status
+            result["telegram_token_configured"] = bool(status.get("telegram_available"))
+        except Exception:
+            result["bridge"] = {"available": False}
     try:
         result["codex"] = await provider(settings).status()
     except ProviderError as exc:
@@ -40,9 +51,9 @@ async def doctor(settings, live=False) -> bool:
             raise ValueError("Daily provider budget exhausted")
         value = await provider(settings).complete("Return reply MARKA_OK. No tools.", schema)
         result["codex_live_ok"] = value == {"reply": "MARKA_OK"}
-    if settings.token:
+    if settings.token or settings.bridge_socket:
         try:
-            client = TelegramClient(settings.token)
+            client = settings.telegram() if settings.bridge_socket else TelegramClient(settings.token)
             me = await client.get_me()
             hook = await client.call("getWebhookInfo", {})
             result["telegram"] = {"username": me.get("username"), "webhook_active": bool(hook.get("url"))}
@@ -50,7 +61,7 @@ async def doctor(settings, live=False) -> bool:
             result["telegram"] = {"error": str(exc)}
     telegram = result.get("telegram", {})
     ready = (database_ok and bool(result["codex"].get("authenticated"))
-             and bool(settings.token) and "error" not in telegram and not telegram.get("webhook_active", False)
+             and result["telegram_token_configured"] and "error" not in telegram and not telegram.get("webhook_active", False)
              and (not live or result.get("codex_live_ok", False)))
     result["ready"] = ready
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -58,6 +69,8 @@ async def doctor(settings, live=False) -> bool:
 
 
 def login(settings) -> int:
+    if settings.bridge_socket:
+        raise ValueError("Codex login belongs to the protected bridge; ask the operator to authenticate that single installation")
     # The official CLI owns the auth flow and refresh. No token parsing/copying.
     env = dict(os.environ)
     for key in list(env):
@@ -169,6 +182,8 @@ def main(argv=None):
     try:
         settings = Settings.load(args.data)
         if args.command == "setup":
+            if settings.bridge_socket:
+                raise ValueError("Protected installations are paired and configured by the operator's bridge setup")
             if args.timezone:
                 from .scheduling import owner_timezone
                 owner_timezone(args.timezone)
@@ -201,7 +216,7 @@ def main(argv=None):
         elif args.command == "chat":
             asyncio.run(chat(settings, args.text))
         elif args.command == "run":
-            if not settings.token:
+            if not settings.token and not settings.bridge_socket:
                 raise ValueError("Сначала выполни marka setup")
             asyncio.run(Application(settings).run())
     except KeyboardInterrupt:

@@ -20,10 +20,10 @@ import sys
 import tempfile
 import time
 
-MAX_WIRE_BYTES = 3 * 1024 * 1024
+MAX_WIRE_BYTES = 4 * 1024 * 1024
 MAX_FILES = 200
 MAX_FILE_BYTES = 512 * 1024
-MAX_INPUT_BYTES = 1024 * 1024
+MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 _ALLOWED = {"python": "/opt/venv/bin/python", "python3": "/opt/venv/bin/python",
             "node": "/usr/bin/node", "bash": "/bin/bash"}
