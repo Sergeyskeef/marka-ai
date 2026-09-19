@@ -242,7 +242,7 @@ def _guardian(value):
     if isinstance(incident, dict):
         if type(incident.get("at")) in (int, float) and 0 <= incident["at"] <= 1e12:
             result["last_failure_at"] = incident["at"]
-        if incident.get("component") in {"startup", "supervisor", "polling", "worker", "delivery", "maintenance", "heartbeat", "signal"}:
+        if isinstance(incident.get("component"), str) and incident["component"] in {"startup", "supervisor", "polling", "worker", "delivery", "maintenance", "heartbeat", "signal"}:
             result["last_failure_component"] = incident["component"]
     return result
 

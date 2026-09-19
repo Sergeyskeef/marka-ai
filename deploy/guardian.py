@@ -822,7 +822,7 @@ class Guardian:
                 record["heartbeat"].get("boot_id") == record["runtime_exit"].get("boot_id"))
             if isinstance(self.docker, Docker):
                 logs = self.docker.command(["logs", "--tail", "80", self.cfg["container"]["name"]], timeout=5, check=False)
-                text = logs.stdout + "\n" + logs.stderr
+                text = (logs.stdout + b"\n" + logs.stderr).decode("utf-8", "replace")
                 record["log_exception_classes"] = [name for name in re.findall(r"(?m)^(?:[A-Za-z_]+\.)*([A-Za-z_]+Error):", text) if name in errors][-12:]
                 record["log_frames"] = [{"module": name, "line": int(number)} for name, number in
                     re.findall(r'File "[^"\n]*/marka/([a-z_]+)\.py", line (\d{1,6})', text) if name in modules][-12:]

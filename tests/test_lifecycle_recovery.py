@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -176,3 +177,16 @@ class RecoveryTests(unittest.TestCase):
             self.g.tick()
         self.assertEqual(self.g.state['phase'], 'rolling_back')
         self.assertFalse(self.g.state['last_incident']['persisted'])
+
+    def test_real_docker_byte_output_is_filtered_before_container_removal(self):
+        docker = guardian.Docker(self.fixture.config)
+        self.g.docker = docker
+        output = subprocess.CompletedProcess([], 0, b'private chat content',
+            b'  File "/app/marka/app.py", line 123, in run\nRuntimeError: synthetic-private-error\n')
+        with patch.object(docker, 'inspect', return_value=self.fixture.docker.row), patch.object(docker, 'command', return_value=output):
+            self.g.capture_incident('heartbeat unavailable')
+        row = json.loads(next(self.g.root.glob('incident-*.json')).read_text())
+        self.assertNotIn('capture_incomplete', row)
+        self.assertEqual(row['log_exception_classes'], ['RuntimeError'])
+        self.assertEqual(row['log_frames'], [{'module': 'app', 'line': 123}])
+        self.assertNotIn('private', json.dumps(row))
