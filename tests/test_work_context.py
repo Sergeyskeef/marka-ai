@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,7 +14,7 @@ from unittest.mock import patch
 
 from marka.config import Settings
 from marka.engine import Engine
-from marka.queue import Queue
+from marka.queue import Queue, _snapshot_payload
 from marka.store import Store
 from marka.tools import ToolInputError, Tools
 from marka.work_context import WorkContext, compact_observation
@@ -280,6 +282,71 @@ class WorkContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "Нужный участок найден")
         self.assertEqual(self.queue.get(job["id"])["state"], "completed")
         self.assertEqual(len(provider.calls), 5)
+
+
+class WorkContextLargeEvidenceTests(unittest.TestCase):
+    """Real SQLite and real ledger compaction without filesystem I/O."""
+
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        self.addCleanup(self.db.close)
+        self.db.executescript("""
+            CREATE TABLE task_steps(job_id TEXT,number INTEGER,name TEXT,arguments TEXT,outcome TEXT,event_id INTEGER);
+            CREATE TABLE events(id INTEGER PRIMARY KEY,role TEXT,session TEXT,meta TEXT,content TEXT);
+        """)
+        database = self.db
+
+        class MemoryQueue:
+            @contextmanager
+            def connection(self):
+                with database:
+                    yield database
+
+        self.context = WorkContext(MemoryQueue())
+        self.job = "large-evidence-task"
+        self.args = {"argv": ["python", "script.py"]}
+
+    def record(self, number, *, exit_code=2, large=False):
+        observation = {"ok": True, "result": {"exit_code": exit_code,
+            "output": "x" * (50000 if large else 10),
+            "input_manifest": {"script.py": "a" * 64}}}
+        content = json.dumps(observation, ensure_ascii=False, allow_nan=False)
+        saved = _snapshot_payload(observation, 48000)
+        self.db.execute("INSERT INTO events VALUES(?,?,?,?,?)", (number, "tool", "work:" + self.job,
+            json.dumps({"job": self.job, "tool": "code.run"}), content))
+        self.db.execute("INSERT INTO task_steps VALUES(?,?,?,?,?,?)", (self.job, number, "code.run",
+            json.dumps(self.args), saved, number))
+        self.db.commit()
+        return observation, saved
+
+    def test_large_failed_commands_are_counted_from_hash_verified_same_task_events(self):
+        for number in range(1, 5):
+            _, saved = self.record(number, large=True)
+            self.assertTrue(json.loads(saved)["truncated"])
+            self.assertNotIn("ok", json.loads(saved))
+        before = [tuple(row) for row in self.db.execute("SELECT * FROM task_steps ORDER BY number")]
+        guard = self.context.summary(self.job)["loop_guard"]
+        self.assertEqual(guard["same_failure_count"], 4)
+        self.assertEqual(guard["status"], "blocked")
+        self.assertEqual([tuple(row) for row in self.db.execute("SELECT * FROM task_steps ORDER BY number")], before)
+
+    def test_forged_large_canonical_event_neither_resets_nor_increments_failure_guard(self):
+        for forged_exit in (0, 2):
+            with self.subTest(forged_exit=forged_exit):
+                self.db.execute("DELETE FROM task_steps")
+                self.db.execute("DELETE FROM events")
+                for number in range(1, 4):
+                    self.record(number)
+                original, saved = self.record(4, exit_code=2 if forged_exit == 0 else 0, large=True)
+                forged = copy.deepcopy(original)
+                forged["result"]["exit_code"] = forged_exit
+                self.db.execute("UPDATE events SET content=? WHERE id=4", (json.dumps(forged),))
+                self.db.commit()
+                guard = self.context.summary(self.job)["loop_guard"]
+                self.assertEqual(guard["same_failure_count"], 3)
+                self.assertEqual(guard["status"], "warning")
+                self.assertEqual(self.db.execute("SELECT outcome FROM task_steps WHERE number=4").fetchone()[0], saved)
 
 
 if __name__ == "__main__":

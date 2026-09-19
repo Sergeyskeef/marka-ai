@@ -54,12 +54,39 @@ class WorkContext:
     def __init__(self, queue):
         self.queue = queue
 
+    @staticmethod
+    def _canonical_content(identifier, row, event):
+        if not event or event['role'] != 'tool' or event['session'] != 'work:' + identifier or len(event['content']) > 300000:
+            return None
+        try:
+            meta, value = json.loads(event['meta']), json.loads(event['content'])
+            if not (meta.get('job') == identifier and meta.get('tool') == row['name'] and
+                    isinstance(value, dict) and type(value.get('ok')) is bool):
+                return None
+            saved = json.loads(row['outcome'])
+            raw = json.dumps(redact_value(value), ensure_ascii=False, allow_nan=False).encode()
+            verified_summary = (isinstance(saved, dict) and saved.get('truncated') is True and
+                                saved.get('sha256') == hashlib.sha256(raw).hexdigest())
+            return event['content'] if saved == value or verified_summary else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def _rows(self, identifier):
         with self.queue.connection() as db:
+            db.execute('BEGIN')
             rows = db.execute('SELECT number,name,arguments,outcome,event_id FROM task_steps '
                               'WHERE job_id=? ORDER BY number DESC LIMIT 512', (identifier,)).fetchall()
-        return [{**dict(row), 'arguments': json.loads(row['arguments']),
-                 'outcome': json.loads(row['outcome'])} for row in reversed(rows)]
+            events_available = db.execute("SELECT 1 FROM sqlite_master WHERE name='events'").fetchone() is not None
+            result = []
+            for row in reversed(rows):
+                outcome = json.loads(row['outcome'])
+                if outcome.get('truncated') is True and row['event_id'] and events_available:
+                    event = db.execute('SELECT role,session,meta,content FROM events WHERE id=?', (row['event_id'],)).fetchone()
+                    original = self._canonical_content(identifier, row, event)
+                    if original is not None:
+                        outcome = json.loads(original)
+                result.append({**dict(row), 'arguments': json.loads(row['arguments']), 'outcome': outcome})
+        return result
 
     def summary(self, identifier):
         rows = self._rows(identifier)
@@ -148,20 +175,9 @@ class WorkContext:
             canonical = False
             if row['event_id'] and db.execute("SELECT 1 FROM sqlite_master WHERE name='events'").fetchone():
                 event = db.execute('SELECT role,session,meta,content FROM events WHERE id=?', (row['event_id'],)).fetchone()
-                if event and event['role'] == 'tool' and event['session'] == 'work:' + identifier:
-                    try:
-                        meta = json.loads(event['meta'])
-                        value = json.loads(event['content'])
-                        if meta.get('job') == identifier and meta.get('tool') == row['name'] and isinstance(value, dict) and type(value.get('ok')) is bool:
-                            saved = json.loads(content)
-                            raw = json.dumps(redact_value(value), ensure_ascii=False, allow_nan=False).encode()
-                            intact = saved == value
-                            verified_summary = (isinstance(saved, dict) and saved.get('truncated') is True and
-                                                saved.get('sha256') == hashlib.sha256(raw).hexdigest())
-                            if intact or verified_summary:
-                                content, canonical = event['content'], True
-                    except (ValueError, TypeError, AttributeError):
-                        pass
+                original = self._canonical_content(identifier, row, event)
+                if original is not None:
+                    content, canonical = original, True
         # Old imports may predate redaction. Page only the sanitized representation.
         value = redact_value(json.loads(content))
         text = json.dumps(value, ensure_ascii=False)
