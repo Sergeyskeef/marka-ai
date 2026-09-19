@@ -23,7 +23,8 @@ from .redact import redact
 from .store import Store
 from .voice import VoiceStore, VoiceError, MAX_VOICE_BYTES, MAX_VOICE_SECONDS, STT_TIMEOUT, transcribe
 from .telegram import (TelegramClient, TelegramError, TelegramRetryAfter, parse_message, valid_private_message,
-                       parse_attachment, parse_image, parse_voice, attachment_problem, decode_text_attachment)
+                       parse_attachment, parse_image, parse_voice, attachment_problem, decode_text_attachment,
+                       TYPING_INTERVAL, TYPING_TIMEOUT)
 
 LOG = logging.getLogger("marka")
 HELP = """Я Марк. Можно просто написать вопрос или поручение.
@@ -115,6 +116,7 @@ class Application:
         self.reflection_task: asyncio.Task | None = None
         self.heartbeat = Heartbeat(settings.data_dir)
         self.bridge_capabilities = None
+        self._typing_next = 0.0
 
     def wake_worker(self):
         self.work_available.set()
@@ -128,9 +130,10 @@ class Application:
 
     async def progress(self, job, message):
         self.heartbeat.progress(job)
-        self.last_status = message
+        if message:
+            self.last_status = message
         # Work summaries only, not private model reasoning or every tool call.
-        if job["chat_id"] > 0 and time.monotonic() - self.last_progress > 45:
+        if message and job["chat_id"] > 0 and time.monotonic() - self.last_progress > 45:
             self.last_progress = time.monotonic()
             self.queue.deliver(f"progress:{job['id']}:{int(time.time())}", job["chat_id"], message)
 
@@ -524,9 +527,10 @@ class Application:
                 self.bridge_capabilities = None
                 self.engine.provider_details = None
 
-    def voice_retry(self, identifier, update_id):
+    def voice_retry(self, identifier, update_id, *, resumed=False):
         job = self.queue.get(identifier)
-        if job and job["state"] in {"blocked", "failed", "cancelled"}:
+        allowed = {'queued'} if resumed else {'blocked', 'failed', 'cancelled'}
+        if job and job["state"] in allowed:
             attempt = "owner-" + str(update_id)
             self.store.set_meta("model-attempt:" + identifier, attempt)
             if job["kind"] == "voice":
@@ -613,8 +617,8 @@ class Application:
                                      extra_model_calls=self.settings.task_max_calls, extra_seconds=self.settings.task_max_seconds,
                                      source=f"telegram:extend:{message.update_id}")
             if job["state"] in {"blocked", "failed", "cancelled"}:
-                self.voice_retry(argument, message.update_id)
-                self.queue.resume(argument)
+                if self.queue.resume(argument):
+                    self.voice_retry(argument, message.update_id, resumed=True)
             self.wake_worker()
             self.reply(message, "Бюджет задачи увеличен.\n" + self.progress_text(argument))
         elif command == "/result":
@@ -630,11 +634,17 @@ class Application:
                 self.current.cancel()
             self.reply(message, f"Остановлено/отменено задач: {len(ids)}. Результаты и журнал сохранены.")
         elif command == "/resume":
-            if argument:
-                self.voice_retry(argument, message.update_id)
-            if not argument or not self.queue.resume(argument):
+            job = self.queue.get(argument) if argument else None
+            if not job or job['state'] not in {'blocked', 'failed', 'cancelled'}:
                 raise ValueError("Нужен номер остановленной/неудачной задачи из /tasks")
             self.configure_task(argument)
+            if not self.queue.resume(argument):
+                if self.queue._budget_exhausted(self.queue.get(argument)):
+                    self.reply(message, 'Общий бюджет задачи исчерпан. /resume не добавляет шаги или время. '
+                                       '/extend ' + argument + ' — добавить бюджет и продолжить. Задача не запускалась повторно.')
+                    return True
+                raise ValueError('Задача больше не ожидает продолжения; проверь /tasks')
+            self.voice_retry(argument, message.update_id, resumed=True)
             self.wake_worker()
             self.reply(message, "Продолжу задачу " + argument + " по сохранённому журналу.")
         elif command in {"/remember", "/learn"}:
@@ -793,6 +803,33 @@ class Application:
                 return
         return await self.engine.run(job)
 
+    async def typing(self, job, operation):
+        """Best-effort owner-only UI, scoped to one active worker operation."""
+        owner = self.store.get_meta("owner_id")
+        send = getattr(self.client, "send_typing", None)
+        if type(owner) is not int or owner <= 0 or job.get("chat_id") != owner or not callable(send):
+            return
+        failures = 0
+        while not self.stopping.is_set() and not operation.done():
+            delay = self._typing_next - time.monotonic()
+            if delay > 0:
+                await self.pause(delay)
+            if self.stopping.is_set() or operation.done():
+                return
+            self._typing_next = time.monotonic() + TYPING_INTERVAL
+            try:
+                async with asyncio.timeout(TYPING_TIMEOUT + 1.5):
+                    await send(owner)
+                failures = 0
+            except TelegramRetryAfter as exc:
+                self._typing_next = max(self._typing_next, time.monotonic() + exc.seconds)
+            except Exception as exc:
+                failures += 1
+                if failures == 1:
+                    LOG.info("Telegram typing unavailable (%s)", type(exc).__name__)
+                if failures >= 3 or not isinstance(exc, (TelegramError, TimeoutError)) or getattr(exc, "permanent", False):
+                    return
+
     async def worker(self):
         while not self.stopping.is_set():
             job = self.queue.claim()
@@ -813,12 +850,15 @@ class Application:
             self.last_status = ""
             self.last_progress = time.monotonic()
             self.current = asyncio.create_task(self.run_job(job))
+            typing = asyncio.create_task(self.typing(job, self.current))
             try:
                 await self.current
             except asyncio.CancelledError:
                 if self.stopping.is_set():
                     return
             finally:
+                typing.cancel()
+                await asyncio.gather(typing, return_exceptions=True)
                 self.current, self.current_id = None, None
                 self.last_status = ""
                 self.heartbeat.progress()

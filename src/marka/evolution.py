@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import base64
+from bisect import bisect_right
 from datetime import datetime, timezone
 import difflib
 import hashlib
@@ -23,6 +24,7 @@ from .redact import redact
 
 
 _MARKER = "MARKA_EVAL_REPORT="
+_PROPOSAL_MODULE_BYTES = 60000
 _LIMITATION = ("Regression evidence only: imported candidate code shares unittest's process and could "
                "tamper with the evaluator. A model-proposed test is not independent evidence. "
                "No runtime code was installed; this does not establish broader agent improvement.")
@@ -250,21 +252,37 @@ class Evolution:
                        "total_chars": len(text), "next_offset": end if end < len(text) else None,
                        "truncated": bool(offset or end < len(text))}
 
-    def _snapshot(self) -> dict[str, bytes]:
+    def _snapshot(self, *, bounded=False) -> dict[str, bytes]:
         files = {}
+
+        def add(name, path):
+            if bounded:
+                self._source_path(name)
+                if len(files) >= 1000 or path.stat().st_size > 524288:
+                    raise ValueError("Public source navigation exceeds its file or bundle size limit")
+                with path.open("rb") as stream:
+                    data = stream.read(524289)
+                if len(data) > 524288 or sum(map(len, files.values())) + len(data) > 8 * 1024 * 1024:
+                    raise ValueError("Public source navigation exceeds its file or bundle size limit")
+            else:
+                data = path.read_bytes()
+            files[name] = data
+
         for path in sorted(self.source_root.iterdir()):
             if path.is_symlink() or not path.is_file():
                 continue
             if path.suffix == ".py" or path.name == "identity.md":
-                files["src/marka/" + path.name] = path.read_bytes()
+                if bounded and not (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.py", path.name) or path.name == "identity.md"):
+                    continue
+                add("src/marka/" + path.name, path)
         if not self.test_root.is_dir():
             raise ValueError("Evaluation tests are unavailable; set MARKA_EVAL_TESTS to the shipped test directory")
         for path in sorted(self.test_root.rglob("*.py")):
-            if path.is_symlink() or any(part.startswith(".") or part == "__pycache__" for part in path.relative_to(self.test_root).parts):
+            if path.is_symlink() or not path.is_file() or any(part.startswith(".") or part == "__pycache__" for part in path.relative_to(self.test_root).parts):
                 continue
             if any(parent.is_symlink() for parent in path.parents if parent != self.test_root and parent.is_relative_to(self.test_root)):
                 continue
-            files["tests/" + path.relative_to(self.test_root).as_posix()] = path.read_bytes()
+            add("tests/" + path.relative_to(self.test_root).as_posix(), path)
         if not any(name.startswith("tests/test_") for name in files):
             raise ValueError("No canonical tests were found")
         if "tests/test_model_proposed.py" in files:
@@ -273,23 +291,108 @@ class Evolution:
             raise ValueError("No installed public source was found")
         for name in ("guardian.py", "observer.py", "marka-observer.service", "marka-observer.timer"):
             helper = self.test_root.parent / "deploy" / name
-            if helper.is_file() and not helper.is_symlink():
-                files["deploy/" + name] = helper.read_bytes()
+            if helper.is_file() and not helper.is_symlink() and not helper.parent.is_symlink():
+                add("deploy/" + name, helper)
         return files
 
-    def inspect(self, path: str = "") -> dict:
-        files = self._snapshot()
+    def inspect(self, path: str = "", start_line: int = 1, end_line: int = 160, *,
+                offset: int | None = None, expected_sha256: str = "") -> dict:
+        if not isinstance(path, str):
+            raise ValueError("Source path must be a string")
+        if (type(start_line) is not int or type(end_line) is not int or start_line < 1
+                or end_line < start_line or end_line - start_line > 199):
+            raise ValueError("Inspect 1–200 source lines per page")
+        if offset is not None and (type(offset) is not int or offset < 0):
+            raise ValueError("Source offset must be a nonnegative character position")
+        if not isinstance(expected_sha256, str) or (expected_sha256 and not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)):
+            raise ValueError("Expected source hash must be lowercase SHA256")
+        if not path and (offset is not None or expected_sha256):
+            raise ValueError("Source pagination and hash checks require a path")
+        if path:
+            self._source_path(path)
+        files = self._snapshot(bounded=True)
         if not path:
-            return {"files": [{"path": name, "bytes": len(data), "sha256": _hash(data)}
+            return {"files": [{"path": name, "bytes": len(data), "sha256": _hash(data),
+                               **self._change_size_metadata(data)}
                               for name, data in sorted(files.items())],
                     "editable": "src/marka/*.py; at most 3 files per experiment",
+                    "self_change_proposal_limit_bytes": _PROPOSAL_MODULE_BYTES,
                     "canonical_tests_editable": False, "promotion": "none",
                     "limitation": _LIMITATION}
         if path not in files:
             raise ValueError("Only installed public source and shipped test files can be inspected")
         text = files[path].decode("utf-8")
-        return {"path": path, "content": text[:60000], "truncated": len(text) > 60000,
-                "sha256": _hash(files[path])}
+        digest = _hash(files[path])
+        if expected_sha256 and expected_sha256 != digest:
+            raise ValueError("Installed source changed; restart reading with its current hash")
+        lines = text.splitlines(keepends=True)
+        starts, position = [], 0
+        for line in lines:
+            starts.append(position)
+            position += len(line)
+        if offset is None:
+            begin = starts[start_line - 1] if start_line <= len(starts) else len(text)
+            requested_end = starts[end_line] if end_line < len(starts) else len(text)
+            end = min(requested_end, begin + 12000)
+        else:
+            begin = min(offset, len(text))
+            end = min(len(text), begin + 12000)
+        return {"path": path, "content": text[begin:end], "sha256": digest, **self._change_size_metadata(files[path]),
+                "start_line": bisect_right(starts, begin) if end > begin else None,
+                "end_line": bisect_right(starts, end - 1) if end > begin else None,
+                "total_lines": len(lines), "offset": begin, "next_offset": end if end < len(text) else None,
+                "total_chars": len(text), "truncated": bool(begin or end < len(text))}
+
+    @staticmethod
+    def _change_size_metadata(data: bytes) -> dict:
+        eligible = len(data) <= _PROPOSAL_MODULE_BYTES
+        return {"self_change_proposal_limit_bytes": _PROPOSAL_MODULE_BYTES,
+                "self_change_size_eligible": eligible,
+                "self_change_size_reason": None if eligible else "current_file_exceeds_proposal_limit",
+                "self_change_size_note": ("Size check only; source-path and independent promotion checks still apply."
+                                          if eligible else
+                                          "Current file exceeds the 60000-byte proposal limit. A smaller proposed module may fit; "
+                                          "changes retaining this size require an operator release.")}
+
+    def search(self, query: str, path: str = "", limit: int = 20) -> dict:
+        """Find literal text only in the installed public source snapshot."""
+        if not isinstance(query, str) or not 1 <= len(query) <= 200 or not query.strip() or any(ch in query for ch in "\r\n\x00"):
+            raise ValueError("Source search needs 1–200 characters of literal single-line text")
+        if not isinstance(path, str) or type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("Source search requires a public path and a limit of 1–50")
+        if path:
+            self._source_path(path)
+        files = self._snapshot(bounded=True)
+        if path and path not in files:
+            raise ValueError("Only installed public source and shipped test files can be searched")
+        matches, searched, truncated = [], 0, False
+        for name, data in sorted(files.items()):
+            if path and name != path:
+                continue
+            text = data.decode("utf-8")
+            digest, position = _hash(data), 0
+            searched += 1
+            for number, line in enumerate(text.splitlines(keepends=True), 1):
+                cursor = 0
+                while (found := line.find(query, cursor)) >= 0:
+                    if len(matches) >= limit:
+                        truncated = True
+                        break
+                    excerpt_begin = max(0, found - 40)
+                    excerpt_end = min(len(line), excerpt_begin + 240)
+                    matches.append({"path": name, "line": number, "column": found + 1,
+                                    "offset": position + found, "end_offset": position + found + len(query),
+                                    "sha256": digest, "excerpt": line[excerpt_begin:excerpt_end],
+                                    "excerpt_offset": position + excerpt_begin,
+                                    "excerpt_truncated": bool(excerpt_begin or excerpt_end < len(line))})
+                    cursor = found + len(query)
+                if truncated:
+                    break
+                position += len(line)
+            if truncated:
+                break
+        return {"query": query, "matches": matches, "limit": limit, "truncated": truncated,
+                "files_searched": searched, "literal": True, "case_sensitive": True}
 
     @staticmethod
     def _changes(changes: dict[str, str]) -> dict[str, bytes]:
@@ -299,7 +402,7 @@ class Evolution:
         for name, text in changes.items():
             if not isinstance(name, str) or not re.fullmatch(r"src/marka/[A-Za-z_][A-Za-z0-9_]*\.py", name):
                 raise ValueError("Only src/marka/*.py candidate modules may change")
-            if not isinstance(text, str) or len(text.encode("utf-8")) > 60000:
+            if not isinstance(text, str) or len(text.encode("utf-8")) > _PROPOSAL_MODULE_BYTES:
                 raise ValueError("Each changed module must contain at most 60000 UTF-8 bytes")
             try:
                 ast.parse(text, filename=name)

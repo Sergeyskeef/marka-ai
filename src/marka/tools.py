@@ -43,13 +43,15 @@ CATALOG = {
     "task.list": '{}',
     "task.plan": '{"steps":[{"title":"step","status":"pending|running|completed|blocked","evidence":"source or artifact"}],"summary":"current progress"}; persist <=12 steps for the current task; completion still requires observed outcomes',
     "task.progress": '{"id":"optional current task id"}; durable plan, checks, artifacts and remaining budget',
+    "task.recall": '{"number":12,"offset":0,"limit":12000}; reread original tool observation from THIS task by step number; follow next_offset; no re-execution or other task access',
     "task.criteria": '{"criteria":[{"id":"result","kind":"json_matches","path":"result.json","assertions":[{"pointer":"/status","equals":"ready"}]}]}; freeze objective checks BEFORE effects; kinds artifact(path,min_bytes,max_bytes), text_contains(path,contains:[literal]), json_matches, command_succeeded(argv). Cannot weaken/replace; model-proposed checks do not prove all owner requirements',
     "server.read": '{"section":"status|config|events|guardian_source|observer_source","offset":0,"expected_sha256":"previous page hash for continuation"}; operator-published read-only Mark diagnostics, no SSH/commands/arbitrary paths/private data; stale snapshots require qualification; own runtime code is in self.inspect',
     "connections.list": '{}; list installed protected connections and allowed actions; no credential values',
     "connections.check": '{"connection":"codex|telegram|openai_speech"}; bounded connection check, no inference, upload or messages; scope of verification is explicit, speech metadata access does not prove transcription/billing',
     "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; alternatively replace delay_seconds with due_at="2026-10-01T09:00:00+03:00"; exactly one time form, explicit offset for due_at; owner-requested only, 1–100 runs, minimum recurring interval 300 seconds',
     "consult": '{"question":"self-contained bounded subproblem including necessary evidence","role":"researcher|critic|engineer"}; separate read-only model consultation, no tools or delegated authority',
-    "self.inspect": '{"path":"src/marka/module.py or tests/test_module.py; empty for index","start_line":1,"end_line":160}; read public source of this Mark installation',
+    "self.inspect": '{"path":"src/marka/module.py or tests/test_module.py; empty for index","start_line":1,"end_line":160,"offset":0,"expected_sha256":"optional previous hash"}; omit offset for line selection (1-200 lines); follow next_offset for exact 12000-character pages',
+    "self.search": '{"query":"literal function name or text","path":"optional exact public source/test file","limit":20}; bounded literal search of installed public code; returns precise lines/offsets for self.inspect',
     "self.experiment": '{"objective":"specific improvement","changes":{"src/marka/module.py":"complete updated code"},"regression_test":"optional unittest source, applied to baseline AND candidate"}; test <=3 changed modules in isolated copies, archive both results and export patch/report; never installs the candidate',
     "self.history": '{"limit":8}; read prior improvement experiment outcomes and identifiers from the original archive',
     "self.read_experiment": '{"id":"experiment ID","artifact":"report|patch|candidate|baseline","path":"optional source path for candidate/baseline","offset":0,"limit":8000}; paged original evidence for reusing an experiment; no installation',
@@ -360,6 +362,14 @@ class Tools:
             identifier = args.get("id") or job["id"]
             progress = self.queue.progress(identifier)
             return {**progress, "acceptance_criteria": get_criteria(self.queue, identifier)} if progress else None
+        if name == "task.recall":
+            if set(args) - {'number', 'offset', 'limit'} or 'number' not in args:
+                raise ToolInputError('Recall a step number of the current task only')
+            from .work_context import WorkContext
+            try:
+                return WorkContext(self.queue).recall(job['id'], args['number'], offset=args.get('offset', 0), limit=args.get('limit', 12000))
+            except (ValueError, TypeError) as exc:
+                raise ToolInputError(str(exc)) from None
         if name == "task.criteria":
             from .acceptance import freeze_criteria
             if set(args) != {"criteria"}:
@@ -434,15 +444,14 @@ class Tools:
                     return await asyncio.to_thread(promotion.status)
                 return await asyncio.to_thread(promotion.request, args["id"], job, sources)
             if name == "self.inspect":
-                result = evolution.inspect(args.get("path", ""))
-                if "content" in result:
-                    start, end = args.get("start_line", 1), args.get("end_line", 160)
-                    if type(start) is not int or type(end) is not int or start < 1 or end < start or end - start > 199:
-                        raise ValueError("Inspect 1–200 source lines per page")
-                    lines = result["content"].splitlines(keepends=True)
-                    page = "".join(lines[start-1:end])
-                    result.update(content=page[:12000], start_line=start, end_line=min(end, len(lines)), total_lines=len(lines), truncated=len(page) > 12000 or end < len(lines))
-                return result
+                if set(args) - {'path', 'start_line', 'end_line', 'offset', 'expected_sha256'}:
+                    raise ToolInputError('Unknown source inspection arguments')
+                return evolution.inspect(args.get('path', ''), args.get('start_line', 1), args.get('end_line', 160),
+                                         offset=args.get('offset'), expected_sha256=args.get('expected_sha256', ''))
+            if name == 'self.search':
+                if set(args) - {'query', 'path', 'limit'} or 'query' not in args:
+                    raise ToolInputError('Search with a literal query and optional public file path')
+                return evolution.search(args['query'], args.get('path', ''), args.get('limit', 20))
             if name == "self.experiment":
                 return await evolution.experiment(args["objective"], args["changes"], args.get("regression_test", ""))
             if name == "self.history":

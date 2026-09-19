@@ -26,6 +26,7 @@ from .bridge_client import (BridgeError, canonical, digest, pack_bytes, read_fra
 from .media import MAX_IMAGE_BYTES, image_inputs, validate_image
 from .provider import CodexProvider, validate_model_settings
 from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_IMAGE_DOWNLOAD_BYTES,
+                       TYPING_INTERVAL, TYPING_TIMEOUT,
                        TelegramClient, TelegramError, TelegramRetryAfter, _message_envelope,
                        parse_attachment, parse_image, parse_message, parse_voice, split_message)
 from .voice import MAX_VOICE_BYTES, STT_TIMEOUT, transcribe, validate_audio_bytes
@@ -335,6 +336,7 @@ class Bridge:
         self._slots = asyncio.Semaphore(4)
         self._connections = 0
         self._serving = False
+        self._typing_next = 0.0
 
     async def poll_once(self):
         values = await self.telegram.get_updates(self.journal.offset, timeout=25)
@@ -515,6 +517,25 @@ class Bridge:
             payload = {"sha256": audio_hash, "duration": duration}
             return await self._effect("voice", identity, payload, lambda: self.speech(
                 Path(self.config["voice_key_file"]), audio, duration=duration, timeout=timeout))
+        if op == "telegram.typing":
+            self._fields(request, ["chat_id"])
+            if type(request["chat_id"]) is not int or request["chat_id"] != self.owner_id:
+                raise Rejected("denied", permanent=True)
+            now = time.monotonic()
+            if now < self._typing_next:
+                raise TelegramRetryAfter(math.ceil(self._typing_next - now))
+            # Reserve before awaiting so parallel or failed requests cannot
+            # bypass the cadence. Ephemeral UI state has no durable receipt.
+            self._typing_next = now + TYPING_INTERVAL
+            try:
+                async with asyncio.timeout(TYPING_TIMEOUT + 0.5):
+                    result = await self.telegram.send_typing(self.owner_id)
+            except TelegramRetryAfter as exc:
+                self._typing_next = max(self._typing_next, time.monotonic() + exc.seconds)
+                raise
+            if result is not True:
+                raise Rejected("unavailable")
+            return True
         if op in {"telegram.send_message", "telegram.send_document"}:
             names = ["chat_id", "effect_id", "attempt"] + (["text"] if op.endswith("send_message") else ["filename", "data", "caption"])
             self._fields(request, names)

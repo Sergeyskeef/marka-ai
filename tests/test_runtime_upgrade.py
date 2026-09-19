@@ -57,10 +57,12 @@ class RuntimeUpgradeTests(unittest.IsolatedAsyncioTestCase):
         while self.queue.get(identifier)["state"] == "queued":
             await engine.run(self.queue.claim())
         self.assertEqual(len(provider.calls), 4)
-        self.assertTrue(self.queue.resume(identifier))
-        await engine.run(self.queue.claim())
+        before = self.queue.get(identifier)
+        self.assertFalse(self.queue.resume(identifier))
+        self.assertIsNone(self.queue.claim())
+        self.assertEqual(self.queue.get(identifier), before)
         self.assertEqual(len(provider.calls), 4)
-        self.assertIn("/extend", self.queue.get(identifier)["error"])
+        self.assertIn("/extend", self.queue.next_delivery()["text"])
 
     async def test_final_after_failed_execution_requests_real_recheck(self):
         self.settings.max_steps = 6

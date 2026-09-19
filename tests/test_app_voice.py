@@ -137,8 +137,10 @@ class VoiceGatewayTests(unittest.IsolatedAsyncioTestCase):
                 await self.app.run_job(job)
                 self.assertEqual(self.app.queue.get(job["id"])["state"], "blocked")
                 self.assertIn("/extend", self.app.queue.get(job["id"])["error"])
-                self.app.queue.resume(job["id"])
-                await self.app.run_job(self.app.queue.claim())
+                before = self.app.queue.get(job["id"])
+                self.assertFalse(self.app.queue.resume(job["id"]))
+                self.assertIsNone(self.app.queue.claim())
+                self.assertEqual(self.app.queue.get(job["id"]), before)
                 stt.assert_not_awaited()
             self.assertEqual(self.app.voices.for_job(job)["transcript"], {})
 

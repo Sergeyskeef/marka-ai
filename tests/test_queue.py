@@ -212,15 +212,76 @@ class TestQueue(unittest.TestCase):
             self.queue.reserve_call(identifier, job["lease"])
             self.queue.cancel(identifier)
         with patch("marka.queue.time.time", return_value=600):
-            self.queue.resume(identifier)
-            second = self.queue.claim()
-            self.assertEqual(self.queue.reserve_call(identifier, second["lease"])["reason"], "time_limit")
+            self.assertFalse(self.queue.resume(identifier))
+            self.assertIsNone(self.queue.claim())
             self.queue.configure_task(identifier, max_steps=99, max_model_calls=99, max_seconds=900)
             self.assertEqual(self.queue.get(identifier)["deadline"], 530)
             extended = self.queue.extend_budget(identifier, extra_seconds=20, extra_steps=1, extra_model_calls=1)
             self.assertEqual(extended["deadline"], 620)
             self.assertEqual(extended["used"], {"steps": 1, "model_calls": 1})
+            self.assertTrue(self.queue.resume(identifier))
+            second = self.queue.claim()
             self.assertTrue(self.queue.reserve_call(identifier, second["lease"])["allowed"])
+
+    def test_exhausted_resume_preserves_saved_state_and_final_points_to_extend(self):
+        for exhausted in ("steps", "model_calls", "seconds"):
+            with self.subTest(exhausted=exhausted):
+                with patch("marka.queue.time.time", return_value=100):
+                    identifier = self.queue.enqueue("Finite owner task", 10)
+                    self.queue.configure_task(identifier, max_steps=1 if exhausted == "steps" else 4,
+                                              max_model_calls=1 if exhausted == "model_calls" else 4,
+                                              max_seconds=30)
+                    job = self.queue.claim()
+                    self.assertTrue(self.queue.reserve_call(identifier, job["lease"])["allowed"])
+                    trace = [{"kind": "observation", "content": "Saved actual result"}]
+                    self.queue.checkpoint(identifier, trace, lease=job["lease"])
+                with patch("marka.queue.time.time", return_value=131 if exhausted == "seconds" else 100):
+                    self.assertTrue(self.queue.finish(identifier, "blocked", error="Budget reached", lease=job["lease"]))
+                    before = self.queue.get(identifier)
+                    delivery = self.queue.next_delivery()
+                    self.assertIn("/extend " + identifier, delivery["text"])
+                    self.assertNotIn("/resume " + identifier, delivery["text"])
+                    self.queue.delivery_result(delivery["id"], "sent")
+                    restarted = Queue(self.path)
+                    for _ in range(3):
+                        self.assertFalse(restarted.resume(identifier))
+                    self.assertEqual(restarted.get(identifier), before)
+                    self.assertIsNone(restarted.claim())
+                    self.assertIsNone(restarted.next_delivery())
+
+    def test_exhausted_recovery_keeps_ambiguous_action_until_owner_extends_and_resumes(self):
+        identifier = self.queue.enqueue("Interrupted last permitted call", 10)
+        self.queue.configure_task(identifier, max_steps=1, max_model_calls=1)
+        old = self.queue.claim()
+        self.queue.reserve_call(identifier, old["lease"])
+        trace = [{"kind": "tool", "name": "workspace.write", "arguments": "{}"}]
+        self.queue.checkpoint(identifier, trace, inflight=True, lease=old["lease"])
+        restarted = Queue(self.path)
+        restarted.recover()
+        before = restarted.get(identifier)
+        self.assertEqual(before["state"], "blocked")
+        self.assertTrue(before["inflight"])
+        self.assertFalse(restarted.resume(identifier))
+        self.assertEqual(restarted.get(identifier), before)
+        self.assertIsNone(restarted.claim())
+
+        restarted.extend_budget(identifier, extra_steps=1)
+        self.assertFalse(restarted.resume(identifier), "Other exhausted dimensions still block continuation")
+        restarted.extend_budget(identifier, extra_model_calls=1)
+        self.assertTrue(restarted.get(identifier)["inflight"], "Extension alone must not clear ambiguity")
+        self.assertIsNone(restarted.claim(), "Extension alone must not resume a task")
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            resumed = list(pool.map(lambda _: restarted.resume(identifier), range(8)))
+        self.assertEqual(sum(resumed), 1)
+        current = restarted.claim()
+        self.assertFalse(current["inflight"])
+        self.assertEqual(current["trace"], trace)
+        self.assertFalse(restarted.finish(identifier, "completed", "late result", lease=old["lease"]))
+        self.assertFalse(restarted.checkpoint(identifier, [], lease=old["lease"]))
+        reservation = restarted.reserve_call(identifier, current["lease"])
+        self.assertTrue(reservation["allowed"])
+        self.assertEqual(reservation["step_number"], 2)
+        self.assertEqual(reservation["call_number"], 2)
 
     def test_recovery_fences_old_worker_and_preserves_total_budget(self):
         identifier = self.queue.enqueue("Restart during a call", 10)

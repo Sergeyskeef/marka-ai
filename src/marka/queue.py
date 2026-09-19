@@ -233,8 +233,10 @@ class Queue:
                 else:
                     description = "приостановлена" if state == "blocked" else "не завершена"
                     details = "\n".join(value for value in (result, error) if value) or "Причина не указана"
+                    continuation = (f"/extend {identifier} — добавить бюджет и продолжить"
+                                    if self._budget_exhausted(row) else f"/resume {identifier}")
                     text = (f"Задача {identifier} {description}.\n{details}\n"
-                            f"Проверь результат и возможные выполненные действия перед продолжением: /resume {identifier}")
+                            f"Проверь результат и возможные выполненные действия перед продолжением: {continuation}")
                 db.execute("INSERT INTO deliveries(source,chat_id,text,due) VALUES(?,?,?,?)",
                            (f"job:{identifier}:final:{row['completion_seq']}", row["chat_id"], redact(text), time.time()))
             if state == "completed" and row["interval_seconds"] and row["runs_left"] > 1:
@@ -260,7 +262,16 @@ class Queue:
             return [r[0] for r in rows]
 
     def resume(self, identifier: str) -> bool:
+        """Resume only when the saved total budget permits another decision.
+
+        Refusal preserves the checkpoint, ambiguity marker and original error.
+        Only an explicit budget extension may reopen an exhausted task.
+        """
         with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM jobs WHERE id=? AND state IN ('blocked','failed','cancelled')", (identifier,)).fetchone()
+            if row is None or self._budget_exhausted(row):
+                return False
             cursor = db.execute("UPDATE jobs SET state='queued',due=?,updated=?,lease='',inflight=0,error='' WHERE id=? AND state IN ('blocked','failed','cancelled')", (time.time(), time.time(), identifier))
             return bool(cursor.rowcount)
 
@@ -285,6 +296,11 @@ class Queue:
             "deadline": row["deadline"] or None,
             "first_started": row["first_started"], "continuations": row["continuations"],
         }
+
+    @staticmethod
+    def _budget_exhausted(row):
+        budget = Queue._budget(row)
+        return budget["configured"] and any(value <= 0 for value in budget["remaining"].values())
 
     def configure_task(self, identifier: str, *, max_steps=48, max_model_calls=64, max_seconds=900) -> dict:
         """Set a task's budget once. Replays never replenish existing budgets.

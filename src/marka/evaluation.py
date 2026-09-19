@@ -61,6 +61,10 @@ def _target(name, args):
         # A successful different section/page cannot erase the failed read.
         # Refreshing a snapshot digest may repair the same section/page.
         return name + ":" + str(identity("section")) + ":" + str(args.get("offset", 0))
+    if name == 'task.recall':
+        return name + ':' + str(args.get('number')) + ':' + str(args.get('offset', 0))
+    if name == 'self.search':
+        return name + ':' + str(identity('query')) + ':' + str(identity('path'))
     if name in {"memory.search", "memory.episodes", "web.search"}:
         return name + ":" + hashlib.sha256(str(args.get("query", "")).encode()).hexdigest()[:16]
     return name
@@ -325,9 +329,9 @@ def run_acceptance_suite() -> dict:
             job = queue.claim()
             assert queue.reserve_call(identifier, job["lease"])["allowed"]
             queue.cancel(identifier)
-            queue.resume(identifier)
-            new = queue.claim()
-            assert not queue.reserve_call(identifier, new["lease"])["allowed"]
+            assert not queue.resume(identifier)
+            assert queue.claim() is None
+            assert queue.get(identifier)['state'] == 'cancelled'
         scenario("resume_cannot_reset_model_budget", exhausted)
 
         def ambiguous():

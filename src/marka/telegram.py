@@ -24,6 +24,8 @@ MAX_ATTACHMENT_BYTES = 512 * 1024
 MAX_IMAGE_DOWNLOAD_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MESSAGE_UNITS = 3500
+TYPING_INTERVAL = 4.0
+TYPING_TIMEOUT = 3.0
 _READ_METHODS = frozenset({"getMe", "getUpdates", "getWebhookInfo", "getFile"})
 TEXT_ATTACHMENT_EXTENSIONS = frozenset({
     ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".yaml", ".yml",
@@ -297,12 +299,15 @@ class TelegramClient:
                        *, timeout: float | None = None) -> Any:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", method):
             raise TelegramError("Invalid Telegram API method", permanent=True)
-        uncertain = method not in _READ_METHODS
+        # Chat actions expire automatically; they are not durable deliveries.
+        uncertain = method not in _READ_METHODS and method != "sendChatAction"
         request = urllib.request.Request(
             f"{self._base}/bot{self._token}/{method}", data=body,
             headers={"Content-Type": content_type, "User-Agent": "marka-ai/telegram"},
             method="POST",
         )
+        if method == "sendChatAction":
+            request._marka_response_limit = 4096
         try:
             response = await asyncio.to_thread(self._transport, request, timeout or self._timeout)
         except Exception:
@@ -409,6 +414,25 @@ class TelegramClient:
         if declared is not None and len(data) != declared:
             raise TelegramError("Attachment download was incomplete or changed")
         return data
+
+    async def send_typing(self, chat_id: int) -> bool:
+        """One ephemeral pulse; ownership and cadence are enforced by callers.
+
+        The Bot API clears it within five seconds or on a bot message. It has
+        no cancel action: stopping the caller's pulse task lets it expire.
+        """
+        if not _is_int(chat_id) or not 1 <= chat_id <= 2**63 - 1:
+            raise TelegramError("Invalid Telegram private chat ID", permanent=True)
+        body = json.dumps({"chat_id": chat_id, "action": "typing"}).encode("utf-8")
+        try:
+            async with asyncio.timeout(TYPING_TIMEOUT):
+                result = await self._request("sendChatAction", body, "application/json",
+                                             timeout=min(self._timeout, TYPING_TIMEOUT))
+        except TimeoutError:
+            raise TelegramError("Telegram typing request timed out") from None
+        if result is not True:
+            raise TelegramError("Telegram returned an invalid typing response")
+        return True
 
     async def send_message(self, chat_id: int, text: str) -> list[int]:
         if not _is_int(chat_id):

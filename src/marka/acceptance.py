@@ -23,7 +23,7 @@ _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}\Z")
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _READ_ONLY = {"memory.search", "memory.episodes", "memory.read", "memory.source", "memory.related", "memory.entities",
               "workspace.list", "workspace.read", "workspace.find", "web.search", "web.fetch", "skill.search", "skill.inspect",
-              "task.list", "task.plan", "task.progress", "task.criteria", "consult", "self.inspect", "self.history",
+              "task.list", "task.plan", "task.progress", "task.recall", "task.criteria", "consult", "self.inspect", "self.search", "self.history",
               "self.read_experiment", "self.upgrade_status", "server.inspect", "server.read",
               "connections.list", "connections.check"}
 

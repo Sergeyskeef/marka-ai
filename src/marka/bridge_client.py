@@ -11,7 +11,7 @@ import struct
 
 from .media import image_inputs
 from .provider import ProviderError
-from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, TelegramError,
+from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, TYPING_TIMEOUT, TelegramError,
                        TelegramRetryAfter)
 from .voice import STT_TIMEOUT, VoiceError, validate_audio_bytes, validate_transcript
 
@@ -210,6 +210,15 @@ class BridgeTelegramClient:
     async def send_message(self, chat_id, text, *, effect_id=None, attempt="0"):
         return await self._request("telegram.send_message", {"chat_id": chat_id, "text": text},
                                    effect_id=effect_id, attempt=attempt)
+
+    async def send_typing(self, chat_id):
+        if type(chat_id) is not int or not 1 <= chat_id <= 2**63 - 1:
+            raise TelegramError("Invalid Telegram private chat ID", permanent=True)
+        result = await self._request("telegram.typing", {"chat_id": chat_id},
+                                     timeout=min(self.timeout, TYPING_TIMEOUT + 1))
+        if result is not True:
+            raise TelegramError("Protected bridge returned invalid typing response")
+        return True
 
     async def send_document(self, chat_id, path, caption="", *, effect_id=None, attempt="0", content=None):
         try:

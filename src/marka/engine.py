@@ -13,6 +13,7 @@ from .scheduling import clock_context
 from .redact import redact, redact_value
 from .tools import CATALOG, Tools, ToolInputError
 from .memory_context import MemoryContext
+from .work_context import WorkContext, compact_observation
 
 
 DECISION_SCHEMA = {
@@ -45,6 +46,7 @@ class Engine:
         from .learning import Learning
         self.learning = Learning(store)
         self.memory_context = MemoryContext(store)
+        self.work_context = WorkContext(queue)
         if settings.semantic_search:
             from .semantic import SemanticIndex
             self.tools.semantic = SemanticIndex(store, settings.data_dir / "models" / "multilingual-minilm")
@@ -155,8 +157,11 @@ class Engine:
                 "task_plan": (progress or {}).get("plan", []),
                 "acceptance_criteria": get_criteria(self.queue, job["id"]),
                 "remaining_budget": (progress or {}).get("budget", {}),
-                "current_work_log": [compact(item, 16000 if index >= len(trace[-20:]) - 2 else 2000)
+                "current_work_log": [{**compact(item, 2000), 'content': compact_observation(item.get('content', ''),
+                                      16000 if index >= len(trace[-20:]) - 2 else 2000)}
+                                     if item.get('kind') == 'observation' else compact(item, 2000)
                                      for index, item in enumerate(trace[-20:])],
+                "task_working_memory": self.work_context.summary(job['id']),
                 "code_runner_available": bool(self.settings.sandbox_socket),
                 "runtime_capabilities": {"provider": "official_codex_cli",
                                          "configured_model": (self.provider_details or {}).get("model_requested", self.settings.model),
@@ -181,6 +186,14 @@ kind=final: message — ответ пользователю; tool='', arguments=
 Короткий обычный разговор не требует инструментов. Никаких выдуманных действий, команд, проверок или воспоминаний.
 Не выдавай план будущей работы за выполненную задачу. Для созданного кода используй code.run, если среда доступна.
 При ошибке инструмента разберись в результате и исправь причину; не повторяй один и тот же вызов вслепую.
+task_working_memory сохраняет прочитанные файлы, номера шагов и обнаруженные повторы между проходами.
+task.recall возвращает полное наблюдение указанного шага текущей задачи, даже если старый контекст сокращён.
+При loop_guard.warning перестань перечитывать неизменные страницы: используй сохранённые сведения,
+проверь конкретную гипотезу или назови отсутствующую возможность. Повторный план не является продвижением.
+Для поиска функций используй self.search, затем читай только нужные страницы self.inspect.
+next_offset и sha256 позволяют точно продолжить страницу; не считай обрезанный ответ полным файлом.
+Если изменение требует новой операции защищённого bridge, оно требует операторского выпуска;
+самоизменение бота не меняет закреплённый bridge. Объясни этот конкретный предел без бесконечного чтения.
 Можно создавать и менять рабочие файлы, исследовать публичные страницы и выполнять код только в runner.
 Для задачи с несколькими действиями составь краткий план через task.plan и обновляй его по результатам.
 Для создания или изменения файлов до первого изменения зафиксируй task.criteria: конкретные проверяемые
@@ -271,7 +284,7 @@ lesson — короткий применимый урок, опирающийс�
         rows = [dict(item) for item in trace if item.get("kind") != "request"][-60:]
         for index, row in enumerate(rows):
             if row.get("kind") == "observation" and index < len(rows) - 4:
-                row["content"] = row.get("content", "")[:2500]
+                row["content"] = compact_observation(row.get("content", ""), 2500)
             if row.get("kind") == "tool":
                 try:
                     args = json.loads(row.get("arguments", "{}"))
@@ -339,7 +352,9 @@ lesson — короткий применимый урок, опирающийс�
             self.store.event("system", message, session="work:" + job["id"], meta={"outcome": "failed"})
             self.queue.finish(job["id"], "blocked" if isinstance(exc, ProviderError) else "failed", error=message, lease=job["lease"])
             self._learn(job["id"])
-            return f"{message}\nЗадача {job['id']} сохранена. /resume {job['id']} — повторить после устранения причины."
+            current = self.queue.get(job['id'])
+            command = '/extend' if current and self.queue._budget_exhausted(current) else '/resume'
+            return f"{message}\nЗадача {job['id']} сохранена. {command} {job['id']} — продолжить после устранения причины."
         finally:
             self.active_job = None
 
@@ -428,8 +443,6 @@ lesson — короткий применимый урок, опирающийс�
                     self.queue.finish(job["id"], decision["outcome"], message, lease=job["lease"], verification=verification)
                     self._learn(job["id"])
                     return message
-                if self.on_progress and decision["message"].strip():
-                    await self.on_progress(job, redact(decision["message"])[:800])
                 current = self.queue.get(job["id"])
                 if not current or current["state"] != "running" or current["lease"] != job["lease"]:
                     raise asyncio.CancelledError()
@@ -473,9 +486,30 @@ lesson — короткий применимый урок, опирающийс�
                         artifacts = [*artifacts, result]
                     for artifact in artifacts:
                         self.queue.record_artifact(job["id"], artifact, lease=job["lease"], step=self.last_decision_step)
-                trace.append({"kind": "observation", "event_id": observation_id, "content": self._observation_text(observation, limit=16000)})
+                trace.append({"kind": "observation", "event_id": observation_id, "step_number": self.last_decision_step,
+                              "content": self._observation_text(observation, limit=16000)})
                 if not self.queue.checkpoint(job["id"], self._trim_trace(trace), lease=job["lease"]):
                     raise asyncio.CancelledError()
+                guard = self.work_context.summary(job['id'])['loop_guard']
+                if guard['status'] == 'blocked':
+                    message = ('Остановил повторяющиеся действия: одни и те же чтения или ошибки больше не дают новой информации. '
+                               'Ход работы сохранён; изменения и завершение задачи не подтверждены. '
+                               'Нужно сменить подход, а не просто увеличить бюджет.')
+                    self.queue.finish(job['id'], 'blocked', error=message, lease=job['lease'])
+                    self._learn(job['id'])
+                    return message
+                if self.on_progress:
+                    # Always refresh liveness, but text updates require observed changes.
+                    name, status = decision['tool'], ''
+                    if observation['ok'] and name in {'workspace.write', 'workspace.replace'}:
+                        status = 'Сохранён файл: ' + redact(str(args.get('path', '')))[:300]
+                    elif observation['ok'] and name in {'code.run', 'skill.run'}:
+                        status = 'Проверка кода завершена. Код выхода: ' + str(observation['result'].get('exit_code'))
+                    elif observation['ok'] and name == 'self.experiment':
+                        status = 'Эксперимент завершён; отчёт сохранён. Это ещё не установка изменения.'
+                    elif observation['ok'] and name == 'task.criteria':
+                        status = 'Зафиксированы условия проверки результата.'
+                    await self.on_progress(job, status)
             current = self.queue.get(job["id"])
             if current and current.get("budget_configured") and self.queue.requeue(job["id"], job["lease"], self._trim_trace(trace), "Продолжаю по сохранённому плану и проверенным шагам."):
                 return ""
