@@ -100,6 +100,30 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase):
     async def call(self, name, args, *, job=None):
         return await self.tools.call(name, args, job or self.job, [self.source], 1)
 
+    async def test_corrupt_optional_index_keeps_canonical_search_and_stops_retries(self):
+        from marka.semantic import SemanticIndex
+        event = self.store.event("user", "needle owner statement")
+        memory = self.store.remember("needle owner fact", sources=[event], actor="owner", status="accepted")
+        index = SemanticIndex(self.store, self.settings.data_dir / "model", encoder=object())
+        damaged = b"damaged optional SQLite index"
+        index.index_path.write_bytes(damaged)
+        self.tools.semantic = index
+        self.assertEqual([row["id"] for row in await self.tools.search("needle")], [memory])
+        self.assertFalse(index.available())
+        with patch.object(index, "_db", side_effect=AssertionError("disabled index was retried")):
+            self.assertEqual([row["id"] for row in await self.tools.search("needle", episodes=True)], [event])
+            self.assertEqual(index.update(), {"indexed": 0, "available": False})
+            self.assertEqual(index.stats()["error"], "sqlite_unavailable")
+        self.assertEqual(index.index_path.read_bytes(), damaged)
+        self.assertEqual(self.store.get_event(event)["content"], "needle owner statement")
+        self.assertEqual(self.store.get_memory(memory)["status"], "accepted")
+
+    async def test_canonical_sqlite_failure_is_not_hidden_by_optional_fallback(self):
+        import sqlite3
+        with patch.object(self.store, "search", side_effect=sqlite3.DatabaseError("canonical damaged")):
+            with self.assertRaisesRegex(sqlite3.DatabaseError, "canonical damaged"):
+                await self.tools.search("needle")
+
     async def test_memory_proposal_cannot_smuggle_owner_acceptance(self):
         result = await self.call("memory.propose", {"content": "A hypothesis", "kind": "lesson",
                                 "actor": "owner", "status": "accepted"})

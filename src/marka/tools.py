@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 
@@ -227,7 +228,7 @@ class Tools:
                 from .semantic import hybrid
                 extra = await asyncio.to_thread(self.semantic.search, query, kind="event" if episodes else "memory", limit=limit)
                 rows = hybrid(rows, extra, limit)
-            except (ImportError, ValueError, OSError, RuntimeError):
+            except (ImportError, ValueError, OSError, RuntimeError, sqlite3.Error):
                 # A derived index failure must not hide canonical lexical results.
                 pass
         if not episodes:

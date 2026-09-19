@@ -1,17 +1,20 @@
 """Acceptance of immutable recipes from canonical runner evidence; no live runner."""
 import base64
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from marka.config import Settings
 from marka.learning import Learning
 from marka.queue import Queue
 from marka.skills import SkillLibrary
 from marka.store import Store
+from marka.tools import Tools
 
 
 class SkillLibraryTests(unittest.TestCase):
@@ -56,6 +59,27 @@ class SkillLibraryTests(unittest.TestCase):
 
     def save(self, job, event, name="csv-report"):
         return self.library.save(name, "Generate a CSV report using Python", event, job)
+
+    def reuse(self, *, output="report ready", exit_code=0):
+        self.serial += 1
+        identifier = self.queue.enqueue("Reuse the report skill", 17, source=f"skills-test:{self.serial}")
+        job = self.queue.claim()
+        self.assertEqual(job["id"], identifier)
+        tools = Tools(self.settings, self.store, self.queue)
+        args = {"name": "csv-report"}
+        with patch.object(tools, "_run_code", return_value={"exit_code": exit_code, "output": output, "timed_out": False}):
+            result = asyncio.run(tools.call("skill.run", args, job, [], 1))
+        observation = {"ok": True, "result": result}
+        event = self.store.event("tool", json.dumps(observation), session="work:" + identifier,
+                                 meta={"tool": "skill.run", "job": identifier})
+        self.assertTrue(self.queue.record_step(identifier, lease=job["lease"], number=1, name="skill.run",
+                                              outcome=observation, arguments=args, event_id=event))
+        self.queue.finish(identifier, "completed", "done")
+        return identifier, event
+
+    def feedback(self, job, valence):
+        source = self.store.event("user", "/good checked" if valence > 0 else "/bad wrong")
+        Learning(self.store).feedback(job, valence, "checked", source_id=source)
 
     def test_preserves_exact_command_bytes_and_canonical_evidence_across_restart(self):
         job, event, original = self.observed()
@@ -186,6 +210,89 @@ class SkillLibraryTests(unittest.TestCase):
         learning.feedback(first, -1, "Wrong for the first case", source_id=negative)
         with self.assertRaisesRegex(ValueError, "feedback"):
             self.library.prepare("csv-report")
+
+    def test_feedback_on_reuse_suspends_skill_across_restart_until_same_job_is_corrected(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        first, _ = self.reuse()
+        second, _ = self.reuse()
+        self.feedback(first, -1)
+        self.feedback(second, 1)
+        self.feedback(creation, 1)
+        restarted = SkillLibrary(self.settings, self.store, self.queue)
+        for operation in (restarted.prepare, restarted.inspect):
+            with self.assertRaisesRegex(ValueError, "feedback"):
+                operation("csv-report")
+        self.assertEqual(restarted.search("report"), [])
+        self.feedback(first, 1)
+        self.assertEqual(restarted.prepare("csv-report")["version"], 1)
+        self.feedback(creation, -1)
+        with self.assertRaisesRegex(ValueError, "feedback"):
+            restarted.prepare("csv-report")
+
+    def test_rejected_old_version_does_not_suspend_new_version(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        reuse, _ = self.reuse(exit_code=1)
+        self.feedback(reuse, -1)
+        with self.assertRaisesRegex(ValueError, "feedback"):
+            self.library.prepare("csv-report")
+        new_job, new_event, _ = self.observed({"scripts/report.py": b"print('fixed report')"})
+        self.save(new_job, new_event)
+        self.assertEqual(self.library.prepare("csv-report")["version"], 2)
+
+    def test_legacy_large_reuse_receipt_recovers_only_runtime_hashed_source(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        reuse, source = self.reuse(output="x" * 60000)
+        with self.store._connect() as db:
+            saved = json.loads(db.execute("SELECT outcome FROM task_steps WHERE job_id=?", (reuse,)).fetchone()[0])
+        self.assertTrue(saved["truncated"])
+        self.feedback(reuse, -1)
+        with self.assertRaisesRegex(ValueError, "feedback"):
+            self.library.prepare("csv-report")
+
+    def test_compacted_use_cannot_borrow_tampered_imported_or_cross_job_source(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        reuse, source = self.reuse(output="x" * 60000)
+        self.feedback(reuse, -1)
+        with self.store._connect() as db:
+            original = dict(db.execute("SELECT role,session,meta,content FROM events WHERE id=?", (source,)).fetchone())
+        for changes in ({"role": "assistant"}, {"session": "work:another-job"},
+                        {"meta": json.dumps({"job": reuse, "tool": "skill.run", "imported": True})},
+                        {"content": original["content"].replace("x" * 20, "y" * 20, 1)}):
+            with self.subTest(changes=list(changes)):
+                changed = original | changes
+                with self.store._connect() as db:
+                    db.execute("UPDATE events SET role=?,session=?,meta=?,content=? WHERE id=?",
+                               (*[changed[key] for key in ("role", "session", "meta", "content")], source))
+                self.assertEqual(self.library.prepare("csv-report")["version"], 1)
+
+    def test_validation_rejection_with_skill_name_in_arguments_is_not_an_observed_use(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        reuse = self.queue.enqueue("Invalid skill request", 17)
+        job = self.queue.claim()
+        observation = {"ok": False, "error": "Invalid parameters", "error_kind": "validation_rejected"}
+        source = self.store.event("tool", json.dumps(observation), session="work:" + reuse,
+                                 meta={"job": reuse, "tool": "skill.run"})
+        self.queue.record_step(reuse, lease=job["lease"], number=1, name="skill.run", outcome=observation,
+                               arguments={"name": "csv-report", "version": 1}, event_id=source)
+        self.queue.finish(reuse, "failed", "Invalid parameters")
+        self.feedback(reuse, -1)
+        self.assertEqual(self.library.prepare("csv-report")["version"], 1)
+
+    def test_model_or_imported_claim_without_runtime_receipt_cannot_suspend_skill(self):
+        creation, event, _ = self.observed()
+        self.save(creation, event)
+        unrelated, _, _ = self.observed()
+        claim = {"ok": True, "result": {"skill": "csv-report", "version": 1}}
+        for role, imported in (("assistant", False), ("tool", True)):
+            self.store.event(role, json.dumps(claim), session="work:" + unrelated,
+                             meta={"job": unrelated, "tool": "skill.run", "imported": imported})
+        self.feedback(unrelated, -1)
+        self.assertEqual(self.library.prepare("csv-report")["version"], 1)
 
     def test_forgotten_and_deleted_sources_disable_reuse_search_and_resave(self):
         job, event, _ = self.observed()

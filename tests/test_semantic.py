@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -73,6 +74,30 @@ class SemanticTests(unittest.TestCase):
         self.assertEqual(reopened.search("alpha", kind="event"), [])
         self.assertEqual(reopened.update()["indexed"], 1)
         self.assertEqual(reopened.search("игла", kind="event")[0]["id"], event)
+
+    def test_index_read_failure_after_initialization_disables_only_current_instance(self):
+        event = self.store.event("user", "alpha")
+        self.index.update()
+        with self.index._db() as db:
+            db.execute("DROP TABLE vectors")
+        with self.assertRaises(sqlite3.Error):
+            self.index.search("alpha", kind="event")
+        self.assertFalse(self.index.available())
+        self.assertEqual(self.index.search("alpha", kind="event"), [])
+        self.assertEqual(self.index.update(), {"indexed": 0, "available": False})
+        self.assertTrue(self.index.index_path.is_file())
+        self.assertEqual(self.store.get_event(event)["content"], "alpha")
+        reopened = SemanticIndex(self.store, self.directory / "missing-model", encoder=self.encoder)
+        self.assertTrue(reopened.available())
+
+    def test_corrupt_index_maintenance_failure_does_not_repeat_or_delete_files(self):
+        damaged = b"not a SQLite database"
+        self.index.index_path.write_bytes(damaged)
+        with self.assertRaises(sqlite3.Error):
+            self.index.update()
+        self.assertFalse(self.index.available())
+        self.assertEqual(self.index.update(), {"indexed": 0, "available": False})
+        self.assertEqual(self.index.index_path.read_bytes(), damaged)
 
     def test_candidates_never_index_as_accepted_and_status_changes_gate_cached_vectors(self):
         _, accepted = self.remember("alpha accepted")

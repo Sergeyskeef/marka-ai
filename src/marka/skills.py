@@ -122,6 +122,48 @@ class SkillLibrary:
         row = db.execute("SELECT valence FROM learning_feedback WHERE job_id=? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
         return row is not None and row["valence"] < 0
 
+    @staticmethod
+    def _negative_use_feedback(db, name: str, version: int) -> bool:
+        """Use immutable runtime receipts, including runs before this upgrade.
+
+        A later positive review of another task cannot override a rejected use.
+        The ledger survives checkpoint compaction and needs no source rewrite.
+        """
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_feedback'").fetchone() is None:
+            return False
+        # Keep the small feedback set outermost; task_steps has a job_id index.
+        rows = db.execute("SELECT s.job_id,s.outcome,s.event_id FROM learning_feedback f "
+                          "CROSS JOIN task_steps s ON s.job_id=f.job_id AND s.name='skill.run' "
+                          "WHERE f.valence<0 AND f.id="
+                          "(SELECT max(id) FROM learning_feedback WHERE job_id=f.job_id)")
+        for row in rows:
+            try:
+                observed = json.loads(row["outcome"])
+                if isinstance(observed, dict) and observed.get("truncated") is True:
+                    # Recover only the exact runtime-hashed source, never a
+                    # model trace, imported event or a shortened JSON preview.
+                    event = db.execute("SELECT role,session,meta,content FROM events WHERE id=?", (row["event_id"],)).fetchone()
+                    if event is None or event["role"] != "tool" or event["session"] != "work:" + row["job_id"]:
+                        continue
+                    meta, full = json.loads(event["meta"]), json.loads(event["content"])
+                    if (not isinstance(meta, dict) or meta.get("job") != row["job_id"]
+                            or meta.get("tool") != "skill.run" or meta.get("imported")):
+                        continue
+                    from .queue import _snapshot_payload
+                    if json.loads(_snapshot_payload(full, 48000)) != observed:
+                        continue
+                    observed = full
+                result = observed.get("result") if isinstance(observed, dict) else None
+                if (isinstance(observed, dict) and observed.get("ok") is True and isinstance(result, dict)
+                        and result.get("skill") == name and type(result.get("version")) is int
+                        and result["version"] == version and type(result.get("source_event")) is int
+                        and db.execute("SELECT 1 FROM skill_evidence WHERE name=? AND version=? AND event_id=?",
+                                       (name, version, result["source_event"])).fetchone()):
+                    return True
+            except (ValueError, TypeError):
+                continue
+        return False
+
     def _source(self, event_id: int, job_id: str) -> tuple[dict, dict, str]:
         if type(event_id) is not int or event_id < 1 or not isinstance(job_id, str) or not self.queue.get(job_id):
             raise ValueError("A real task and tool observation are required")
@@ -245,7 +287,8 @@ class SkillLibrary:
             row = db.execute("SELECT * FROM skill_versions WHERE name=? ORDER BY version DESC LIMIT 1", (_name(name),)).fetchone()
             evidence = db.execute("SELECT * FROM skill_evidence WHERE name=? AND version=? ORDER BY event_id DESC",
                                   (name, row["version"])).fetchall() if row else []
-            if any(self._negative_feedback(db, proof["job_id"]) for proof in evidence):
+            if (any(self._negative_feedback(db, proof["job_id"]) for proof in evidence)
+                    or (row and self._negative_use_feedback(db, name, row["version"]))):
                 raise ValueError("Owner feedback suspends this skill; a zero process exit did not establish task correctness")
         if row is None:
             raise ValueError("Skill does not exist")

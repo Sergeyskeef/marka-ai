@@ -250,6 +250,7 @@ class SemanticIndex:
         self.encoder = encoder
         self.index_path = store.path.with_suffix(".semantic.sqlite3")
         self._initialized = False
+        self._disabled = False
 
     def _initialize(self):
         if self._initialized:
@@ -315,16 +316,25 @@ class SemanticIndex:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.index_path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=30000")
+        db = None
         try:
+            db = sqlite3.connect(self.index_path, timeout=30)
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=30000")
             with db:
                 yield db
+        except sqlite3.Error:
+            # The index is optional. Preserve its files for diagnosis and stop
+            # retrying a damaged database on every search/maintenance tick.
+            self._disabled = True
+            raise
         finally:
-            db.close()
+            if db is not None:
+                db.close()
 
     def available(self) -> bool:
+        if self._disabled:
+            return False
         if self.encoder is not None:
             return True
         if self.model_dir.is_symlink():
@@ -351,6 +361,10 @@ class SemanticIndex:
             return _ENCODERS[key]
 
     def stats(self):
+        if self._disabled:
+            return {"available": False, "model": MODEL, "revision": REVISION,
+                    "pipeline": PIPELINE, "sources": None, "chunks": None,
+                    "error": "sqlite_unavailable"}
         if not self.index_path.exists():
             return {"available": self.available(), "model": MODEL, "revision": REVISION,
                     "pipeline": PIPELINE, "sources": 0, "chunks": 0}
