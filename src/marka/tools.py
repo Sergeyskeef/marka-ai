@@ -235,7 +235,7 @@ class Tools:
             rows = Learning(self.store).filter_context(rows)
         return rows
 
-    async def call(self, name: str, args: dict, job: dict, sources: list[int], step: int):
+    async def call(self, name: str, args: dict, job: dict, sources: list[int], step: int | str):
         if not isinstance(args, dict):
             raise ToolInputError("Tool arguments must be an object")
         if name in {"workspace.read", "workspace.write", "workspace.replace", "workspace.send"}:
@@ -341,14 +341,20 @@ class Tools:
             return self.queue.progress(job["id"])
         if name == "task.schedule":
             now = time.time()
-            try:
-                due = schedule_due(args, now=now)
-            except ValueError as exc:
-                raise ToolInputError(str(exc)) from None
             if job["chat_id"] <= 0:
                 raise ToolInputError("Scheduled tasks require Telegram ownership")
             if job.get("kind") == "scheduled":
                 raise ToolInputError("A scheduled job cannot create more schedules")
+            source = f"schedule:{job['id']}:{step}"
+            existing = self.queue.get_by_source(source)
+            if existing:
+                if existing["chat_id"] != job["chat_id"] or existing["kind"] != "scheduled":
+                    raise ToolInputError("Existing schedule ownership does not match")
+                return self._schedule_receipt(existing, now)
+            try:
+                due = schedule_due(args, now=now)
+            except ValueError as exc:
+                raise ToolInputError(str(exc)) from None
             if not isinstance(args.get("prompt"), str):
                 raise ToolInputError("Scheduled task prompt must be text")
             interval = args.get("interval_seconds", 0)
@@ -358,15 +364,12 @@ class Tools:
             clock_context(self.settings.timezone, now=due)
             try:
                 identifier = self.queue.enqueue(args["prompt"], job["chat_id"], kind="scheduled",
-                                                source=f"schedule:{job['id']}:{step}", due=due,
+                                                source=source, due=due,
                                                 interval_seconds=interval, runs=args.get("runs", 1))
             except ValueError as exc:
                 raise ToolInputError(str(exc)) from None
             saved = self.queue.get(identifier)
-            timing = clock_context(self.settings.timezone, now=saved["due"])
-            return {"task_id": identifier, "delay_seconds": max(0, saved["due"] - now), "status": saved["state"],
-                    "due_at": timing["utc"], "local_time": timing["local"], "timezone": timing["timezone"],
-                    "interval_seconds": saved["interval_seconds"], "runs_left": saved["runs_left"]}
+            return self._schedule_receipt(saved, now)
         if name == "consult" and self.consultation:
             return await self.consultation(str(args["question"])[:14000], str(args.get("role", "critic")))
         if name.startswith("self."):
@@ -390,6 +393,12 @@ class Tools:
                 return evolution.read_experiment(args["id"], args.get("artifact", "report"), path=args.get("path", ""),
                                                  offset=args.get("offset", 0), limit=args.get("limit", 8000))
         raise ValueError("Unknown or unavailable tool")
+
+    def _schedule_receipt(self, saved, now):
+        timing = clock_context(self.settings.timezone, now=saved["due"])
+        return {"task_id": saved["id"], "delay_seconds": max(0, saved["due"] - now), "status": saved["state"],
+                "due_at": timing["utc"], "local_time": timing["local"], "timezone": timing["timezone"],
+                "interval_seconds": saved["interval_seconds"], "runs_left": saved["runs_left"]}
 
     async def _run_code(self, argv, timeout, inputs):
         manifest = {}

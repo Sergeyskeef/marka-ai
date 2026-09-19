@@ -194,6 +194,11 @@ class Queue:
         with self.connection() as db:
             return [dict(x) for x in db.execute("SELECT id,prompt,state,kind,due,error FROM jobs ORDER BY created DESC LIMIT ?", (limit,))]
 
+    def get_by_source(self, source: str) -> dict | None:
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM jobs WHERE source=?", (source,)).fetchone()
+            return self._decode(row) if row else None
+
     def checkpoint(self, identifier: str, trace: list, *, inflight=False, lease=None) -> bool:
         # Redact string leaves, not encoded JSON: a secret regex can otherwise
         # consume closing quotes/brackets and make restart checkpoints unreadable.

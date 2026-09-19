@@ -1,5 +1,6 @@
 """Calendar boundaries and actual durable scheduling, independent of model guesses."""
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,7 +61,7 @@ class TimeContextTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 schedule_due({"due_at": value}, now=NOW)
         for args in ({}, {"due_at": "2026-09-19T09:00:00Z", "delay_seconds": 60},
-                     *({"delay_seconds": x} for x in (True, 1.5, "60", 0, -1, 31622401))):
+                     *({"delay_seconds": x} for x in (True, 1.5, "60", 0, -1, 31622401, 10 ** 400))):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 schedule_due(args, now=NOW)
 
@@ -101,6 +102,50 @@ class ScheduleQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["due_at"], repeated["due_at"])
         self.assertEqual(repeated["delay_seconds"], 570)
         self.assertEqual(len(self.queue.list()), 2)
+
+    async def test_absolute_schedule_replay_after_its_due_returns_original_receipt(self):
+        args = {"prompt": "one", "due_at": "2026-09-19T09:00:00+03:00"}
+        with patch("marka.tools.time.time", return_value=NOW):
+            first = await self.call(args)
+        with patch("marka.tools.time.time", return_value=NOW + 86400):
+            repeated = await self.call(args)
+        self.assertEqual(first["task_id"], repeated["task_id"])
+        self.assertEqual(first["due_at"], repeated["due_at"])
+        self.assertEqual(repeated["delay_seconds"], 0)
+        self.assertEqual(len(self.queue.list()), 2)
+
+    async def test_many_schedule_and_delivery_actions_keep_distinct_receipts_after_compaction(self):
+        class Provider:
+            calls = 0
+
+            async def complete(self, prompt, schema):
+                self.calls += 1
+                if self.calls > 40:
+                    return {"kind": "final", "tool": "", "arguments": "{}", "message": "done",
+                            "outcome": "completed", "lesson": ""}
+                even = self.calls % 2 == 0
+                args = ({"path": "report.txt", "caption": str(self.calls)} if even else
+                        {"prompt": "task " + str(self.calls), "delay_seconds": 3600})
+                return {"kind": "tool", "tool": "workspace.send" if even else "task.schedule",
+                        "arguments": json.dumps(args), "message": "", "outcome": "completed", "lesson": ""}
+
+        self.settings.max_steps = 12
+        self.settings.semantic_search = False
+        self.settings.workspace.joinpath("report.txt").write_text("checked", encoding="utf-8")
+        self.queue.configure_task(self.identifier, max_steps=45, max_model_calls=45, max_seconds=900)
+        engine = Engine(self.settings, self.store, self.queue, Provider())
+        while self.queue.get(self.identifier)["state"] == "queued":
+            claimed = self.queue.claim()
+            self.assertEqual(claimed["id"], self.identifier)
+            await engine.run(claimed)
+        self.assertEqual(self.queue.get(self.identifier)["state"], "completed")
+        self.assertEqual(self.queue.progress(self.identifier)["budget"]["used"]["model_calls"], 41)
+        self.assertEqual(len([row for row in self.queue.list(100) if row["kind"] == "scheduled"]), 20)
+        with self.queue.connection() as db:
+            deliveries = db.execute("SELECT source FROM deliveries WHERE source LIKE 'artifact:%'").fetchall()
+            sources = db.execute("SELECT source FROM jobs WHERE kind='scheduled'").fetchall()
+        self.assertEqual(len(deliveries), 20)
+        self.assertTrue(all(":decision:" in row[0] for row in [*deliveries, *sources]))
 
     async def test_rejected_schedules_do_not_create_jobs(self):
         for additions in ({"interval_seconds": True}, {"interval_seconds": 10 ** 50},

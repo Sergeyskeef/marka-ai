@@ -490,7 +490,9 @@ class Application:
                 raise ValueError("Задача не найдена")
             self.reply(message, job["result"] or job["error"] or "Итог ещё не готов.")
         elif command in {"/stop", "/cancel"}:
-            ids = self.queue.cancel(argument if command == "/cancel" and argument else None)
+            if command == "/cancel" and not argument:
+                raise ValueError("Укажи номер задачи: /cancel номер. /tasks покажет номера; /stop отменяет всю очередь.")
+            ids = self.queue.cancel(argument if command == "/cancel" else None)
             if self.current_id in ids and self.current:
                 self.current.cancel()
             self.reply(message, f"Остановлено/отменено задач: {len(ids)}. Результаты и журнал сохранены.")

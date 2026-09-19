@@ -76,6 +76,22 @@ class AppAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         with self.app.queue.connection() as db:
             return [dict(row) for row in db.execute("SELECT * FROM deliveries ORDER BY id")]
 
+    async def test_cancel_without_identifier_preserves_work_and_future_reminders(self):
+        self.owner()
+        current = self.app.queue.enqueue("working", 17)
+        future = self.app.queue.enqueue("reminder", 17, kind="scheduled", due=9999999999)
+        claimed = self.app.queue.claim()
+        self.assertEqual(claimed["id"], current)
+        await self.app.ingest(update(1, "/cancel"))
+        self.assertEqual(self.app.queue.get(current)["state"], "running")
+        self.assertEqual(self.app.queue.get(future)["state"], "queued")
+        self.assertIn("/cancel номер", self.delivery_rows()[0]["text"])
+        await self.app.ingest(update(2, "/cancel " + future))
+        self.assertEqual(self.app.queue.get(current)["state"], "running")
+        self.assertEqual(self.app.queue.get(future)["state"], "cancelled")
+        await self.app.ingest(update(3, "/stop"))
+        self.assertEqual(self.app.queue.get(current)["state"], "cancelled")
+
     async def test_pairing_requires_local_code_and_matching_private_human_chat(self):
         code = issue_pairing(self.app.store)
         attempts = [update(1, "/start wrong"),

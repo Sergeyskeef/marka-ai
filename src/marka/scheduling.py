@@ -51,8 +51,8 @@ def schedule_due(args, *, now):
             raise ValueError("Invalid due_at date") from None
     else:
         delay = args["delay_seconds"]
-        if type(delay) is not int:
-            raise ValueError("delay_seconds must be an integer")
+        if type(delay) is not int or not 1 <= delay <= 366 * 86400:
+            raise ValueError("delay_seconds must be an integer from 1 second to 366 days")
         due = now + delay
     if not math.isfinite(due) or not 1 <= due - now <= 366 * 86400:
         raise ValueError("Scheduled start must be 1 second–366 days in the future")

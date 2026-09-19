@@ -364,7 +364,11 @@ lesson — короткий применимый урок, опирающийс�
                     remaining = current["deadline"] - time.time() if current and current.get("budget_configured") else None
                     if remaining is not None and remaining <= 0:
                         raise BudgetExceeded("Время задачи исчерпано перед действием. /extend " + job["id"] + " добавит бюджет.")
-                    execution = self.tools.call(decision["tool"], args, job, [sources[0], *sources[1:][-7:]], len(trace))
+                    # The persisted decision number grows across compaction and
+                    # restarts, including legacy jobs without configured budgets.
+                    # A new namespace avoids old trace-length receipt collisions.
+                    execution = self.tools.call(decision["tool"], args, job, [sources[0], *sources[1:][-7:]],
+                                                "decision:" + str(self.last_decision_step))
                     result = await asyncio.wait_for(execution, remaining) if remaining is not None else await execution
                     observation = {"ok": True, "result": result}
                 except (ValueError, KeyError, TypeError, OSError, TimeoutError) as exc:
