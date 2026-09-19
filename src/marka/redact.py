@@ -3,7 +3,9 @@
 import re
 
 _PATTERNS = (
-    (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{25,}\b"), "[REDACTED_TELEGRAM_TOKEN]"),
+    # Legacy serialized text can put a letter (including a literal "\\n")
+    # directly before the numeric prefix; a word boundary misses that case.
+    (re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_-]{25,}\b"), "[REDACTED_TELEGRAM_TOKEN]"),
     (re.compile(r"\b(?:sk-|ghp_|github_pat_|gho_)[A-Za-z0-9_-]{16,}\b"), "[REDACTED_KEY]"),
     (re.compile(r"\b(?:xox[baprs]-|glpat-|AIza)[A-Za-z0-9_-]{16,}\b"), "[REDACTED_SERVICE_KEY]"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[REDACTED_JWT]"),

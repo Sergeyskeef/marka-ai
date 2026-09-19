@@ -57,6 +57,9 @@ class Engine:
         self.provider_details = None
 
     async def complete(self, prompt, schema, *, task=True):
+        # Consultations and reflection bypass prompt(); apply known-pattern
+        # redaction before both the provider call and its idempotency digest.
+        prompt = redact(prompt)
         active = self.active_job if task else None
         async with self.provider_lock:
             kwargs = {}
@@ -236,6 +239,9 @@ lesson — короткий применимый урок, опирающийс�
 О модели суди только по runtime_capabilities. configured_model — запрос конфигурации, resolved_model=unknown
 значит точная модель не подтверждена. Не придумывай GPT-поколение, внутреннее имя, размер или номер снимка.
 """
+        # Stored history and derived excerpts may predate ingestion redaction.
+        # Sanitize a copy at the model boundary, without rewriting source data.
+        data = redact_value(data)
         serialized = json.dumps(data, ensure_ascii=False, default=str)
         while len(serialized) > 64000:
             candidates = [data["recent_dialogue"], data["current_work_log"], data["recent_accepted_knowledge"], data["relevant_memories"], data["related_experience"]]
