@@ -231,8 +231,20 @@ def _guardian(value):
     if not isinstance(value, dict):
         return {"service_active": False, "phase": "unavailable"}
     phase = value.get("phase")
-    return {"service_active": value.get("service_active") is True,
-            "phase": phase if isinstance(phase, str) and phase in PHASES else "unavailable"}
+    result = {"service_active": value.get("service_active") is True,
+              "phase": phase if isinstance(phase, str) and phase in PHASES else "unavailable"}
+    version = value.get("current_runtime_version")
+    if isinstance(version, str) and re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", version):
+        result["current_runtime_version"] = version
+    if value.get("recovery_action") in ("restart", "rollback"):
+        result["recovery_action"] = value["recovery_action"]
+    incident = value.get("last_incident")
+    if isinstance(incident, dict):
+        if type(incident.get("at")) in (int, float) and 0 <= incident["at"] <= 1e12:
+            result["last_failure_at"] = incident["at"]
+        if incident.get("component") in {"startup", "supervisor", "polling", "worker", "delivery", "maintenance", "heartbeat", "signal"}:
+            result["last_failure_component"] = incident["component"]
+    return result
 
 
 def _change(containers, guardian, when):
@@ -301,6 +313,10 @@ def collect(root, output):
         guardian = protected_json(root / "status/status.json")
         phase = guardian.get("phase") if isinstance(guardian, dict) else None
         status["guardian"]["phase"] = phase if isinstance(phase, str) and phase in PHASES else "other"
+        status["guardian"] = _guardian({**status["guardian"],
+            "current_runtime_version": guardian.get("current_runtime_version"),
+            "last_incident": guardian.get("last_incident"),
+            "recovery_action": (guardian.get("last_result") or {}).get("action")})
     except (OSError, ValueError, TypeError):
         status["guardian"]["phase"] = "unavailable"
     config = {"runtime": sanitized_config(protected_json(root / "masks/settings.json")),

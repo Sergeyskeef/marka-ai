@@ -164,6 +164,9 @@ class Engine:
                 "task_working_memory": self.work_context.summary(job['id']),
                 "code_runner_available": bool(self.settings.sandbox_socket),
                 "runtime_capabilities": {"provider": "official_codex_cli",
+                                         "bot_runtime_version": __import__("marka").__version__,
+                                         "telegram_typing_implemented": True,
+                                         "bridge_runtime_version": (self.provider_details or {}).get("bridge_runtime_version", "unknown"),
                                          "configured_model": (self.provider_details or {}).get("model_requested", self.settings.model),
                                          "configured_reasoning_effort": (self.provider_details or {}).get("reasoning_effort_requested", self.settings.reasoning_effort),
                                          "model_configuration_source": "protected_bridge" if self.provider_details else "runtime_settings",
@@ -194,6 +197,13 @@ task.recall возвращает полное наблюдение указан�
 next_offset и sha256 позволяют точно продолжить страницу; не считай обрезанный ответ полным файлом.
 Если изменение требует новой операции защищённого bridge, оно требует операторского выпуска;
 самоизменение бота не меняет закреплённый bridge. Объясни этот конкретный предел без бесконечного чтения.
+Фактически запущенные версии указаны в runtime_capabilities.bot_runtime_version и bridge_runtime_version.
+self.history содержит эксперименты, а не полный журнал операторских выпусков. Отсутствие эксперимента
+не означает, что оператор не установил возможность. telegram_typing_implemented означает наличие
+кода индикатора, но не подтверждает доставку или отображение в Telegram. При recovered проверяй
+текущую версию, а не пересказывай старую неудачную задачу как состояние установленного кода.
+Для короткого разговора отвечай непосредственно. Не вызывай task.progress без необходимости
+проверить бюджет, критерии или запрошенный владельцем ход задачи: каждый вызов добавляет ожидание.
 Можно создавать и менять рабочие файлы, исследовать публичные страницы и выполнять код только в runner.
 Для задачи с несколькими действиями составь краткий план через task.plan и обновляй его по результатам.
 Для создания или изменения файлов до первого изменения зафиксируй task.criteria: конкретные проверяемые

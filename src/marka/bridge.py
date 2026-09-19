@@ -391,6 +391,7 @@ class Bridge:
         if op == "status":
             self._fields(request, [])
             return {"ready": self.poll_ready and not self.poll_error, "poll_ready": self.poll_ready,
+                    "bridge_runtime_version": __import__("marka").__version__,
                     "telegram_available": self.poll_ready and not self.poll_error,
                     "poll_error": self.poll_error, "last_poll": self.last_poll,
                     "voice_available": Path(self.config["voice_key_file"]).is_file(),
@@ -408,6 +409,7 @@ class Bridge:
                                   "auth_method": "chatgpt" if value.get("auth_method") == "chatgpt" else "unavailable",
                                   "version": value.get("version") if isinstance(value.get("version"), str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", value["version"]) else None}
             return {**self.provider_info, "model_requested": self.config["model"], "model_resolved": None,
+                    "bridge_runtime_version": __import__("marka").__version__,
                     "reasoning_effort_requested": self.config["reasoning_effort"], "reasoning_effort_resolved": None}
         if op == "server.read":
             self._fields(request, ["section", "offset", "expected_sha256"])

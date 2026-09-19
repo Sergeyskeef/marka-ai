@@ -522,7 +522,7 @@ class Application:
                 self.bridge_capabilities = await bridge_status(self.settings.bridge_socket)
                 self.engine.provider_details = {key: self.bridge_capabilities.get(key)
                                                 for key in ("model_requested", "model_resolved", "reasoning_effort_requested",
-                                                            "reasoning_effort_resolved", "server_read_available")}
+                                                            "reasoning_effort_resolved", "server_read_available", "bridge_runtime_version")}
             except Exception:
                 self.bridge_capabilities = None
                 self.engine.provider_details = None
@@ -948,6 +948,27 @@ class Application:
             pass
 
     async def run(self):
+        self._exit_recorded = False
+        self._exit_signal = None
+        try:
+            await self._run_gateway()
+        except BaseException as error:
+            if not self._exit_recorded:
+                self._record_exit("startup", "cancelled" if isinstance(error, asyncio.CancelledError) else "failed", error)
+            raise
+
+    def _record_exit(self, component, event, error=None):
+        self._exit_recorded = True
+        try:
+            self.heartbeat.record_exit(component, event, error, signal_number=self._exit_signal)
+        except OSError as exc:
+            LOG.warning("Lifecycle receipt unavailable (%s)", type(exc).__name__)
+
+    def _signal_stop(self, signum):
+        self._exit_signal = int(signum)
+        self.stopping.set()
+
+    async def _run_gateway(self):
         with instance_lock(self.settings.data_dir / "gateway.lock"):
             self.heartbeat.write()
             await self.client.get_me()
@@ -962,17 +983,32 @@ class Application:
             handlers = []
             for signum in (signal.SIGTERM, signal.SIGINT):
                 try:
-                    loop.add_signal_handler(signum, self.stopping.set)
+                    loop.add_signal_handler(signum, self._signal_stop, signum)
                     handlers.append(signum)
                 except (NotImplementedError, RuntimeError, ValueError):
                     pass
-            tasks = [asyncio.create_task(self.polling()), asyncio.create_task(self.worker()), asyncio.create_task(self.delivery()),
-                     asyncio.create_task(self.maintenance()), asyncio.create_task(self.heartbeat.run(self.stopping))]
+            components = ("polling", "worker", "delivery", "maintenance", "heartbeat")
+            tasks = [asyncio.create_task(operation, name=component) for component, operation in zip(components,
+                     (self.polling(), self.worker(), self.delivery(), self.maintenance(), self.heartbeat.run(self.stopping)))]
             stop_task = asyncio.create_task(self.stopping.wait())
             try:
                 done, _ = await asyncio.wait([*tasks, stop_task], return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    task.result()
+                for task in tasks:
+                    if task in done:
+                        try:
+                            task.result()
+                        except BaseException as error:
+                            self._record_exit(task.get_name(), "cancelled" if isinstance(error, asyncio.CancelledError) else "failed", error)
+                            raise
+                if self.stopping.is_set():
+                    self._record_exit("signal" if self._exit_signal else "supervisor", "signal" if self._exit_signal else "requested")
+                else:
+                    self._record_exit(next(task.get_name() for task in tasks if task in done), "returned")
+                    raise RuntimeError("A gateway component returned unexpectedly")
+            except BaseException as error:
+                if not self._exit_recorded:
+                    self._record_exit("supervisor", "cancelled" if isinstance(error, asyncio.CancelledError) else "failed", error)
+                raise
             finally:
                 self.stopping.set()
                 self.heartbeat.phase = "stopping"

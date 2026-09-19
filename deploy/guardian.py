@@ -110,7 +110,7 @@ def read_regular(path, limit, *, trusted=False):
     path = Path(path)
     if path.is_symlink():
         raise Rejected("symlink refused")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
@@ -636,6 +636,10 @@ class Guardian:
         public = {key: self.state.get(key) for key in ("version", "phase", "current_image", "fallback_image", "reason", "updated")}
         public["request_id"] = active.get("request_id", "") or self.state.get("last_result", {}).get("request_id", "")
         public["last_result"] = self.state.get("last_result", {})
+        version = re.search(r'^__version__\s*=\s*[\'"]([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})[\'"]',
+                            self.state.get("current_sources", {}).get("src/marka/__init__.py", ""), re.MULTILINE)
+        public["current_runtime_version"] = version[1] if version else None
+        public["last_incident"] = self.state.get("last_incident")
         atomic(self.status, canonical(public), 0o644)
 
     def phase(self, phase, reason):
@@ -750,20 +754,93 @@ class Guardian:
             # Free emergency blocks before trying to persist this transition:
             # a completely full filesystem cannot fsync a new state document.
             self.release_recovery_reserve(Path(backup).stat().st_size)
+        self.capture_incident(reason)
         if self.state.get("recovery_attempts", 0) >= 2:
             self.phase("manual_intervention", "bounded recovery attempts exhausted")
             return
         active = self.state.get("active")
         if not active:
-            image = self.state.get("previous_image") or self.state["fallback_image"]
-            sources = self.state.get("previous_sources") or self.state["fallback_sources"]
-            if image == self.state["current_image"]:
-                image, sources = self.state["fallback_image"], self.state["fallback_sources"]
+            observed = self.docker.inspect()
+            restart = (reason in {"heartbeat unavailable", "event loop heartbeat stale", "container exited or changed"}
+                       and self.state.get("phase") in {"accepted", "recovered"}
+                       and self.state.get("restarted_image") != self.state["current_image"]
+                       and observed and observed["image"] == self.state["current_image"]
+                       and not observed.get("oom") and not observed.get("restarts"))
+            if restart:
+                image, sources = self.state["current_image"], self.state["current_sources"]
+                self.state["restarted_image"] = image
+            else:
+                image = self.state.get("previous_image") or self.state["fallback_image"]
+                sources = self.state.get("previous_sources") or self.state["fallback_sources"]
+                if image == self.state["current_image"]:
+                    image, sources = self.state["fallback_image"], self.state["fallback_sources"]
             self.state["active"] = {"request_id": "", "rollback_image": image, "rollback_sources": sources,
+                                    "restart_only": bool(restart),
                                     "checkpoint": self.state.get("checkpoint", ""), "fingerprint": self.state.get("fingerprint"),
                                     "schema": self.state.get("schema")}
         self.state["recovery_attempts"] = self.state.get("recovery_attempts", 0) + 1
         self.phase("rolling_back", reason)
+
+    def capture_incident(self, reason):
+        """Keep bounded, sanitized evidence BEFORE deleting the failed container."""
+        record = {"version": 1, "at": self.now(), "image": self.state["current_image"],
+                  "reason": reason if reason in {"heartbeat unavailable", "event loop heartbeat stale", "container exited or changed",
+                      "canonical history changed", "canonical schema is incompatible", "canonical owner changed",
+                      "heartbeat belongs to earlier process", "running task exceeded durable deadline",
+                      "canonical database or heartbeat unavailable", "owner recovery command", "guardian restarted during activation"} else "other"}
+        errors = set("CancelledError TimeoutError RuntimeError ValueError TypeError OSError PermissionError OperationalError IntegrityError DatabaseError ProviderError BridgeError TelegramError TelegramRetryAfter VoiceError AttributeError KeyError IndexError MemoryError KeyboardInterrupt SystemExit other".split())
+        modules = set("app health queue store bridge_client telegram engine learning backup provider semantic media config cli".split())
+        try:
+            observed = self.docker.inspect()
+            record["container"] = {key: observed.get(key) for key in ("image", "running", "oom", "restarts", "exit")} if observed else None
+            for filename, label in (("heartbeat.json", "heartbeat"), ("last-exit.json", "runtime_exit")):
+                try:
+                    value = json_object(read_regular(Path(self.cfg["state_path"]) / filename, 8192))
+                    clean = {}
+                    for key in ("version", "at", "started", "tick", "pid"):
+                        if type(value.get(key)) in (int, float) and 0 <= value[key] <= 1e12:
+                            clean[key] = value[key]
+                    for key, allowed in (("phase", {"starting", "running", "stopping"}),
+                                         ("component", {"startup", "supervisor", "polling", "worker", "delivery", "maintenance", "heartbeat", "signal"}),
+                                         ("event", {"failed", "cancelled", "returned", "requested", "signal"}), ("exception", errors)):
+                        if isinstance(value.get(key), str) and value[key] in allowed:
+                            clean[key] = value[key]
+                    if value.get("signal") in (2, 15):
+                        clean["signal"] = value["signal"]
+                    for key, pattern in (("boot_id", r"[a-f0-9]{32}"), ("runtime_version", r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}")):
+                        if isinstance(value.get(key), str) and re.fullmatch(pattern, value[key]):
+                            clean[key] = value[key]
+                    frames = value.get("frames")
+                    if isinstance(frames, list):
+                        clean["frames"] = [{"module": row["module"], "line": row["line"]} for row in frames[:12]
+                            if isinstance(row, dict) and isinstance(row.get("module"), str) and row["module"] in modules
+                            and type(row.get("line")) is int and 1 <= row["line"] <= 100000]
+                    record[label] = clean
+                except (OSError, ValueError, TypeError, Rejected):
+                    record[label] = {"unavailable": True}
+            record["runtime_exit_matches_boot"] = bool(record["heartbeat"].get("boot_id") and
+                record["heartbeat"].get("boot_id") == record["runtime_exit"].get("boot_id"))
+            if isinstance(self.docker, Docker):
+                logs = self.docker.command(["logs", "--tail", "80", self.cfg["container"]["name"]], timeout=5, check=False)
+                text = logs.stdout + "\n" + logs.stderr
+                record["log_exception_classes"] = [name for name in re.findall(r"(?m)^(?:[A-Za-z_]+\.)*([A-Za-z_]+Error):", text) if name in errors][-12:]
+                record["log_frames"] = [{"module": name, "line": int(number)} for name, number in
+                    re.findall(r'File "[^"\n]*/marka/([a-z_]+)\.py", line (\d{1,6})', text) if name in modules][-12:]
+        except (OSError, ValueError, TypeError, Rejected, subprocess.SubprocessError):
+            record["capture_incomplete"] = True
+        identifier = "incident-" + uuid.uuid4().hex
+        self.state["last_incident"] = {"id": identifier, "at": record["at"], "reason": record["reason"]}
+        if record.get("runtime_exit_matches_boot"):
+            self.state["last_incident"].update({key: record["runtime_exit"][key] for key in ("component", "event", "exception")
+                                              if key in record["runtime_exit"]})
+        try:
+            atomic(self.root / (identifier + ".json"), canonical(record))
+            old = sorted(self.root.glob("incident-*.json"), key=lambda p: p.stat().st_mtime)
+            for path in old[:-32]:
+                if re.fullmatch(r"incident-[a-f0-9]{32}\.json", path.name) and path.is_file() and not path.is_symlink():
+                    path.unlink()
+        except (OSError, ValueError, Rejected):
+            self.state["last_incident"]["persisted"] = False
 
     def healthy(self, image, *, grace=False):
         observed = self.docker.inspect()
@@ -846,17 +923,19 @@ class Guardian:
         self.state["current_sources"] = active["rollback_sources"]
         self.state["started"] = self.now()
         self.state["expected_boot_started"] = self.now()
-        self.state["previous_image"] = ""
-        self.state["previous_sources"] = {}
+        if not active.get("restart_only"):
+            self.state["previous_image"] = ""
+            self.state["previous_sources"] = {}
         request_id = active.get("request_id", "")
         if request_id:
             self.state["seen"][request_id] = "recovered"
             if active.get("candidate_manifest"):
                 self.state["rejected_manifests"] = (self.state["rejected_manifests"] + [active["candidate_manifest"]])[-500:]
         self.state["last_result"] = {"request_id": request_id, "phase": "recovered", "restored_database": restored,
-                                     "reason": self.state["reason"]}
+                                     "reason": self.state["reason"], "action": "restart" if active.get("restart_only") else "rollback",
+                                     "incident": self.state.get("last_incident", {}).get("id")}
         self.state["active"] = None
-        self.phase("recovered", "known-good image restored")
+        self.phase("recovered", "current image restarted once" if active.get("restart_only") else "known-good image restored")
         image = active.get("candidate_image")
         if image and image not in {self.state["current_image"], self.state["fallback_image"]}:
             self.docker.remove_image(image)
@@ -1053,6 +1132,7 @@ def main():
     with lock(root / "guardian.lock"):
         guardian = Guardian(config)
         guardian.initialize_checkpoint()
+        guardian.save()  # Refresh actual release metadata after a host controller update.
         while True:
             try:
                 guardian.tick()
