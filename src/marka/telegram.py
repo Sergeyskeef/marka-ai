@@ -79,6 +79,11 @@ class Attachment:
     private: bool
 
 
+@dataclass(frozen=True, slots=True)
+class VoiceAttachment(Attachment):
+    duration: int
+
+
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -165,6 +170,22 @@ def attachment_problem(attachment: Attachment) -> str | None:
     if Path(attachment.file_name).suffix.lower() not in TEXT_ATTACHMENT_EXTENSIONS:
         return "Supported attachments are UTF-8 text, Markdown, CSV, JSON and source-code files; PDF, images and audio are not supported"
     return None
+
+
+def parse_voice(update: Any) -> VoiceAttachment | None:
+    """Original private Telegram voice notes only; no file download or trust grant."""
+    envelope = _message_envelope(update)
+    if envelope is None:
+        return None
+    raw, _, _ = envelope
+    voice = raw.get("voice")
+    if not isinstance(voice, dict) or not _is_int(voice.get("duration")) or voice["duration"] < 0:
+        return None
+    item = parse_attachment(update | {"message": raw | {"document": voice | {"file_name": "voice.ogg"}}})
+    if item is None:
+        return None
+    return VoiceAttachment(item.update_id, item.chat_id, item.user_id, item.file_id, item.file_unique_id,
+                           item.file_name, item.mime_type, item.file_size, item.caption, item.private, voice["duration"])
 
 
 def parse_image(update: Any) -> Attachment | None:
@@ -341,15 +362,15 @@ class TelegramClient:
         return result
 
     async def download_file(self, file_id: str, *, max_bytes=MAX_ATTACHMENT_BYTES, expected_size=None,
-                            image=False) -> bytes:
+                            image=False, voice=False) -> bytes:
         """Download a bounded original file from Telegram, after owner validation.
 
         The file URL follows the official getFile contract. No redirect or
         custom API origin is accepted for downloads containing the bot token.
         """
         if (not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", file_id)
-                or type(image) is not bool or not _is_int(max_bytes)
-                or not 1 <= max_bytes <= (MAX_IMAGE_DOWNLOAD_BYTES if image else MAX_ATTACHMENT_BYTES)):
+                or type(image) is not bool or type(voice) is not bool or (image and voice) or not _is_int(max_bytes)
+                or not 1 <= max_bytes <= (MAX_IMAGE_DOWNLOAD_BYTES if image or voice else MAX_ATTACHMENT_BYTES)):
             raise TelegramError("Invalid Telegram attachment request", permanent=True)
         if expected_size is not None and (not _is_int(expected_size) or not 0 <= expected_size <= max_bytes):
             raise TelegramError("Attachment exceeds the download limit", permanent=True)

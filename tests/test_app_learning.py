@@ -290,7 +290,7 @@ class GatewayLearningTests(unittest.IsolatedAsyncioTestCase):
         media["message"].pop("text")
         media["message"]["voice"] = {"file_id": "some-file"}
         await self.app.ingest(media)
-        self.assertIn("аудио пока не читаю", self.replies()[-1]["text"])
+        self.assertIn("произвольные аудиофайлы пока не читаю", self.replies()[-1]["text"])
         self.assertIn("PNG/JPEG", self.replies()[-1]["text"])
         self.assertEqual(self.app.queue.list(), [])
         self.assertEqual(self.client.downloads, [])

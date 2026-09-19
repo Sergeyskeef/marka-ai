@@ -19,8 +19,9 @@ from .provider import CodexProvider
 from .queue import Queue
 from .redact import redact
 from .store import Store
+from .voice import VoiceStore, VoiceError, MAX_VOICE_BYTES, MAX_VOICE_SECONDS, STT_TIMEOUT, transcribe
 from .telegram import (TelegramClient, TelegramError, TelegramRetryAfter, parse_message, valid_private_message,
-                       parse_attachment, parse_image, attachment_problem, decode_text_attachment)
+                       parse_attachment, parse_image, parse_voice, attachment_problem, decode_text_attachment)
 
 LOG = logging.getLogger("marka")
 HELP = """Я Марк. Можно просто написать вопрос или поручение.
@@ -53,6 +54,7 @@ HELP = """Я Марк. Можно просто написать вопрос и�
 Могу исследовать публичные страницы, создавать файлы и запускать код в отдельной среде.
 Можно приложить текстовый файл UTF-8 до 512 KiB и написать поручение в подписи.
 Также понимаю фото и файлы PNG/JPEG до 2 MiB, 4096 пикселей по стороне и 8 млн пикселей всего.
+Голосовые OGG/Opus до 60 секунд и 2 MiB принимаю при настроенном API OpenAI для речи.
 Работа ограничена числом шагов и дневным лимитом. Непроверенные догадки не становятся фактами."""
 
 
@@ -98,6 +100,7 @@ class Application:
         self.provider = provider or CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout)
         self.engine = Engine(settings, self.store, self.queue, self.provider, self.progress)
         self.backups = DailyBackups(self.store, settings.data_dir)
+        self.voices = VoiceStore(settings, self.store)
         self.stopping = asyncio.Event()
         self.current: asyncio.Task | None = None
         self.current_id: str | None = None
@@ -226,6 +229,30 @@ class Application:
             db.execute("INSERT INTO meta(key,value) VALUES(?,?)", (key, json.dumps(state)))
             return state
 
+    async def voice(self, item):
+        owner = self.store.get_meta("owner_id")
+        if not valid_private_message(item) or item.user_id != owner or item.chat_id != owner:
+            raise VoiceError("Голосовые принимаются только из личного чата владельца")
+        if not self.settings.voice_key_file.is_file() or self.settings.voice_key_file.is_symlink():
+            raise VoiceError("Распознавание через OpenAI не настроено. Пришли поручение текстом; голосовое не скачивалось")
+        if not 0 < item.duration <= MAX_VOICE_SECONDS or (item.file_size is not None and item.file_size > MAX_VOICE_BYTES):
+            raise VoiceError("Голосовое должно длиться 1–60 секунд и занимать не больше 2 MiB")
+        source = f"telegram:{item.update_id}"
+        receipt = self.voices.get(source, item.chat_id)
+        with self.queue.connection() as db:
+            existing = db.execute("SELECT id,kind FROM jobs WHERE source=?", (source,)).fetchone()
+        if existing and (existing["kind"] != "voice" or receipt is None):
+            raise VoiceError("Это событие связано с другой задачей; пришли голосовое заново")
+        if receipt is None:
+            data = await self.client.download_file(item.file_id, max_bytes=MAX_VOICE_BYTES,
+                                                   expected_size=item.file_size, voice=True)
+            if item.file_size is not None and len(data) != item.file_size:
+                raise VoiceError("Размер голосового не совпал с метаданными Telegram")
+            receipt = self.voices.save(source, item.chat_id, item.caption, item.duration, data)
+        identifier = self._enqueue_owner("Голосовое владельца ожидает расшифровки OpenAI. " + source,
+                                         item.chat_id, source=source, kind="voice")
+        self.reply(item, f"Голосовое сохранено для задачи {identifier}. Отправлю аудио в OpenAI для распознавания; текст может содержать ошибки. /progress {identifier} — ход работы.")
+
     async def photo(self, item):
         owner = self.store.get_meta("owner_id")
         if not valid_private_message(item) or item.user_id != owner or item.chat_id != owner:
@@ -295,6 +322,18 @@ class Application:
         if type(update_id) is not int or update_id < 0 or update_id < self.queue.offset():
             return
         message = parse_message(update)
+        voice = parse_voice(update)
+        if voice is not None:
+            owner = self.store.get_meta("owner_id")
+            if owner is not None and voice.user_id == owner and voice.chat_id == owner and valid_private_message(voice):
+                if not self._has_command_receipt(update_id):
+                    try:
+                        await self.voice(voice)
+                    except (ValueError, TelegramError, OSError) as exc:
+                        reason = str(exc) if isinstance(exc, (ValueError, TelegramError)) else "Не удалось сохранить голосовое"
+                        self.reply(voice, "Голосовое не принято: " + redact(reason)[:400])
+            self.queue.advance(update_id)
+            return
         picture = parse_image(update)
         if picture is not None:
             owner = self.store.get_meta("owner_id")
@@ -325,7 +364,7 @@ class Application:
                 envelope = parse_message(update | {"message": raw | {"text": "unsupported media"}})
                 owner = self.store.get_meta("owner_id")
                 if envelope and valid_private_message(envelope) and envelope.user_id == owner and not self._has_command_receipt(update_id):
-                    self.reply(envelope, "Вложение не удалось принять. Поддерживаю текст UTF-8 до 512 KiB и PNG/JPEG до 2 MiB, максимум 4096 на сторону и 8 млн пикселей. PDF, видео и аудио пока не читаю.")
+                    self.reply(envelope, "Вложение не удалось принять. Поддерживаю текст UTF-8 до 512 KiB, PNG/JPEG до 2 MiB и голосовые OGG/Opus до 60 секунд при настроенном API OpenAI для речи. PDF, видео и произвольные аудиофайлы пока не читаю.")
             self.queue.advance(update_id)
             return
         owner = self.store.get_meta("owner_id")
@@ -435,17 +474,24 @@ class Application:
             text += "\nПоследний инструмент был прерван; его эффект требует проверки перед повтором."
         return text
 
+    def voice_status(self):
+        path = self.settings.voice_key_file
+        if path.is_symlink() or not path.is_file():
+            return "Голосовые: OpenAI API не настроен. Пришли поручение текстом."
+        return "Голосовые: OpenAI API настроен; до 60 секунд и 2 MiB. Аудио передаётся в OpenAI."
+
     async def command(self, message) -> bool:
         command, _, argument = message.text.partition(" ")
         command = command.split("@")[0].lower()
         argument = argument.strip()
         if command in {"/start", "/help"}:
-            self.reply(message, HELP)
+            self.reply(message, HELP + "\n\n" + self.voice_status())
         elif command == "/status":
             stats = self.store.stats()
             text = f"Марк работает. Память: {stats['by_status']['accepted']} принятых, {stats['by_status']['candidate']} кандидатов.\nВызовы Codex за сутки UTC: {stats['budget_used']}/{self.settings.daily_calls}.\n"
             text += f"Текущая задача: {self.current_id or 'нет'}. " + self.last_status
             text += "\nОбучение: " + self.engine.learning.policy()["mode"]
+            text += "\n" + self.voice_status()
             backup = self.backups.status()
             if backup.get("last_success_at"):
                 date = datetime.fromtimestamp(backup["last_success_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -589,6 +635,52 @@ class Application:
                 LOG.warning("Telegram polling unavailable (%s)", type(exc).__name__)
                 await self.pause(min(60, 2 ** min(failures, 6)))
 
+    async def run_job(self, job):
+        if job.get("kind") == "voice":
+            try:
+                receipt = await asyncio.to_thread(self.voices.for_job, job, audio=True)
+                result = receipt["transcript"]
+                if not result:
+                    current = self.queue.get(job["id"])
+                    if current is None or current["state"] != "running" or current["lease"] != job["lease"]:
+                        raise asyncio.CancelledError()
+                    budget = self.queue.progress(job["id"])["budget"]
+                    if budget["configured"] and any(value <= 0 for value in budget["remaining"].values()):
+                        self.queue.finish(job["id"], "blocked", lease=job["lease"], error=
+                            f"Бюджет задачи исчерпан до распознавания. /extend {job['id']} — добавить бюджет; аудио в API не отправлялось.")
+                        return
+                    remaining = current["deadline"] - time.time() if budget["configured"] else STT_TIMEOUT
+                    if remaining <= 0:
+                        self.queue.finish(job["id"], "blocked", lease=job["lease"], error=
+                            f"Время задачи истекло до распознавания. /extend {job['id']} — добавить бюджет; аудио в API не отправлялось.")
+                        return
+                    self.last_status = "Распознаю голосовое через OpenAI API"
+                    # A restart during a paid remote request is ambiguous. The
+                    # durable queue must block it until an explicit /resume.
+                    if not self.queue.checkpoint(job["id"], job.get("trace", []), inflight=True, lease=job["lease"]):
+                        raise asyncio.CancelledError()
+                    # SQLite can wait on a writer; that wait also consumes the
+                    # absolute task deadline and must not buy another API call.
+                    if budget["configured"]:
+                        remaining = current["deadline"] - time.time()
+                        if remaining <= 0:
+                            self.queue.finish(job["id"], "blocked", lease=job["lease"], error=
+                                f"Время задачи истекло до отправки аудио. /extend {job['id']} — добавить бюджет; API не вызывался.")
+                            return
+                    result = await transcribe(self.settings.voice_key_file, receipt["audio"],
+                                             duration=receipt["declared_duration"], timeout=min(STT_TIMEOUT, remaining))
+                    self.voices.save_transcript(job, result)
+                if not result["text"].strip():
+                    raise VoiceError("В голосовом не удалось распознать речь. Исходник сохранён; пришли поручение текстом или запиши голосовое заново")
+                job = self.queue.get(job["id"])
+                if job["state"] != "running":
+                    raise asyncio.CancelledError()
+            except (VoiceError, OSError, ValueError) as exc:
+                message = str(exc) if isinstance(exc, VoiceError) else "Исходное голосовое недоступно или повреждено"
+                self.queue.finish(job["id"], "blocked", error=message + f". /resume {job['id']} — повторить после устранения причины", lease=job["lease"])
+                return
+        return await self.engine.run(job)
+
     async def worker(self):
         while not self.stopping.is_set():
             job = self.queue.claim()
@@ -607,7 +699,7 @@ class Application:
                 await asyncio.gather(self.reflection_task, return_exceptions=True)
             self.last_status = ""
             self.last_progress = time.monotonic()
-            self.current = asyncio.create_task(self.engine.run(job))
+            self.current = asyncio.create_task(self.run_job(job))
             try:
                 await self.current
             except asyncio.CancelledError:

@@ -295,6 +295,9 @@ lesson — короткий применимый урок, опирающийс�
             event_id = self.store.event("user", job["prompt"], session=session,
                                         meta={"job": job["id"], "scheduled": job.get("kind") == "scheduled",
                                               "restored_from_saved_job": restored,
+                                              **({"input_type": "stt", "trust": "unverified_transcription",
+                                                  "telegram_source": job["source"], "exact_owner_quote": False}
+                                                 if job.get("kind") == "voice" else {}),
                                               **({"image_sources": attachment["receipts"], "telegram_source": attachment["source"]}
                                                  if attachment else {})})
             trace = [{"kind": "request", "event_id": event_id},

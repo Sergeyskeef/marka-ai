@@ -189,7 +189,7 @@ class Store:
             item = dict(row)
             item["inactive"] = not bool(item.pop("visible"))
             item["meta"] = json.loads(item["meta"])
-            item["trust"] = "historical_unverified" if item["meta"].get("imported") else "observed_episode_not_accepted_knowledge"
+            item["trust"] = self._event_trust(item["meta"])
             item.update(self._page(item["content"], offset, limit))
             origin = db.execute("SELECT source,external_id,original_role,original_timestamp,content_hash,imported_at "
                                 "FROM event_origins WHERE event_id=?", (event_id,)).fetchone()
@@ -436,6 +436,12 @@ class Store:
             return result
 
     @staticmethod
+    def _event_trust(meta: dict) -> str:
+        if meta.get("trust") == "unverified_transcription":
+            return "unverified_transcription"
+        return "historical_unverified" if meta.get("imported") else "observed_episode_not_accepted_knowledge"
+
+    @staticmethod
     def _episode(row: sqlite3.Row, hit: dict | None = None) -> dict:
         item = dict(row)
         item["meta"] = json.loads(item["meta"])
@@ -445,7 +451,7 @@ class Store:
         start = min(start, max(0, len(content) - 2000))
         item.update(Store._page(content, start, 2000))
         item["truncated"] = len(content) > 2000
-        item["trust"] = "historical_unverified" if item["meta"].get("imported") else "observed_episode_not_accepted_knowledge"
+        item["trust"] = Store._event_trust(item["meta"])
         if hit:
             item["match"] = hit
             item["score"] = hit["score"]

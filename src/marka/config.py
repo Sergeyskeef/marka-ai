@@ -32,6 +32,10 @@ class Settings:
         return self.data_dir / "codex"
 
     @property
+    def voice_key_file(self) -> Path:
+        return self.data_dir / "openai-stt.key"
+
+    @property
     def database(self) -> Path:
         return self.data_dir / "marka.sqlite3"
 
