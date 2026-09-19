@@ -26,6 +26,7 @@ CATALOG = {
     "memory.related": '{"event_id":12,"limit":8}; related task/conversation evidence, not inferred facts',
     "memory.entities": '{"query":"project or person","limit":12}; links supported by source mentions, not accepted relationships',
     "memory.propose": '{"content":"fact/lesson/skill and its scope","kind":"fact|lesson|skill|preference","key":"optional replacement key"}; saves an unverified candidate, never confirms it',
+    "memory.annotate": '{"id":12,"label":"decision|hypothesis|dated_observation|fact|lesson|skill|preference","review_after":"optional UTC ISO date","valid_from":"optional UTC ISO date","valid_until":"optional UTC ISO date","last_verified":"optional UTC ISO date"}; proposes meaning/freshness metadata, never confirms a fact or owner decision',
     "workspace.list": '{"path":"relative directory, empty for root"}',
     "workspace.read": '{"path":"relative UTF-8 file","start_line":1,"end_line":200,"offset":0}; omit offset for line selection; next_offset reads the next 12000-character page including long lines; <=512 KiB file',
     "workspace.write": '{"path":"relative file","content":"complete UTF-8 contents"}; saves in personal workspace with recoverable previous version',
@@ -42,6 +43,10 @@ CATALOG = {
     "task.list": '{}',
     "task.plan": '{"steps":[{"title":"step","status":"pending|running|completed|blocked","evidence":"source or artifact"}],"summary":"current progress"}; persist <=12 steps for the current task; completion still requires observed outcomes',
     "task.progress": '{"id":"optional current task id"}; durable plan, checks, artifacts and remaining budget',
+    "task.criteria": '{"criteria":[{"id":"result","kind":"json_matches","path":"result.json","assertions":[{"pointer":"/status","equals":"ready"}]}]}; freeze objective checks BEFORE effects; kinds artifact(path,min_bytes,max_bytes), text_contains(path,contains:[literal]), json_matches, command_succeeded(argv). Cannot weaken/replace; model-proposed checks do not prove all owner requirements',
+    "server.read": '{"section":"status|config|events|guardian_source|observer_source","offset":0,"expected_sha256":"previous page hash for continuation"}; operator-published read-only Mark diagnostics, no SSH/commands/arbitrary paths/private data; stale snapshots require qualification; own runtime code is in self.inspect',
+    "connections.list": '{}; list installed protected connections and allowed actions; no credential values',
+    "connections.check": '{"connection":"codex|telegram|openai_speech"}; bounded connection check, no inference, upload or messages; scope of verification is explicit, speech metadata access does not prove transcription/billing',
     "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; alternatively replace delay_seconds with due_at="2026-10-01T09:00:00+03:00"; exactly one time form, explicit offset for due_at; owner-requested only, 1–100 runs, minimum recurring interval 300 seconds',
     "consult": '{"question":"self-contained bounded subproblem including necessary evidence","role":"researcher|critic|engineer"}; separate read-only model consultation, no tools or delegated authority',
     "self.inspect": '{"path":"src/marka/module.py or tests/test_module.py; empty for index","start_line":1,"end_line":160}; read public source of this Mark installation',
@@ -236,6 +241,8 @@ class Tools:
         if not episodes:
             from .learning import Learning
             rows = Learning(self.store).filter_context(rows)
+            from .memory_context import MemoryContext
+            rows = MemoryContext(self.store).enrich_many(rows)
         return rows
 
     async def call(self, name: str, args: dict, job: dict, sources: list[int], step: int | str):
@@ -253,7 +260,19 @@ class Tools:
         if name == "memory.episodes":
             return await self.search(str(args.get("query", ""))[:1000], args.get("limit", 5), episodes=True)
         if name == "memory.read":
-            return self.store.get_memory(int(args["id"]), offset=int(args.get("offset", 0)), limit=int(args.get("limit", 4000))) or {"not_found": True}
+            from .memory_context import MemoryContext
+            row = self.store.get_memory(int(args["id"]), offset=int(args.get("offset", 0)), limit=int(args.get("limit", 4000)))
+            return MemoryContext(self.store).enrich(row) if row else {"not_found": True}
+        if name == "memory.annotate":
+            from .memory_context import MemoryContext
+            allowed = {"id", "label", "last_verified", "review_after", "valid_from", "valid_until"}
+            if set(args) - allowed or not {"id", "label"} <= set(args):
+                raise ToolInputError("Invalid memory annotation fields")
+            try:
+                return MemoryContext(self.store).annotate(args["id"], actor="model", source_ids=sources[-16:],
+                    **{key: value for key, value in args.items() if key != "id"})
+            except (ValueError, TypeError) as exc:
+                raise ToolInputError(str(exc)) from None
         if name == "memory.source":
             options = {"offset": int(args.get("offset", 0)), "limit": int(args.get("limit", 4000))}
             if args.get("memory_id"):
@@ -337,7 +356,37 @@ class Tools:
         if name == "task.list":
             return self.queue.list()
         if name == "task.progress":
-            return self.queue.progress(args.get("id") or job["id"])
+            from .acceptance import get_criteria
+            identifier = args.get("id") or job["id"]
+            progress = self.queue.progress(identifier)
+            return {**progress, "acceptance_criteria": get_criteria(self.queue, identifier)} if progress else None
+        if name == "task.criteria":
+            from .acceptance import freeze_criteria
+            if set(args) != {"criteria"}:
+                raise ToolInputError("Supply only criteria")
+            try:
+                return freeze_criteria(self.queue, job["id"], job["lease"], args["criteria"])
+            except (ValueError, TypeError) as exc:
+                raise ToolInputError(str(exc)) from None
+        if name == "server.read":
+            if not self.settings.bridge_socket:
+                raise ToolInputError("Server diagnostics require the protected bridge")
+            if set(args) - {"section", "offset", "expected_sha256"} or "section" not in args:
+                raise ToolInputError("Supply a diagnostic section, not paths or commands")
+            from .bridge_client import server_read
+            return await server_read(self.settings.bridge_socket, args["section"],
+                                     offset=args.get("offset", 0), expected_sha256=args.get("expected_sha256", ""))
+        if name in {"connections.list", "connections.check"}:
+            if not self.settings.bridge_socket:
+                raise ToolInputError("Managed connections require the protected bridge")
+            from .bridge_client import connections_list, connections_check
+            if name == "connections.list":
+                if args:
+                    raise ToolInputError("Connection listing takes no arguments")
+                return await connections_list(self.settings.bridge_socket)
+            if set(args) != {"connection"} or not isinstance(args["connection"], str) or args["connection"] not in {"codex", "telegram", "openai_speech"}:
+                raise ToolInputError("Choose codex, telegram or openai_speech; no URLs, headers or secrets")
+            return await connections_check(self.settings.bridge_socket, args["connection"])
         if name == "task.plan":
             if not self.queue.save_plan(job["id"], args["steps"], lease=job["lease"], summary=args.get("summary", "")):
                 raise ValueError("Task is no longer active")

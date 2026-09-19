@@ -31,6 +31,8 @@ HELP = """Я Марк. Можно просто написать вопрос и�
 /task поручение — выполнить с инструментами
 /evolve конкретное улучшение — подготовить и проверить изменение моего кода
 /status — память, лимит, текущая работа
+/server [status|config|events] — разрешённая диагностика сервера без секретов
+/connections [codex|telegram|openai_speech] — подключения и проверка доступа
 /tasks — последние задачи и их номера
 /progress [номер] — план, проверки, файлы и оставшийся бюджет
 /extend номер — добавить бюджет и продолжить остановленную задачу
@@ -44,6 +46,7 @@ HELP = """Я Марк. Можно просто написать вопрос и�
 /learning [off|tentative|auto] — политика применения процедурных уроков
 /memory слова — найти в принятой памяти
 /memoryid номер [смещение] — прочитать запись целиком по страницам
+/annotate номер JSON — подтвердить тип и сроки актуальности записи памяти
 /source номер [смещение] — прочитать исходное событие
 /why номер — источники и основания записи памяти
 /candidates [курсор] — предложенные факты и уроки; /review — проверка
@@ -445,6 +448,11 @@ class Application:
         if row is None:
             raise ValueError("Запись не найдена")
         text = f"{memory_id} · {row['kind']} · L{row['level']} · {row['status']}\n\n{row['content']}\n\n/why {memory_id} — основания"
+        context = self.engine.memory_context.enrich(row)["memory_context"]
+        text += "\nТип/актуальность: " + str(context.get("label")) + " · " + str(context.get("temporal_status"))
+        if context.get("needs_recheck"):
+            text += " · требуется перепроверка"
+        text += "\nСтатус аннотации: " + str(context.get("annotation_status"))
         if row.get("next_offset") is not None:
             text += f"\n/memoryid {memory_id} {row['next_offset']}"
         return text
@@ -479,6 +487,11 @@ class Application:
         text = f"{identifier} · {progress['state']}\n{progress['summary']}\nОсталось шагов: {left['steps']}; вызовов модели: {left['model_calls']}; секунд: {int(left['seconds']) if left['seconds'] is not None else 'не задано'}."
         for step in progress["plan"][:12]:
             text += f"\n[{step.get('status', 'pending')}] {step.get('title', '')}"
+        from .acceptance import get_criteria
+        criteria = get_criteria(self.queue, identifier)
+        if criteria:
+            text += "\nУсловия результата: " + ("запись повреждена, завершение заблокировано" if criteria.get("invalid")
+                       else ", ".join(item["id"] for item in criteria["criteria"]))
         if progress["verification"]:
             text += "\nПроверка: " + json.dumps(progress["verification"], ensure_ascii=False)[:1800]
         if progress["artifacts"]:
@@ -505,7 +518,8 @@ class Application:
             try:
                 self.bridge_capabilities = await bridge_status(self.settings.bridge_socket)
                 self.engine.provider_details = {key: self.bridge_capabilities.get(key)
-                                                for key in ("model_requested", "model_resolved")}
+                                                for key in ("model_requested", "model_resolved", "reasoning_effort_requested",
+                                                            "reasoning_effort_resolved", "server_read_available")}
             except Exception:
                 self.bridge_capabilities = None
                 self.engine.provider_details = None
@@ -533,6 +547,9 @@ class Application:
             text += "\n" + self.voice_status()
             configured_model = (self.engine.provider_details or {}).get("model_requested", self.settings.model)
             text += "\nМодель в настройках: " + (configured_model or "выбор Codex по умолчанию") + "; точное внутреннее имя не подтверждено."
+            effort = (self.engine.provider_details or {}).get("reasoning_effort_requested", self.settings.reasoning_effort)
+            text += "\nУровень рассуждения в настройках: " + (effort or "стандартный уровень модели") + "."
+            text += "\nЧтение диагностики сервера: " + ("доступно, /server" if (self.engine.provider_details or {}).get("server_read_available") else "не подключено")
             if self.settings.guarded_upgrades:
                 from .promotion import Promotion
                 upgrade = Promotion(self.settings, self.store, self.queue, self.engine.tools.workspace).status()
@@ -549,6 +566,30 @@ class Application:
             if issues:
                 text += "\nЕсть неподтверждённые/неудачные доставки. Результат сохранён; /tasks покажет номера, /result номер повторно выдаст ответ."
             self.reply(message, text)
+        elif command == "/server":
+            if not self.settings.bridge_socket:
+                raise ValueError("Диагностика сервера не подключена")
+            section = argument or "status"
+            if section not in {"status", "config", "events"}:
+                raise ValueError("Раздел: status, config или events")
+            from .bridge_client import server_read
+            snapshot = await server_read(self.settings.bridge_socket, section)
+            age = snapshot.get("age_seconds", 0)
+            self.reply(message, f"Диагностика Марка · {section} · возраст снимка {age} с"
+                       + (" · требуется обновление" if snapshot.get("stale") else "")
+                       + "\n" + snapshot["content"])
+        elif command == "/connections":
+            if not self.settings.bridge_socket:
+                raise ValueError("Защищённые подключения не настроены")
+            from .bridge_client import connections_list, connections_check
+            if argument:
+                if argument not in {"codex", "telegram", "openai_speech"}:
+                    raise ValueError("Подключение: codex, telegram или openai_speech")
+                result = await connections_check(self.settings.bridge_socket, argument)
+            else:
+                result = await connections_list(self.settings.bridge_socket)
+            self.reply(message, "Защищённые подключения · ключи использует исполнитель\n"
+                       + json.dumps(result, ensure_ascii=False, indent=2))
         elif command == "/tasks":
             from .scheduling import clock_context
             rows = []
@@ -627,6 +668,16 @@ class Application:
         elif command == "/memory":
             rows = self.store.search(argument, limit=10)
             self.reply(message, "\n\n".join(f"{x['id']} · {x['kind']} · L{x['level']}\n{x['content']}" for x in rows) or "Принятых записей по этому запросу пока нет.")
+        elif command == "/annotate":
+            first, _, payload = argument.partition(" ")
+            if not first.isdecimal() or not payload or len(payload) > 2000:
+                raise ValueError('Формат: /annotate номер {"label":"decision","review_after":"2026-10-01T00:00:00Z"}')
+            options = json.loads(payload)
+            if not isinstance(options, dict) or set(options) - {"label", "last_verified", "review_after", "valid_from", "valid_until"} or "label" not in options:
+                raise ValueError("Нужны label и, при необходимости, даты UTC")
+            source = self._command_source(message)
+            result = self.engine.memory_context.annotate(int(first), actor="owner", owner_event_id=source["source_id"], **options)
+            self.reply(message, "Метаданные записи сохранены. Статус принятия самого знания не изменён.\n" + json.dumps(result, ensure_ascii=False))
         elif command in {"/candidates", "/review"}:
             cursor = int(argument) if argument else None
             if cursor is not None and cursor <= 0:

@@ -47,6 +47,21 @@ _NATIVE_TOOL_ITEMS = {
 _MAX_STREAM_BYTES = 1_048_576
 _MAX_RESULT_BYTES = 262_144
 _MAX_PROMPT_BYTES = 1_048_576
+REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"})
+
+
+def validate_model_settings(model: str | None, reasoning_effort: str | None) -> None:
+    """Validate operator settings without accepting CLI/TOML fragments.
+
+    These are syntax checks, not a claim of account/model availability. The
+    official Codex catalog and a bounded smoke test establish that separately.
+    """
+    if model is not None and (not isinstance(model, str)
+                              or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", model)):
+        raise ValueError("Invalid Codex model setting")
+    if reasoning_effort is not None and (not isinstance(reasoning_effort, str)
+                                         or reasoning_effort not in REASONING_EFFORTS):
+        raise ValueError("Invalid Codex reasoning effort setting")
 
 
 def _safe_failure(output: bytes, *, exit_code: int | None = None) -> ProviderError:
@@ -80,15 +95,18 @@ class CodexProvider:
     def __init__(
         self, binary: str = "codex", home: Path | None = None,
         model: str | None = None, timeout: float = 180,
+        *, reasoning_effort: str | None = None,
     ) -> None:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be positive")
+        validate_model_settings(model, reasoning_effort)
         self.binary = binary
         selected_home = home if home is not None else Path(
             os.environ.get("CODEX_HOME") or Path.home() / ".codex"
         )
         self.home = Path(selected_home).expanduser().resolve()
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self.timeout = timeout
         self._lock = asyncio.Lock()
         self._validated_binary: str | None = None
@@ -247,6 +265,8 @@ class CodexProvider:
             args.extend(["--disable", feature])
         if self.model:
             args.extend(["--model", self.model])
+        if self.reasoning_effort is not None:
+            args.extend(["-c", "model_reasoning_effort=" + json.dumps(self.reasoning_effort)])
         args.append("-")
         return args
 
@@ -262,7 +282,10 @@ class CodexProvider:
                 )
                 chatgpt = b"using chatgpt" in (out + err).lower()
                 return {"version": self._version, "authenticated": rc == 0 and chatgpt,
-                        "auth_method": "chatgpt" if rc == 0 and chatgpt else "unavailable"}
+                        "auth_method": "chatgpt" if rc == 0 and chatgpt else "unavailable",
+                        "model_requested": self.model, "model_resolved": None,
+                        "reasoning_effort_requested": self.reasoning_effort,
+                        "reasoning_effort_resolved": None}
 
     async def complete(self, prompt: str, schema: dict, *, images=()) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():

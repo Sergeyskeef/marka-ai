@@ -20,10 +20,10 @@ import threading
 import struct
 import zlib
 
-from marka.provider import CodexProvider, ProviderError
+from marka.provider import CodexProvider, ProviderError, REASONING_EFFORTS
 
 
-async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
+async def probe(binary: str, timeout: float = 45, images: int = 0, *, reasoning_effort: str | None = None) -> dict:
     captured: list[dict] = []
     if type(images) is not int or not 0 <= images <= 2:
         raise ValueError("Probe supports zero, one or two synthetic images")
@@ -56,6 +56,7 @@ async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
                                  "tools_field": "present" if "tools" in request else "omitted",
                                  "images": len(pictures), "images_exact": pictures == [expected_image] * images,
                                  "schema": request.get("text", {}).get("format", {}).get("type") == "json_schema",
+                                 "reasoning_effort": request.get("reasoning", {}).get("effort"),
                                  "authorization_present": bool(self.headers.get("Authorization"))})
             except (ValueError, UnicodeError, AttributeError, TypeError):
                 captured.append({"error": "unreadable_request"})
@@ -75,7 +76,8 @@ async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
             home.mkdir()
             work = directory / "work"
             work.mkdir()
-            provider = CodexProvider(binary=binary, home=home, model="gpt-5.6-sol", timeout=timeout)
+            provider = CodexProvider(binary=binary, home=home, model="gpt-5.6-sol", timeout=timeout,
+                                     reasoning_effort=reasoning_effort)
             env = provider._environment(work)
             executable = await provider._check_cli(work, env)
             version = provider._version
@@ -109,6 +111,7 @@ async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
         thread.join(timeout=2)
     response_requests = [row for row in captured if row.get("path", "").endswith("/responses")]
     ok = bool(response_requests) and all(row.get("tools") == [] and row.get("images_exact") and row.get("schema")
+                                        and (reasoning_effort is None or row.get("reasoning_effort") == reasoning_effort)
                                         and not row.get("authorization_present") for row in response_requests)
     return {
         "ok": ok, "version": version, "requests": len(response_requests),
@@ -118,8 +121,10 @@ async def probe(binary: str, timeout: float = 45, images: int = 0) -> dict:
         "image_counts": [row["images"] for row in response_requests],
         "synthetic_image_sha256": hashlib.sha256(synthetic).hexdigest() if images else None,
         "schema_preserved": all(row.get("schema") for row in response_requests),
+        "reasoning_effort_requested": reasoning_effort,
+        "reasoning_efforts_observed": [row.get("reasoning_effort") for row in response_requests],
         "authorization_present": any(row.get("authorization_present") for row in response_requests),
-        "error": None if ok else "Expected no tools or authorization, exact synthetic images, and a structured schema in every Responses request.",
+        "error": None if ok else "Expected no tools or authorization, exact synthetic images, structured schema, and explicit reasoning effort (when requested) in every Responses request.",
     }
 
 
@@ -129,10 +134,12 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=45)
     parser.add_argument("--images", type=int, choices=(0, 1, 2), default=0,
                         help="Verify native PNG image parts as well as the empty tool inventory")
+    parser.add_argument("--reasoning-effort", choices=sorted(REASONING_EFFORTS),
+                        help="Verify the explicit reasoning effort in the actual Responses request")
     args = parser.parse_args()
     if args.timeout <= 0 or args.timeout > 120:
         parser.error("--timeout must be between 0 and 120 seconds")
-    result = asyncio.run(probe(args.binary, args.timeout, args.images))
+    result = asyncio.run(probe(args.binary, args.timeout, args.images, reasoning_effort=args.reasoning_effort))
     print(json.dumps(result))
     return 0 if result["ok"] else 1
 

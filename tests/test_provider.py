@@ -109,6 +109,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_status_contains_only_safe_account_metadata(self):
         self.assertEqual(await self.provider().status(), {
             "version": "0.144.1", "authenticated": True, "auth_method": "chatgpt",
+            "model_requested": "gpt-5.6-sol", "model_resolved": None,
+            "reasoning_effort_requested": None, "reasoning_effort_resolved": None,
         })
         self._write_fake(version="0.154.0-alpha.6.2")
         self.assertEqual((await self.provider().status())["version"], "0.154.0-alpha.6.2")

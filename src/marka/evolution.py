@@ -158,7 +158,7 @@ class Evolution:
     def _source_path(path: str) -> str:
         sandbox._safe_name(path)
         if not (re.fullmatch(r"src/marka/[A-Za-z_][A-Za-z0-9_]*\.py", path)
-                or path in {"src/marka/identity.md", "deploy/guardian.py"} or (path.startswith("tests/") and path.endswith(".py"))):
+                or path in {"src/marka/identity.md", "deploy/guardian.py", "deploy/observer.py", "deploy/marka-observer.service", "deploy/marka-observer.timer"} or (path.startswith("tests/") and path.endswith(".py"))):
             raise ValueError("Only archived public modules, identity and test source may be read")
         return path
 
@@ -271,9 +271,10 @@ class Evolution:
             raise ValueError("Canonical tests conflict with the reserved proposed-test filename")
         if not any(name.startswith("src/marka/") for name in files):
             raise ValueError("No installed public source was found")
-        guardian = self.test_root.parent / "deploy" / "guardian.py"
-        if guardian.is_file() and not guardian.is_symlink():
-            files["deploy/guardian.py"] = guardian.read_bytes()
+        for name in ("guardian.py", "observer.py", "marka-observer.service", "marka-observer.timer"):
+            helper = self.test_root.parent / "deploy" / name
+            if helper.is_file() and not helper.is_symlink():
+                files["deploy/" + name] = helper.read_bytes()
         return files
 
     def inspect(self, path: str = "") -> dict:

@@ -23,7 +23,8 @@ from .telegram import TelegramClient, TelegramError
 def provider(settings) -> CodexProvider:
     if settings.bridge_socket:
         return settings.provider()
-    return CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout)
+    return CodexProvider(settings.codex_binary, settings.codex_home, settings.model, settings.provider_timeout,
+                         reasoning_effort=settings.reasoning_effort)
 
 
 async def doctor(settings, live=False) -> bool:

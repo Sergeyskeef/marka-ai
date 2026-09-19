@@ -30,3 +30,4 @@ jobs:
       - run: python scripts/probe_codex_tools.py --images 0
       - run: python scripts/probe_codex_tools.py --images 1
       - run: python scripts/probe_codex_tools.py --images 2
+      - run: python scripts/probe_codex_tools.py --images 0 --reasoning-effort high

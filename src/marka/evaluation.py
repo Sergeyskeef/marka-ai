@@ -55,6 +55,12 @@ def _target(name, args):
         return name + ":" + hashlib.sha256(json.dumps(target, sort_keys=True).encode()).hexdigest()[:16]
     if name == "web.fetch":
         return name + ":" + hashlib.sha256(str(args.get("url", "")).encode()).hexdigest()[:16]
+    if name == "connections.check":
+        return name + ":" + str(identity("connection"))
+    if name == "server.read":
+        # A successful different section/page cannot erase the failed read.
+        # Refreshing a snapshot digest may repair the same section/page.
+        return name + ":" + str(identity("section")) + ":" + str(args.get("offset", 0))
     if name in {"memory.search", "memory.episodes", "web.search"}:
         return name + ":" + hashlib.sha256(str(args.get("query", "")).encode()).hexdigest()[:16]
     return name
@@ -92,7 +98,7 @@ def _artifact_check(receipt, workspace):
         return check | {"status": "failed", "reason": "artifact_unreadable_or_unsafe"}
 
 
-def verify_completion(trace: list, *, workspace=None, model_outcome="completed", expected_artifacts=None) -> dict:
+def verify_completion(trace: list, *, workspace=None, model_outcome="completed", expected_artifacts=None, criteria_contract=None) -> dict:
     """Evaluate runtime-owned observations; never pass model-authored trace data.
 
     Later success can resolve an earlier failure of the *same* tool/target. File
@@ -197,9 +203,23 @@ def verify_completion(trace: list, *, workspace=None, model_outcome="completed",
     artifact_checks = [_artifact_check(receipt, workspace) for receipt in receipts.values()]
     checks = [*latest.values(), *rejections.values(), *uncertainties.values(), *artifact_checks]
     failures = [check for check in checks if check["status"] == "failed"]
-    return {"status": "contradicted" if failures else "observed" if any(check["status"] == "passed" for check in checks) else "unverified",
-            "model_outcome": model_outcome, "observation_count": observation_count, "checks": checks,
-            "failures": failures, "artifacts": artifact_checks, "limitations": list(_LIMITATIONS)}
+    report = {"status": "contradicted" if failures else "observed" if any(check["status"] == "passed" for check in checks) else "unverified",
+              "model_outcome": model_outcome, "observation_count": observation_count, "checks": checks,
+              "failures": failures, "artifacts": artifact_checks, "limitations": list(_LIMITATIONS)}
+    if criteria_contract is not None:
+        from .acceptance import evaluate_criteria
+        acceptance = evaluate_criteria(criteria_contract, trace, workspace=workspace, expected_artifacts=expected_artifacts)
+        report["acceptance"] = acceptance
+        if not acceptance["completion_allowed"]:
+            report["status"] = "contradicted"
+            blocked = [item for item in acceptance["checks"] if item["status"] != "pass"]
+            if not blocked:
+                blocked = [{"reason": acceptance.get("reason", "criteria_contract_invalid")}]
+            for item in blocked:
+                check = dict(item, kind="acceptance", criterion_kind=item.get("kind"), status="failed")
+                report["checks"].append(check)
+                report["failures"].append(check)
+    return report
 
 
 def _pair(name, arguments, result=None, *, ok=True):
@@ -375,17 +395,177 @@ def run_acceptance_suite() -> dict:
             "scope": "Public deterministic runtime acceptance; independent of model-proposed tests, not a model-intelligence benchmark."}
 
 
+_REPORT_VERIFIER = """import json
+from pathlib import Path
+from calculator import summarize
+assert summarize([10, 15, 17]) == 42
+assert summarize([]) == 0
+assert summarize([-2, 2, 5]) == 5
+Path('reports').mkdir(exist_ok=True)
+Path('reports/total.json').write_text(json.dumps({'total': summarize([10, 15, 17]), 'checked_cases': 3}))
+print('3 observed cases passed')
+"""
+
+
+def usefulness_cases() -> dict:
+    """Public fixed task templates for an optional, separately authorized model run.
+
+    Freeze this returned object and its digest before the run. Seed files and
+    owner prompts are synthetic; these are not sampled real customer outcomes.
+    The caller must still collect its own task-owned execution/artifact evidence.
+    """
+    cases = [
+        {"id": "structured_report", "prompt": "Создай reports/summary.json для трёх сумм 10, 15 и 17: поля processed=3, total=42, currency='RUB'. Создай также reports/summary.md с разделами «Итог» и «Проверка». До работы объяви проверяемые критерии, затем проверь реальные файлы.",
+         "seed_files": {}, "criteria": [
+             {"id": "numbers", "kind": "json_matches", "path": "reports/summary.json", "assertions": [
+                 {"pointer": "/processed", "equals": 3}, {"pointer": "/total", "equals": 42}, {"pointer": "/currency", "equals": "RUB"}]},
+             {"id": "sections", "kind": "text_contains", "path": "reports/summary.md", "contains": ["Итог", "Проверка"]}]},
+        {"id": "repair_and_verify", "prompt": "В calculator.py ошибка в summarize(values). Исправь суммирование, не меняя verify_report.py. Объяви критерии до правок. Запусти ровно python verify_report.py и проверь reports/total.json. Успешный ответ без действительного запуска не считается результатом.",
+         "seed_files": {"calculator.py": "def summarize(values):\n    return values[0] if values else 0\n", "verify_report.py": _REPORT_VERIFIER},
+         "criteria": [
+             {"id": "test_unchanged", "kind": "artifact", "path": "verify_report.py", "sha256": hashlib.sha256(_REPORT_VERIFIER.encode()).hexdigest()},
+             {"id": "execution", "kind": "command_succeeded", "argv": ["python", "verify_report.py"]},
+             {"id": "result", "kind": "json_matches", "path": "reports/total.json", "assertions": [
+                 {"pointer": "/total", "equals": 42}, {"pointer": "/checked_cases", "equals": 3}]}]},
+    ]
+    raw = json.dumps(cases, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return {"suite": "marka-usefulness-cases-v1", "fixture_kind": "public_synthetic", "cases": cases,
+            "sha256": hashlib.sha256(raw).hexdigest(), "comparison": "No before/after model performance has been measured by exporting these fixtures."}
+
+
+def run_usefulness_suite() -> dict:
+    """Exercise declared outcome checks using real files and scripted receipts.
+
+    Runner receipts in these deterministic scenarios are fixtures, not reports
+    of code execution. Real sandbox tests and live model trials are separate.
+    """
+    if not __debug__:
+        raise RuntimeError("Acceptance assertions require Python without -O")
+    from .acceptance import evaluate_criteria, freeze_criteria, get_criteria
+    from .queue import Queue
+    from .store import Store
+    from .tools import Workspace
+    results, templates = [], usefulness_cases()
+
+    def scenario(name, execute):
+        started = time.monotonic()
+        try:
+            details = execute()
+            results.append({"name": name, "passed": True, "details": details or {}})
+        except Exception as exc:
+            results.append({"name": name, "passed": False, "error": type(exc).__name__})
+        results[-1]["seconds"] = round(time.monotonic() - started, 4)
+
+    with tempfile.TemporaryDirectory(prefix="marka-usefulness-") as temporary:
+        root = Path(temporary)
+
+        def context(name, criteria, prompt="Synthetic owner artifact request"):
+            store = Store(root / (name + ".sqlite3"))
+            queue = Queue(store.path)
+            identifier = queue.enqueue(prompt, 0, source="synthetic:" + name)
+            job = queue.claim()
+            contract = freeze_criteria(queue, identifier, job["lease"], criteria)
+            return queue, job, contract, Workspace(root / name)
+
+        def report_repair():
+            fixture = templates["cases"][0]
+            queue, job, contract, workspace = context("report", fixture["criteria"], fixture["prompt"])
+            before = evaluate_criteria(contract, [], workspace=workspace)
+            assert before["status"] == "missing"
+            partial = [workspace.write("reports/summary.json", '{"processed":3,"total":41,"currency":"RUB"}'),
+                       workspace.write("reports/summary.md", "Итог\nПолучено 41")]
+            wrong = evaluate_criteria(contract, [], workspace=workspace, expected_artifacts=partial)
+            assert wrong["status"] == "failed"
+            complete = [workspace.write("reports/summary.json", '{"processed":3,"total":42,"currency":"RUB"}'),
+                        workspace.write("reports/summary.md", "Итог\nСумма 42.\nПроверка\n10 + 15 + 17 = 42.")]
+            after = evaluate_criteria(get_criteria(Queue(queue.path), job["id"]), [], workspace=workspace, expected_artifacts=complete)
+            assert after["status"] == "pass"
+            return {"states": [before["status"], wrong["status"], after["status"]], "same_contract": contract["sha256"] == after["contract_sha256"]}
+        scenario("required_report_contents_and_json_totals_repaired", report_repair)
+
+        def unchanged_tests_and_code_receipt():
+            fixture = templates["cases"][1]
+            _, _, contract, workspace = context("repair", fixture["criteria"], fixture["prompt"])
+            receipts = {path: workspace.write(path, text) for path, text in fixture["seed_files"].items()}
+            argv = ["python", "verify_report.py"]
+            trace = _pair("code.run", {"argv": argv}, {"exit_code": 1, "timed_out": False, "argv": argv, "input_manifest": receipts})
+            before = evaluate_criteria(contract, trace, workspace=workspace, expected_artifacts=list(receipts.values()))
+            assert before["status"] == "failed"
+            receipts["calculator.py"] = workspace.write("calculator.py", "def summarize(values):\n    return sum(values)\n")
+            output = workspace.write("reports/total.json", '{"total":42,"checked_cases":3}')
+            trace += _pair("code.run", {"argv": argv}, {"exit_code": 0, "timed_out": False, "argv": argv,
+                                                            "input_manifest": receipts, "artifacts": [*receipts.values(), output]})
+            after = evaluate_criteria(contract, trace, workspace=workspace)
+            assert after["status"] == "pass"
+            workspace.write("calculator.py", "def summarize(values):\n    return -1\n")
+            changed = evaluate_criteria(contract, trace, workspace=workspace)
+            assert changed["status"] == "failed"
+            return {"states": [before["status"], after["status"], changed["status"]], "command_receipts": "scripted, no code was executed"}
+        scenario("exact_command_recovery_and_post_test_source_change", unchanged_tests_and_code_receipt)
+
+        def cannot_weaken():
+            queue, job, contract, _ = context("immutable", [{"id": "report", "kind": "artifact", "path": "report.md", "min_bytes": 10}])
+            try:
+                freeze_criteria(queue, job["id"], job["lease"], [{"id": "report", "kind": "artifact", "path": "report.md", "min_bytes": 0}])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Weakened criteria were accepted")
+            assert get_criteria(Queue(queue.path), job["id"]) == contract
+            return {"original_contract_preserved_after_restart": True, "owner_accepted": False}
+        scenario("failed_requirement_cannot_be_removed_after_the_fact", cannot_weaken)
+
+        def unrelated_command():
+            argv = ["python", "report.py"]
+            _, _, contract, workspace = context("unrelated", [{"id": "test", "kind": "command_succeeded", "argv": argv}])
+            trace = _pair("code.run", {"argv": argv}, {"exit_code": 1})
+            trace += _pair("code.run", {"argv": ["python", "other.py"]}, {"exit_code": 0, "argv": ["python", "other.py"], "input_manifest": {}})
+            assert evaluate_criteria(contract, trace, workspace=workspace)["status"] == "failed"
+            return {"unrelated_success_did_not_resolve_requirement": True}
+        scenario("unrelated_success_does_not_complete_the_requested_test", unrelated_command)
+
+        def unsupported_final():
+            _, _, contract, workspace = context("unsupported", [{"id": "output", "kind": "artifact", "path": "report.md"}])
+            trace = [{"kind": "final", "message": "Everything created, tested and sent"}]
+            verified = verify_completion(trace, workspace=workspace, criteria_contract=contract)
+            assert verified["status"] == "contradicted" and verified["acceptance"]["status"] == "missing"
+            return {"unperformed_requirement_blocks_completion": True}
+        scenario("unsupported_final_answer_cannot_substitute_output", unsupported_final)
+
+        def inspect_existing():
+            _, _, contract, workspace = context("inspect", [{"id": "configuration", "kind": "json_matches", "path": "config.json",
+                                                               "assertions": [{"pointer": "/enabled", "equals": True}]}])
+            workspace.write("config.json", '{"enabled":true}')
+            trace = _pair("workspace.read", {"path": "config.json"}, workspace.read("config.json"))
+            assert evaluate_criteria(contract, trace, workspace=workspace)["status"] == "pass"
+            return {"current_task_read_receipt_suffices_for_inspection": True}
+        scenario("existing_file_inspection_needs_a_real_read_receipt", inspect_existing)
+
+        def ordinary_chat():
+            assert verify_completion([{"kind": "final", "message": "Hello"}])["status"] == "unverified"
+            assert evaluate_criteria(None, [])["completion_allowed"]
+            return {"ordinary_chat_still_allowed": True}
+        scenario("ordinary_conversation_does_not_require_artifact_criteria", ordinary_chat)
+
+    passed = sum(row["passed"] for row in results)
+    return {"suite": "marka-usefulness-enforcement-v1", "fixture_kind": "public_synthetic", "fixture_sha256": templates["sha256"],
+            "model_calls": 0, "network_calls": 0, "commands_executed": 0, "evidence_origin": "real local artifacts plus scripted runtime receipts",
+            "passed": passed, "total": len(results), "ok": passed == len(results), "scenarios": results,
+            "scope": "Outcome-contract enforcement and recovery; this is not a measured improvement in model intelligence or real customer usefulness."}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=("runtime", "usefulness", "cases"), default="runtime")
     parser.add_argument("--output", type=Path, help="Write a JSON receipt to this local path")
     args = parser.parse_args()
-    report = run_acceptance_suite()
+    report = run_acceptance_suite() if args.suite == "runtime" else run_usefulness_suite() if args.suite == "usefulness" else usefulness_cases()
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
     print(text)
-    raise SystemExit(0 if report["ok"] else 1)
+    raise SystemExit(0 if report.get("ok", True) else 1)
 
 
 if __name__ == "__main__":

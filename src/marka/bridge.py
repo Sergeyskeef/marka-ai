@@ -24,7 +24,7 @@ import time
 from .bridge_client import (BridgeError, canonical, digest, pack_bytes, read_frame,
                             unpack_bytes, write_frame)
 from .media import MAX_IMAGE_BYTES, image_inputs, validate_image
-from .provider import CodexProvider
+from .provider import CodexProvider, validate_model_settings
 from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_IMAGE_DOWNLOAD_BYTES,
                        TelegramClient, TelegramError, TelegramRetryAfter, _message_envelope,
                        parse_attachment, parse_image, parse_message, parse_voice, split_message)
@@ -96,6 +96,9 @@ class Journal:
                 CREATE INDEX IF NOT EXISTS effects_budget ON effects(created,scope);
                 CREATE TABLE IF NOT EXISTS retry_authorizations(
                     update_id INTEGER PRIMARY KEY,scope TEXT NOT NULL,effect_id TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS read_audit(
+                    id INTEGER PRIMARY KEY,created REAL NOT NULL,
+                    section TEXT NOT NULL,ok INTEGER NOT NULL CHECK(ok IN (0,1)));
             """)
             db.execute("INSERT OR IGNORE INTO metadata VALUES('next_offset',?)", (str(initial_offset),))
             db.execute("INSERT OR IGNORE INTO metadata VALUES('owner_id',?)", (str(owner_id),))
@@ -266,6 +269,14 @@ class Journal:
                     "uncertain_effects": db.execute("SELECT COUNT(*) FROM effects WHERE state IN ('pending','uncertain')").fetchone()[0],
                     "pending_controls": db.execute("SELECT COUNT(*) FROM updates WHERE control<>''").fetchone()[0]}
 
+    def record_read(self, section, *, ok):
+        """Keep an independent bounded audit without paths, output or prompts."""
+        with self.connect() as db:
+            db.execute("INSERT INTO read_audit(created,section,ok) VALUES(?,?,?)",
+                       (time.time(), section, int(bool(ok))))
+            db.execute("DELETE FROM read_audit WHERE id < COALESCE("
+                       "(SELECT id FROM read_audit ORDER BY id DESC LIMIT 1 OFFSET 1999),-1)")
+
 
 def _safe_error(exc, *, effect=False):
     if isinstance(exc, Rejected):
@@ -285,9 +296,10 @@ class Bridge:
     def __init__(self, config, *, telegram=None, provider=None, speech=transcribe):
         required = {"socket", "journal", "owner_id", "token_file", "codex_home", "voice_key_file",
                     "model", "daily_calls", "provider_timeout", "initial_offset"}
-        if not isinstance(config, dict) or set(config) != required:
+        optional = {"reasoning_effort", "server_snapshot_dir"}
+        if not isinstance(config, dict) or not required <= set(config) or set(config) - required - optional:
             raise BridgeError("Invalid protected bridge configuration")
-        self.config = config
+        self.config = {**config, "reasoning_effort": config.get("reasoning_effort")}
         self.owner_id = _integer(config["owner_id"], 1, 2**63 - 1)
         self.daily_calls = _integer(config["daily_calls"], 1, 10000)
         provider_timeout = config["provider_timeout"]
@@ -296,11 +308,22 @@ class Bridge:
         for name in ("socket", "journal", "token_file", "codex_home", "voice_key_file"):
             if not isinstance(config[name], str) or not config[name] or not Path(config[name]).is_absolute():
                 raise BridgeError("Invalid protected bridge configuration")
-        if config["model"] is not None and (not isinstance(config["model"], str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", config["model"])):
-            raise BridgeError("Invalid protected bridge model")
+        snapshot_dir = config.get("server_snapshot_dir")
+        if snapshot_dir is not None and (not isinstance(snapshot_dir, str) or not snapshot_dir
+                                         or len(snapshot_dir) > 4096 or "\0" in snapshot_dir
+                                         or not Path(snapshot_dir).is_absolute()):
+            raise BridgeError("Invalid protected server snapshot directory")
+        try:
+            validate_model_settings(config["model"], self.config["reasoning_effort"])
+        except ValueError:
+            raise BridgeError("Invalid protected bridge model settings") from None
         self.journal = Journal(config["journal"], self.owner_id, config["initial_offset"])
         self.telegram = telegram or TelegramClient(_secret(config["token_file"]))
-        self.provider = provider or CodexProvider(home=Path(config["codex_home"]), model=config["model"], timeout=provider_timeout)
+        self.provider = provider or CodexProvider(home=Path(config["codex_home"]), model=config["model"],
+                                                 timeout=provider_timeout, reasoning_effort=self.config["reasoning_effort"])
+        from .connections import Connections
+        self.connections = Connections(provider=self.provider, telegram=self.telegram,
+                                       speech_key_file=config["voice_key_file"])
         self.speech = speech
         self.changed = asyncio.Event()
         self.poll_ready = False
@@ -369,7 +392,11 @@ class Bridge:
                     "telegram_available": self.poll_ready and not self.poll_error,
                     "poll_error": self.poll_error, "last_poll": self.last_poll,
                     "voice_available": Path(self.config["voice_key_file"]).is_file(),
+                    "server_read_available": bool(self.config.get("server_snapshot_dir"))
+                        and Path(self.config["server_snapshot_dir"]).is_dir(),
                     "model_requested": self.config["model"], "model_resolved": None,
+                    "reasoning_effort_requested": self.config["reasoning_effort"],
+                    "reasoning_effort_resolved": None,
                     "provider": self.provider_info, "daily_model_limit": self.daily_calls,
                     "daily_voice_limit": self.daily_calls, **self.journal.status()}
         if op == "provider.status":
@@ -378,7 +405,49 @@ class Bridge:
             self.provider_info = {"authenticated": value.get("authenticated") is True,
                                   "auth_method": "chatgpt" if value.get("auth_method") == "chatgpt" else "unavailable",
                                   "version": value.get("version") if isinstance(value.get("version"), str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", value["version"]) else None}
-            return {**self.provider_info, "model_requested": self.config["model"], "model_resolved": None}
+            return {**self.provider_info, "model_requested": self.config["model"], "model_resolved": None,
+                    "reasoning_effort_requested": self.config["reasoning_effort"], "reasoning_effort_resolved": None}
+        if op == "server.read":
+            self._fields(request, ["section", "offset", "expected_sha256"])
+            from .server_read import SECTIONS, read_snapshot
+            section = request["section"]
+            if not isinstance(section, str) or section not in SECTIONS:
+                raise Rejected()
+            offset = _integer(request["offset"], 0, 1024 * 1024)
+            expected_sha256 = request["expected_sha256"]
+            if not isinstance(expected_sha256, str) or (expected_sha256
+                    and not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)):
+                raise Rejected()
+            completed = False
+            try:
+                value = await asyncio.to_thread(read_snapshot, self.config.get("server_snapshot_dir"),
+                                               section, offset=offset, expected_sha256=expected_sha256)
+                completed = True
+                return value
+            except ValueError:
+                raise Rejected("invalid") from None
+            except OSError:
+                raise Rejected("unavailable") from None
+            finally:
+                self.journal.record_read(section, ok=completed)
+        if op == "connections.list":
+            self._fields(request, [])
+            value = self.connections.list()
+            self.journal.record_read("connection:list", ok=True)
+            return value
+        if op == "connections.check":
+            self._fields(request, ["connection"])
+            from .connections import CONNECTION_IDS
+            connection = request["connection"]
+            if not isinstance(connection, str) or connection not in CONNECTION_IDS:
+                raise Rejected()
+            completed = False
+            try:
+                value = await self.connections.check(connection)
+                completed = value["ok"] is True
+                return value
+            finally:
+                self.journal.record_read("connection:" + connection, ok=completed)
         if op in {"telegram.get_me", "telegram.webhook"}:
             self._fields(request, [])
             if op == "telegram.get_me":

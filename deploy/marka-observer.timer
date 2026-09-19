@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh read-only Mark diagnostic snapshots
+
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=60
+AccuracySec=5
+Unit=marka-observer.service
+
+[Install]
+WantedBy=timers.target

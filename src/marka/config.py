@@ -25,6 +25,7 @@ class Settings:
     bridge_socket: str = ""
     upgrade_inbox: str = ""
     upgrade_status: str = ""
+    reasoning_effort: str | None = None
 
     @property
     def guarded_upgrades(self) -> bool:
@@ -35,7 +36,8 @@ class Settings:
             from .bridge_client import BridgeProvider
             return BridgeProvider(self.bridge_socket, timeout=self.provider_timeout + 10)
         from .provider import CodexProvider
-        return CodexProvider(self.codex_binary, self.codex_home, self.model, self.provider_timeout)
+        return CodexProvider(self.codex_binary, self.codex_home, self.model, self.provider_timeout,
+                             reasoning_effort=self.reasoning_effort)
 
     def telegram(self):
         if self.bridge_socket:
@@ -72,6 +74,8 @@ class Settings:
             raise ValueError("Workspace and credentials must not overlap")
 
     def save(self) -> None:
+        from .provider import validate_model_settings
+        validate_model_settings(self.model, self.reasoning_effort)
         self.prepare()
         value = {k: v for k, v in vars(self).items() if k != "data_dir"}
         target = self.data_dir / "settings.json"
@@ -95,6 +99,9 @@ class Settings:
         settings.codex_binary = os.environ.get("MARKA_CODEX_BIN", settings.codex_binary)
         settings.sandbox_socket = os.environ.get("MARKA_SANDBOX_SOCKET", settings.sandbox_socket)
         settings.model = os.environ.get("MARKA_MODEL", settings.model)
+        settings.reasoning_effort = os.environ.get("MARKA_REASONING_EFFORT", settings.reasoning_effort)
+        from .provider import validate_model_settings
+        validate_model_settings(settings.model, settings.reasoning_effort)
         settings.timezone = os.environ.get("MARKA_TIMEZONE", settings.timezone)
         settings.bridge_socket = os.environ.get("MARKA_BRIDGE_SOCKET", settings.bridge_socket)
         settings.upgrade_inbox = os.environ.get("MARKA_UPGRADE_INBOX", settings.upgrade_inbox)

@@ -1,0 +1,27 @@
+[Unit]
+Description=Publish bounded Mark diagnostics without credentials or user data
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/marka-guardian/observer.py
+User=root
+Group=root
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/marka-guardian/observability
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=128M
+CPUQuota=20%
+TimeoutStartSec=90
+StandardOutput=journal
+StandardError=null

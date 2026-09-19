@@ -246,3 +246,26 @@ async def bridge_status(socket):
     if error := _error(result):
         raise BridgeError(_message(error))
     return result
+
+
+async def server_read(socket, section, *, offset=0, expected_sha256=""):
+    """Read an operator-exported server section; never accept a host path."""
+    result = await _rpc(socket, {"op": "server.read", "section": section,
+                                "offset": offset, "expected_sha256": expected_sha256}, timeout=40)
+    if error := _error(result):
+        raise BridgeError(_message(error))
+    return result
+
+
+async def connections_list(socket):
+    result = await _rpc(socket, {"op": "connections.list"}, timeout=40)
+    if error := _error(result):
+        raise BridgeError(_message(error))
+    return result
+
+
+async def connections_check(socket, connection):
+    result = await _rpc(socket, {"op": "connections.check", "connection": connection}, timeout=40)
+    if error := _error(result):
+        raise BridgeError(_message(error))
+    return result
