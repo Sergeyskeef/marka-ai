@@ -511,6 +511,53 @@ class GuardianTests(unittest.TestCase):
             with self.assertRaisesRegex(guardian.Rejected, "output exceeded"):
                 adapter.command(["inspect", "fixture"], timeout=5)
 
+    def test_build_uses_verified_local_tag_and_pinned_layer_prefix(self):
+        stage = self.root / 'build-fixture'
+        stage.mkdir()
+        adapter = guardian.Docker(self.config)
+        calls = []
+        def command(arguments, **kwargs):
+            calls.append(arguments)
+            value = b''
+            if arguments[:2] == ['image', 'inspect']:
+                candidate = arguments[2].startswith('marka-guardian-candidate:')
+                value = json.dumps([{'Id': NEW if candidate else BASE,
+                                     'RootFS': {'Type': 'layers', 'Layers': ['layer-one', 'layer-two'] + (['candidate-layer'] if candidate else [])}}]).encode()
+            return subprocess.CompletedProcess(arguments, 0, value, b'')
+        adapter.command = command
+        self.assertEqual(adapter.build(stage, BASE), NEW)
+        content = (stage / 'Dockerfile').read_text()
+        self.assertTrue(content.startswith('FROM marka-guardian-base:'))
+        self.assertNotIn('FROM sha256:', content)
+        self.assertEqual(calls[1][:2], ['tag', BASE])
+        self.assertIn('--network=none', next(row for row in calls if row[0] == 'build'))
+        self.assertIn('--pull=false', next(row for row in calls if row[0] == 'build'))
+        self.assertEqual(calls[-1][:2], ['image', 'rm'])
+
+    def test_build_refuses_retagged_base_and_foreign_result_layers(self):
+        for failure in ('tag', 'layers'):
+            stage = self.root / ('build-' + failure)
+            stage.mkdir()
+            adapter = guardian.Docker(self.config)
+            calls = []
+            def command(arguments, **kwargs):
+                calls.append(arguments)
+                value = b''
+                if arguments[:2] == ['image', 'inspect']:
+                    name = arguments[2]
+                    identifier = BASE
+                    layers = ['base-layer']
+                    if name.startswith('marka-guardian-base:') and failure == 'tag':
+                        identifier = OTHER
+                    if name.startswith('marka-guardian-candidate:'):
+                        identifier, layers = NEW, ['foreign-base-layer']
+                    value = json.dumps([{'Id': identifier, 'RootFS': {'Type': 'layers', 'Layers': layers}}]).encode()
+                return subprocess.CompletedProcess(arguments, 0, value, b'')
+            adapter.command = command
+            with self.assertRaises(guardian.Rejected):
+                adapter.build(stage, BASE)
+            self.assertEqual(calls[-1][:2], ['image', 'rm'])
+
     def test_request_scope_and_manifest_validation(self):
         baseline = self.proposal()["baseline"]
         for mutate in (lambda r: r.update(command="anything"),

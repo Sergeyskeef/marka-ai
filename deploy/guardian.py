@@ -443,16 +443,34 @@ class Docker:
         self.command(args)
 
     def build(self, stage, image):
-        dockerfile = ("FROM " + image + "\nCOPY src/marka/ /app/src/marka/\n"
-                      "COPY src/marka/ /opt/venv/lib/python3.11/site-packages/marka/\n")
-        atomic(Path(stage) / "Dockerfile", dockerfile.encode())
+        if not IMAGE.fullmatch(image):
+            raise Rejected("unpinned build image refused")
+        original = json.loads(self.command(["image", "inspect", image]).stdout)[0]
+        if original.get("Id") != image or not isinstance(original.get("RootFS", {}).get("Layers"), list):
+            raise Rejected("pinned build image metadata mismatch")
+        # BuildKit interprets FROM sha256:<image-id> as a registry image named
+        # "sha256", not as a local content ID. Create our own temporary tag,
+        # verify its exact ID, and bind the result back to the original layers.
+        base_tag = "marka-guardian-base:" + image[7:39] + "-" + digest(str(Path(stage).resolve()).encode())[:16]
         tag = "marka-guardian-candidate:" + Path(stage).name
-        self.command(["build", "--network=none", "--pull=false", "--tag", tag, str(stage)], timeout=600)
-        result = self.command(["image", "inspect", "--format={{.Id}}", tag])
-        candidate = result.stdout.decode().strip()
-        if not IMAGE.fullmatch(candidate):
-            raise Rejected("candidate image identity missing")
-        return candidate
+        self.command(["tag", image, base_tag])
+        try:
+            pinned = json.loads(self.command(["image", "inspect", base_tag]).stdout)[0]
+            if pinned.get("Id") != image or pinned.get("RootFS") != original["RootFS"]:
+                raise Rejected("temporary base tag differs from pinned image")
+            dockerfile = ("FROM " + base_tag + "\nCOPY src/marka/ /app/src/marka/\n"
+                          "COPY src/marka/ /opt/venv/lib/python3.11/site-packages/marka/\n")
+            atomic(Path(stage) / "Dockerfile", dockerfile.encode())
+            self.command(["build", "--network=none", "--pull=false", "--tag", tag, str(stage)], timeout=600)
+            result = json.loads(self.command(["image", "inspect", tag]).stdout)[0]
+            candidate = result.get("Id", "")
+            layers = result.get("RootFS", {}).get("Layers", [])
+            baseline_layers = original["RootFS"]["Layers"]
+            if not IMAGE.fullmatch(candidate) or layers[:len(baseline_layers)] != baseline_layers:
+                raise Rejected("candidate image does not preserve pinned base layers")
+            return candidate
+        finally:
+            self.command(["image", "rm", base_tag], check=False)
 
     def validate(self, image, stage):
         stage = Path(stage)
