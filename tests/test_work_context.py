@@ -143,7 +143,7 @@ class WorkContextTests(unittest.IsolatedAsyncioTestCase):
     def test_changed_canonical_event_cannot_replace_intact_or_hashed_task_evidence(self):
         job = self.claimed()
         intact = {"ok": True, "result": {"exit_code": 2, "output": "ORIGINAL_FAILURE"}}
-        large = {"ok": True, "result": {"exit_code": 2, "output": "Ж" * 20000 + "ORIGINAL_FAILURE"}}
+        large = {"ok": True, "result": {"exit_code": 2, "output": "Ж" * 30000 + "ORIGINAL_FAILURE"}}
         for number, original in enumerate((intact, large), 1):
             with self.subTest(number=number):
                 event_id = self.record(job, number, "code.run", outcome=original)
