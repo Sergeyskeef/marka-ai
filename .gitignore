@@ -13,6 +13,7 @@ state/
 .marka/
 private/
 auth.json
+openai-stt.key
 *.sqlite3*
 *.db*
 *.log

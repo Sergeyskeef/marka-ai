@@ -1,3 +1,3 @@
 """Mark: memory, useful work, and learning from evidence."""
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
