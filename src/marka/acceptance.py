@@ -25,7 +25,7 @@ _READ_ONLY = {"memory.search", "memory.episodes", "memory.read", "memory.source"
               "workspace.list", "workspace.read", "workspace.find", "web.search", "web.fetch", "skill.search", "skill.inspect",
               "task.list", "task.plan", "task.progress", "task.recall", "task.criteria", "consult", "self.inspect", "self.search", "self.history",
               "self.read_experiment", "self.upgrade_status", "server.inspect", "server.read",
-              "connections.list", "connections.check", "server.files"}
+              "connections.list", "connections.check", "server.files", "image.inspect"}
 
 
 def _canonical(value):

@@ -110,6 +110,13 @@ class Queue:
                 if name not in columns:
                     db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_root ON jobs(root_id,state)")
+            delivery_columns = {row[1] for row in db.execute("PRAGMA table_info(deliveries)")}
+            for name, definition in {
+                "media_kind": "TEXT NOT NULL DEFAULT 'document'",
+                "document_sha256": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                if name not in delivery_columns:
+                    db.execute(f"ALTER TABLE deliveries ADD COLUMN {name} {definition}")
 
     @contextmanager
     def connection(self, *, timeout=20):
@@ -269,6 +276,9 @@ class Queue:
                 rows = db.execute(sql).fetchall()
             for row in rows:
                 db.execute("UPDATE jobs SET state='cancelled',lease='',updated=? WHERE id=?", (time.time(), row[0]))
+                prefix = f"artifact:{row[0]}:"
+                db.execute("UPDATE deliveries SET state='failed',error='Task cancelled before delivery' "
+                           "WHERE state='pending' AND substr(source,1,?)=?", (len(prefix), prefix))
             return [r[0] for r in rows]
 
     def resume(self, identifier: str) -> bool:
@@ -578,23 +588,51 @@ class Queue:
                 pairs.sort(key=lambda pair: pair[1]["event_id"])
             return [item for pair in pairs for item in pair]
 
-    def deliver(self, source: str, chat_id: int, text: str, document=""):
+    def deliver(self, source: str, chat_id: int, text: str, document="", *, media_kind="document", document_sha256="", job_id=""):
+        if media_kind not in {"document", "photo"} or (media_kind == "photo" and not document):
+            raise ValueError("Invalid delivery media kind")
+        if document_sha256 and (not isinstance(document_sha256, str) or len(document_sha256) != 64
+                                or any(c not in "0123456789abcdef" for c in document_sha256)):
+            raise ValueError("Invalid delivery artifact hash")
         with self.connection() as db:
-            db.execute("INSERT OR IGNORE INTO deliveries(source,chat_id,text,document,due) VALUES (?,?,?,?,?)", (source, chat_id, redact(text), document, time.time()))
+            db.execute("BEGIN IMMEDIATE")
+            if job_id:
+                job = db.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if job is None or job["state"] == "cancelled":
+                    return False
+            db.execute("INSERT OR IGNORE INTO deliveries(source,chat_id,text,document,due,media_kind,document_sha256) VALUES (?,?,?,?,?,?,?)",
+                       (source, chat_id, redact(text), document, time.time(), media_kind, document_sha256))
+            return True
+
+    @staticmethod
+    def _cancelled_artifact(db, source):
+        # Service/command replies remain deliverable after a task cancellation.
+        parts = source.split(":", 2)
+        return (len(parts) == 3 and parts[0] == "artifact" and bool(db.execute(
+            "SELECT 1 FROM jobs WHERE id=? AND state='cancelled'", (parts[1],)).fetchone()))
 
     def next_delivery(self, *, timeout=20) -> dict | None:
         with self.connection(timeout=timeout) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM deliveries WHERE state='pending' AND due<=? ORDER BY id LIMIT 1", (time.time(),)).fetchone()
-            if row:
+            while True:
+                row = db.execute("SELECT * FROM deliveries WHERE state='pending' AND due<=? ORDER BY id LIMIT 1", (time.time(),)).fetchone()
+                if row is None:
+                    return None
+                if self._cancelled_artifact(db, row["source"]):
+                    db.execute("UPDATE deliveries SET state='failed',error='Task cancelled before delivery' WHERE id=?", (row["id"],))
+                    continue
                 db.execute("UPDATE deliveries SET state='sending' WHERE id=?", (row["id"],))
                 return dict(row)
-            return None
 
     def delivery_result(self, identifier: int, state: str, *, delay=0, error=""):
         if state not in {"pending", "sent", "failed", "uncertain"}:
             raise ValueError("Invalid delivery state")
         with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if state == "pending":
+                row = db.execute("SELECT source FROM deliveries WHERE id=? AND state='sending'", (identifier,)).fetchone()
+                if row and self._cancelled_artifact(db, row["source"]):
+                    state, error = "failed", "Task cancelled before delivery"
             # Late callbacks cannot revive a delivery made uncertain by recovery.
             db.execute("UPDATE deliveries SET state=?,due=?,error=? WHERE id=? AND state='sending'", (state, time.time() + delay, redact(error), identifier))
 

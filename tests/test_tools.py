@@ -170,6 +170,45 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase):
                 await self.call("code.run", {"argv": ["python", "script.py"], "timeout": 61})
             runner.assert_not_called()
 
+    async def test_imported_large_image_does_not_block_default_script_and_omission_is_reported(self):
+        import io
+        from PIL import Image
+        buffer = io.BytesIO()
+        with Image.new("RGB", (1000, 1000), "red") as picture:
+            picture.save(buffer, format="PNG", compress_level=0)
+        data = buffer.getvalue()
+        self.assertGreater(len(data), 2 * 1024 * 1024)
+        self.tools.workspace.import_bytes("retrieved/card.png", data)
+        self.tools.workspace.write("script.py", "print('ok')\n")
+        with patch("marka.tools.sandbox.run_client", return_value={"exit_code": 0, "output": "ok"}) as runner:
+            result = await self.call("code.run", {"argv": ["python", "script.py"]})
+        self.assertEqual(set(runner.call_args.args[3]), {"script.py"})
+        self.assertEqual(result["input_selection"]["omitted"],
+                         [{"path": "retrieved/card.png", "bytes": len(data), "reason": "binary_media"}])
+        self.assertEqual((self.settings.workspace / "retrieved/card.png").read_bytes(), data)
+        with patch("marka.tools.sandbox.run_client") as runner:
+            with self.assertRaisesRegex(ValueError, "512 KiB"):
+                await self.call("code.run", {"argv": ["python", "script.py"], "inputs": ["script.py", "retrieved/card.png"]})
+            runner.assert_not_called()
+
+    async def test_default_binary_omissions_are_disclosed_but_oversized_text_is_not_silently_dropped(self):
+        self.tools.workspace.write_bytes("data.bin", b"\x00\xff\x01")
+        self.tools.workspace.write("script.py", "print('ok')\n")
+        with patch("marka.tools.sandbox.run_client", return_value={"exit_code": 0}) as runner:
+            result = await self.call("code.run", {"argv": ["python", "script.py"]})
+        self.assertEqual(set(runner.call_args.args[3]), {"script.py"})
+        self.assertEqual(result["input_selection"]["omitted"],
+                         [{"path": "data.bin", "bytes": 3, "reason": "not_utf8_text"}])
+        self.tools.workspace.import_bytes("large.txt", b"a" * 524289)
+        with patch("marka.tools.sandbox.run_client") as runner:
+            with self.assertRaisesRegex(ValueError, "explicit inputs"):
+                await self.call("code.run", {"argv": ["python", "script.py"]})
+            runner.assert_not_called()
+        with patch("marka.tools.sandbox.run_client", return_value={"exit_code": 0}) as runner:
+            selected = await self.call("code.run", {"argv": ["python", "script.py"], "inputs": ["script.py"]})
+        self.assertEqual(selected["input_selection"]["mode"], "explicit")
+        self.assertEqual(selected["input_selection"]["omitted"], [])
+
     async def test_untrusted_runner_artifact_paths_are_validated_before_any_import(self):
         payload = base64.b64encode(b"artifact").decode()
         for path in ["../escape.txt", ".env", "auth.json", "nested/settings.json", "/absolute.txt", "C:\\outside.txt"]:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "marka-ai"
-version = "2.7.1"
+version = "2.8.0"
 description = "A persistent personal Telegram agent powered by your Codex login"
 readme = "README.md"
 requires-python = ">=3.11"

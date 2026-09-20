@@ -35,8 +35,8 @@ class FakeClient:
             raise self.error
         return [100 + len(self.sent)]
 
-    async def send_document(self, chat_id, path, caption=""):
-        self.sent.append((chat_id, Path(path).read_bytes(), caption))
+    async def send_document(self, chat_id, path, caption="", *, content=None):
+        self.sent.append((chat_id, Path(path).read_bytes() if content is None else content, caption))
         if self.on_send:
             self.on_send()
         return 101

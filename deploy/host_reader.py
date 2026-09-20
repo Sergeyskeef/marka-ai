@@ -12,7 +12,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from marka.host_read import HostReader
+from marka.host_read import HostReader, MAX_RESPONSE
 
 
 def serve(directory='/var/lib/marka-host-reader'):
@@ -54,16 +54,20 @@ def serve(directory='/var/lib/marka-host-reader'):
                 fields = request if isinstance(request, dict) else {}
                 action = fields.get('action')
                 logger.info(json.dumps({'at': time.time(), 'uid': uid, 'ok': ok,
-                    'action': action if isinstance(action, str) and action in {'read','list','search'} else 'invalid',
+                    'action': action if isinstance(action, str) and action in {'read','list','search','grep','stat','fetch'} else 'invalid',
                     'path_sha256': hashlib.sha256(str(fields.get('path', '')).encode()).hexdigest()}))
                 response = {'ok': True, 'result': result} if ok else {'ok': False, 'error': 'refused_or_unavailable'}
+                payload = b''
                 try:
                     payload = json.dumps(response, ensure_ascii=False).encode()
-                    if len(payload) > 256*1024:
+                    if len(payload) > (MAX_RESPONSE if action == 'fetch' else 256*1024):
                         payload = b'{"ok":false,"error":"response_too_large"}'
                     client.sendall(payload + b'\n')
                 except OSError:
                     pass
+                finally:
+                    # Drop large export buffers before accepting the next file.
+                    del result, response, payload
 
 
 if __name__ == '__main__':

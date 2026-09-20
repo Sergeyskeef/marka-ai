@@ -11,8 +11,8 @@ import struct
 
 from .media import image_inputs
 from .provider import ProviderError
-from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, TYPING_TIMEOUT, TelegramError,
-                       TelegramRetryAfter)
+from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_PHOTO_BYTES, TYPING_TIMEOUT, TelegramError,
+                       TelegramRetryAfter, validate_photo)
 from .voice import STT_TIMEOUT, VoiceError, validate_audio_bytes, validate_transcript
 
 MAX_FRAME = 32 * 1024 * 1024
@@ -175,7 +175,7 @@ class BridgeTelegramClient:
 
     async def _request(self, op, payload, *, effect_id=None, attempt="0", timeout=None):
         request = {"op": op, **payload}
-        is_effect = op in {"telegram.send_message", "telegram.send_document"}
+        is_effect = op in {"telegram.send_message", "telegram.send_document", "telegram.send_photo"}
         if is_effect:
             request.update(effect_id=effect_id or "payload:" + digest(payload), attempt=str(attempt))
         try:
@@ -221,18 +221,33 @@ class BridgeTelegramClient:
         return True
 
     async def send_document(self, chat_id, path, caption="", *, effect_id=None, attempt="0", content=None):
+        return await self._send_file(chat_id, path, caption, effect_id=effect_id, attempt=attempt,
+                                     content=content, photo=False)
+
+    async def send_photo(self, chat_id, path, caption="", *, effect_id=None, attempt="0", content=None):
+        return await self._send_file(chat_id, path, caption, effect_id=effect_id, attempt=attempt,
+                                     content=content, photo=True)
+
+    async def _send_file(self, chat_id, path, caption, *, effect_id, attempt, content, photo):
+        limit = MAX_PHOTO_BYTES if photo else MAX_DOCUMENT_BYTES
         try:
             path = Path(path)
             if content is None:
                 with path.open("rb") as stream:
-                    data = stream.read(MAX_DOCUMENT_BYTES + 1)
+                    data = stream.read(limit + 1)
             else:
                 data = content
-            if not isinstance(data, bytes) or len(data) > MAX_DOCUMENT_BYTES:
+            if not isinstance(data, bytes) or len(data) > limit:
                 raise OSError()
         except (OSError, TypeError, ValueError):
-            raise TelegramError("Telegram document must be a file of at most 20 MiB", permanent=True) from None
-        return await self._request("telegram.send_document", {"chat_id": chat_id, "caption": caption,
+            raise TelegramError("Telegram photo exceeds 10 MiB or is unavailable" if photo else
+                                "Telegram document must be a file of at most 20 MiB", permanent=True) from None
+        if photo:
+            try:
+                validate_photo(data)
+            except ValueError as exc:
+                raise TelegramError(str(exc), permanent=True) from None
+        return await self._request("telegram.send_photo" if photo else "telegram.send_document", {"chat_id": chat_id, "caption": caption,
                                    "filename": path.name, "data": pack_bytes(data)},
                                    effect_id=effect_id, attempt=attempt, timeout=max(self.timeout, 120))
 
@@ -266,12 +281,28 @@ async def server_read(socket, section, *, offset=0, expected_sha256=""):
     return result
 
 
-async def server_files(socket, action, path, *, query="", offset=0, expected_sha256=""):
+async def server_files(socket, action, path, *, query="", offset=0, expected_sha256="", cursor=""):
     result = await _rpc(socket, {"op": "server.files", "action": action, "path": path,
-                                "query": query, "offset": offset, "expected_sha256": expected_sha256}, timeout=15)
+                                "query": query, "offset": offset, "expected_sha256": expected_sha256, "cursor": cursor}, timeout=15)
     if error := _error(result):
         raise BridgeError(_message(error))
     return result
+
+
+async def server_fetch(socket, path, *, expected_sha256=""):
+    result = await _rpc(socket, {"op": "server.fetch", "path": path,
+                                "expected_sha256": expected_sha256}, timeout=30)
+    if error := _error(result):
+        raise BridgeError(_message(error))
+    from .host_read import MAX_EXPORT
+    if not isinstance(result, dict) or not isinstance(result.get("content_base64"), str):
+        raise BridgeError("Invalid host export receipt")
+    data = unpack_bytes(result["content_base64"], MAX_EXPORT)
+    if (len(data) != result.get("bytes") or hashlib.sha256(data).hexdigest() != result.get("sha256")
+            or result.get("source_path") != path
+            or (expected_sha256 and expected_sha256 != result.get("source_sha256"))):
+        raise BridgeError("Host export digest mismatch")
+    return data, {k: v for k, v in result.items() if k != "content_base64"}
 
 
 async def connections_list(socket):

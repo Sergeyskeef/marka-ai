@@ -23,6 +23,9 @@ def delivery_effect(item, *, document: bytes | None = None) -> str:
     payload = {"source": item["source"], "chat_id": item["chat_id"], "text": item["text"],
                "document": item.get("document", ""),
                "document_sha256": hashlib.sha256(document).hexdigest() if document is not None else None}
+    # Preserve identities for existing messages/documents across the migration.
+    if item.get("media_kind", "document") != "document":
+        payload["media_kind"] = item["media_kind"]
     digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
                                        separators=(",", ":")).encode()).hexdigest()
     return "delivery:" + digest

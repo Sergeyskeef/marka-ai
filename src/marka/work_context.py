@@ -11,7 +11,7 @@ from .redact import redact_value
 STATIC_READS = frozenset({'self.inspect', 'self.search', 'self.history', 'task.recall'})
 PROGRESS_ACTIONS = frozenset({'workspace.write', 'workspace.replace', 'code.run', 'skill.run',
                               'self.experiment', 'self.request_upgrade', 'memory.propose',
-                              'workspace.send', 'task.schedule'})
+                              'workspace.send', 'server.fetch', 'task.schedule'})
 
 
 def compact_observation(content, limit):

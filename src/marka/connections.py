@@ -26,7 +26,7 @@ _ERRORS = frozenset({"key_unavailable", "authentication_failed", "access_denied"
 _ACTIONS = {
     "codex": ("provider.complete",),
     "telegram": ("telegram.get_me", "telegram.webhook", "telegram.get_updates", "telegram.download",
-                 "telegram.send_message", "telegram.send_document"),
+                 "telegram.send_message", "telegram.send_document", "telegram.send_photo"),
     "openai_speech": ("voice.transcribe",),
 }
 

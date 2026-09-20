@@ -38,6 +38,22 @@ class CompletionChecks(unittest.TestCase):
         self.assertEqual(verify_completion(observation("code.run", {}, {"output": "all tests passed"}))["status"], "unverified")
         self.assertEqual(verify_completion(observation("code.run", {}, {"exit_code": 0}))["status"], "observed")
 
+    def test_import_of_another_file_cannot_hide_failed_import(self):
+        receipt = self.workspace.import_bytes("b.png", b"original bytes")
+        args = {"path": "/project/a.png", "destination": "a.png"}
+        trace = observation("server.fetch", args, ok=False)
+        trace += observation("server.fetch", {"path": "/project/b.png", "destination": "b.png"}, receipt)
+        self.assertEqual(verify_completion(trace, workspace=self.workspace)["status"], "contradicted")
+        trace += observation("server.fetch", args, self.workspace.import_bytes("a.png", b"a"))
+        self.assertEqual(verify_completion(trace, workspace=self.workspace)["status"], "observed")
+        self.workspace.path("b.png").write_bytes(b"changed")
+        self.assertEqual(verify_completion(trace, workspace=self.workspace)["status"], "contradicted")
+
+    def test_image_model_judgment_is_not_independent_acceptance(self):
+        trace = observation("image.inspect", {"path": "a.png", "question": "is this correct?"},
+                            {"answer": "Yes, perfect", "source": {"sha256": "f" * 64}})
+        self.assertEqual(verify_completion(trace)["status"], "unverified")
+
     def test_only_same_target_success_resolves_previous_failure(self):
         args = {"argv": ["python", "a.py"]}
         trace = observation("code.run", args, {"exit_code": 1})

@@ -63,8 +63,12 @@ def _target(name, args):
         return name + ":" + str(identity("section")) + ":" + str(args.get("offset", 0))
     if name == "server.files":
         return name + ":" + hashlib.sha256(json.dumps(
-            [identity("action"), identity("path"), identity("query"), args.get("offset", 0)],
+            [identity("action"), identity("path"), identity("query"), args.get("offset", 0), args.get("cursor", "")],
             sort_keys=True).encode()).hexdigest()[:16]
+    if name == "server.fetch":
+        return name + ":" + str(identity("path")) + ":" + str(identity("destination"))
+    if name == "image.inspect":
+        return name + ":" + str(identity("path")) + ":" + str(identity("question"))
     if name == 'task.recall':
         return name + ':' + str(args.get('number')) + ':' + str(args.get('offset', 0))
     if name == 'self.search':
@@ -169,7 +173,7 @@ def verify_completion(trace: list, *, workspace=None, model_outcome="completed",
                     for receipt in artifacts:
                         if isinstance(receipt, dict) and isinstance(receipt.get("path"), str):
                             receipts[receipt["path"]] = receipt
-            elif name in {"workspace.write", "workspace.replace"}:
+            elif name in {"workspace.write", "workspace.replace", "server.fetch"}:
                 if isinstance(result_object.get("path"), str):
                     receipts[result_object["path"]] = result_object
                     check.update(status="passed", reason="write_receipt_observed")
@@ -177,7 +181,7 @@ def verify_completion(trace: list, *, workspace=None, model_outcome="completed",
                     check.update(status="failed", reason="write_receipt_missing")
             elif name == "workspace.send":
                 check.update(reason="delivery_pending" if result_object.get("status") == "queued" else "delivery_receipt_unavailable")
-            elif name == "consult":
+            elif name in {"consult", "image.inspect"}:
                 check.update(reason="consultation_is_opinion")
             elif name == "self.experiment":
                 state = result_object.get("status")

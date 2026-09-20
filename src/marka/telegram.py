@@ -18,8 +18,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .media import MAX_OUTPUT_IMAGE_BYTES, validate_image
 
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+MAX_PHOTO_BYTES = MAX_OUTPUT_IMAGE_BYTES
 MAX_ATTACHMENT_BYTES = 512 * 1024
 MAX_IMAGE_DOWNLOAD_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -32,6 +34,14 @@ TEXT_ATTACHMENT_EXTENSIONS = frozenset({
     ".toml", ".ini", ".log", ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css",
     ".xml", ".sql", ".sh", ".ps1", ".go", ".rs", ".java", ".c", ".h", ".cpp",
 })
+
+
+def validate_photo(data: bytes):
+    """Bounded original-byte validation for Telegram image previews."""
+    picture = validate_image(data, max_bytes=MAX_PHOTO_BYTES)
+    if max(picture.width, picture.height) > 20 * min(picture.width, picture.height):
+        raise ValueError("Photo aspect ratio exceeds 20; use mode=document for the original")
+    return picture
 
 
 class TelegramError(RuntimeError):
@@ -455,27 +465,41 @@ class TelegramClient:
             sent.append(result["message_id"])
         return sent
 
-    async def send_document(self, chat_id: int, path: Path, caption: str = "") -> int:
+    async def send_document(self, chat_id: int, path: Path, caption: str = "", *, content=None) -> int:
+        return await self._send_file(chat_id, path, caption, photo=False, content=content)
+
+    async def send_photo(self, chat_id: int, path: Path, caption: str = "", *, content=None) -> int:
+        return await self._send_file(chat_id, path, caption, photo=True, content=content)
+
+    async def _send_file(self, chat_id: int, path: Path, caption: str, *, photo: bool, content=None) -> int:
+        kind, limit = ("photo", MAX_PHOTO_BYTES) if photo else ("document", MAX_DOCUMENT_BYTES)
         if not _is_int(chat_id):
             raise TelegramError("Invalid Telegram chat ID", permanent=True)
         try:
             caption_units = len(caption.encode("utf-16-le")) // 2 if isinstance(caption, str) else 1025
         except UnicodeError:
-            raise TelegramError("Telegram document caption contains invalid Unicode", permanent=True) from None
+            raise TelegramError(f"Telegram {kind} caption contains invalid Unicode", permanent=True) from None
         if caption_units > 1024:
-            raise TelegramError("Telegram document caption exceeds 1024 UTF-16 units", permanent=True)
+            raise TelegramError(f"Telegram {kind} caption exceeds 1024 UTF-16 units", permanent=True)
         path = Path(path)
         try:
-            if not path.is_file() or path.stat().st_size > MAX_DOCUMENT_BYTES:
-                raise TelegramError("Telegram document must be a file of at most 20 MiB", permanent=True)
-            with path.open("rb") as source:
-                content = source.read(MAX_DOCUMENT_BYTES + 1)
+            if content is None:
+                if not path.is_file() or path.stat().st_size > limit:
+                    raise TelegramError(f"Telegram {kind} exceeds its file size limit", permanent=True)
+                with path.open("rb") as source:
+                    content = source.read(limit + 1)
         except TelegramError:
             raise
         except OSError:
-            raise TelegramError("Telegram document could not be read", permanent=True) from None
-        if len(content) > MAX_DOCUMENT_BYTES:
-            raise TelegramError("Telegram document exceeds 20 MiB", permanent=True)
+            raise TelegramError(f"Telegram {kind} could not be read", permanent=True) from None
+        if not isinstance(content, bytes) or len(content) > limit:
+            raise TelegramError(f"Telegram {kind} exceeds its file size limit", permanent=True)
+        mime = "application/octet-stream"
+        if photo:
+            try:
+                mime = validate_photo(content).mime_type
+            except ValueError as exc:
+                raise TelegramError(str(exc), permanent=True) from None
         boundary = "marka-" + secrets.token_hex(24)
         # ASCII fallback prevents path/header injection while preserving the extension.
         filename = re.sub(r"[^A-Za-z0-9._-]", "_", path.name)[:180] or "document.bin"
@@ -484,10 +508,10 @@ class TelegramClient:
             fields.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
             fields.extend(value.encode("utf-8"))
             fields.extend(b"\r\n")
-        fields.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode())
+        fields.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{kind}"; filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n'.encode())
         fields.extend(content)
         fields.extend(f"\r\n--{boundary}--\r\n".encode())
-        result = await self._request("sendDocument", bytes(fields), f"multipart/form-data; boundary={boundary}")
+        result = await self._request("sendPhoto" if photo else "sendDocument", bytes(fields), f"multipart/form-data; boundary={boundary}")
         if not isinstance(result, dict) or not _is_int(result.get("message_id")):
-            raise TelegramError("Telegram returned an invalid document receipt", uncertain=True)
+            raise TelegramError(f"Telegram returned an invalid {kind} receipt", uncertain=True)
         return result["message_id"]

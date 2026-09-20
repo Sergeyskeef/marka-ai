@@ -21,7 +21,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER
-MemoryMax=128M
+MemoryMax=192M
 CPUQuota=20%
 TasksMax=8
 

@@ -65,6 +65,8 @@ class SelfToolRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runs, [])
 
     async def test_experiment_routes_to_copies_and_exports_owner_deliverable_evidence(self):
+        self.queue.enqueue("Correct value 50 and send the evidence", 17, kind="self_improve")
+        self.job = self.queue.claim()
         candidate = self.original.replace("VALUE_50 = 50", "VALUE_50 = 500")
         with patch("marka.evolution.Evolution", side_effect=self.factory):
             result = await self.tools.call("self.experiment", {"objective": "Correct value 50",

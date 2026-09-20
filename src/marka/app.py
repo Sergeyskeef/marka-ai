@@ -931,18 +931,21 @@ class Application:
             try:
                 if item["document"]:
                     target = self.engine.tools.workspace.path(item["document"])
-                    kwargs = {}
+                    from .telegram import MAX_DOCUMENT_BYTES
+                    if target.stat().st_size > MAX_DOCUMENT_BYTES:
+                        raise ValueError("Artifact exceeds delivery limit")
+                    with target.open("rb") as stream:
+                        content = stream.read(MAX_DOCUMENT_BYTES + 1)
+                    if len(content) > MAX_DOCUMENT_BYTES:
+                        raise ValueError("Artifact exceeds delivery limit")
+                    expected = item.get("document_sha256", "")
+                    if expected and hashlib.sha256(content).hexdigest() != expected:
+                        raise ValueError("Artifact changed after being queued")
+                    kwargs = {"content": content}
                     if self.settings.bridge_socket:
-                        from .telegram import MAX_DOCUMENT_BYTES
-                        if target.stat().st_size > MAX_DOCUMENT_BYTES:
-                            raise ValueError("Artifact exceeds delivery limit")
-                        with target.open("rb") as stream:
-                            content = stream.read(MAX_DOCUMENT_BYTES + 1)
-                        if len(content) > MAX_DOCUMENT_BYTES:
-                            raise ValueError("Artifact exceeds delivery limit")
                         kwargs["effect_id"] = delivery_effect(item, document=content)
-                        kwargs["content"] = content
-                    await self.client.send_document(item["chat_id"], target, caption=item["text"][:800], **kwargs)
+                    sender = self.client.send_photo if item.get("media_kind") == "photo" else self.client.send_document
+                    await sender(item["chat_id"], target, caption=item["text"][:800], **kwargs)
                 else:
                     kwargs = {"effect_id": delivery_effect(item)} if self.settings.bridge_socket else {}
                     await self.client.send_message(item["chat_id"], item["text"], **kwargs)

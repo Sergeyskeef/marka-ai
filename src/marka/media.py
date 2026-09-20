@@ -18,6 +18,7 @@ from PIL import Image
 from .redact import redact
 
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_OUTPUT_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGES = 2
 MAX_TOTAL_BYTES = 4 * 1024 * 1024
 MAX_PIXELS = 8_000_000
@@ -165,9 +166,11 @@ def _jpeg(data):
     raise ValueError("Incomplete JPEG image")
 
 
-def validate_image(data: bytes) -> ImageInput:
-    if not isinstance(data, bytes) or not 1 <= len(data) <= MAX_IMAGE_BYTES:
-        raise ValueError("Each image must contain at most 2 MiB")
+def validate_image(data: bytes, *, max_bytes=MAX_IMAGE_BYTES) -> ImageInput:
+    if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_OUTPUT_IMAGE_BYTES:
+        raise ValueError("Invalid image byte limit")
+    if not isinstance(data, bytes) or not 1 <= len(data) <= max_bytes:
+        raise ValueError(f"Each image must contain at most {max_bytes} bytes")
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         width, height = _png(data)
         mime = "image/png"

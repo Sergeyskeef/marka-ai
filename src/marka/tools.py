@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -32,10 +33,11 @@ CATALOG = {
     "workspace.write": '{"path":"relative file","content":"complete UTF-8 contents"}; saves in personal workspace with recoverable previous version',
     "workspace.replace": '{"path":"relative file","old":"exact unique text","new":"replacement text","expected_sha256":"optional hash of current file"}; precise edit with conflict check and saved previous version',
     "workspace.find": '{"query":"literal text","path":"optional subdirectory"}; search bounded working files with line numbers',
-    "workspace.send": '{"path":"relative output file","caption":"short description"}; queues delivery only to the owner',
+    "workspace.send": '{"path":"relative output file","caption":"short description","mode":"auto|photo|document"}; queues only to owner; auto previews validated PNG/JPEG, document sends exact original bytes',
+    "image.inspect": '{"path":"relative workspace PNG/JPEG","question":"what to inspect visually"}; model sees validated image bytes; source <=10 MiB, <=8 million pixels, <=4096 per side; larger images use a disclosed bounded analysis copy, originals unchanged; uses task/daily model budget. Import a host image with server.fetch first.',
     "web.search": '{"query":"public search query"}; snippets need verification',
     "web.fetch": '{"url":"https://public-site/path","offset":0,"expected_sha256":"optional previous page hash"}; 14000-character pages, links and fetch time; pin hash when continuing a source',
-    "code.run": '{"argv":["python","script.py"],"timeout":30,"inputs":["script.py"]}; select relevant input files to avoid copying old artifacts; inputs=[] for no files, omitted copies bounded workspace; networkless Python/Node/bash, max 60 seconds',
+    "code.run": '{"argv":["python","script.py"],"timeout":30,"inputs":["script.py"]}; select relevant input files; inputs=[] for no files, omitted selects bounded UTF-8 workspace files and reports skipped media/binaries. Oversized text needs explicit selection. Networkless Python/Node/bash, max60 seconds, <=512KiB per input/1MiB total.',
     "skill.save": '{"name":"ascii-slug","description":"when this script helps and its limitations","event_id":12}; capture current task successful code.run inputs and exact command as versioned reusable code; use observed event ID',
     "skill.search": '{"query":"task or capability","limit":5}; find previously executed scripts with source and input evidence',
     "skill.inspect": '{"name":"ascii-slug"}; inspect saved command, input manifest, code excerpts and validation limits',
@@ -46,7 +48,8 @@ CATALOG = {
     "task.recall": '{"number":12,"offset":0,"limit":12000}; reread original tool observation from THIS task by step number; follow next_offset; no re-execution or other task access',
     "task.criteria": '{"criteria":[{"id":"result","kind":"json_matches","path":"result.json","assertions":[{"pointer":"/status","equals":"ready"}]}]}; freeze objective checks BEFORE effects; kinds artifact(path,min_bytes,max_bytes), text_contains(path,contains:[literal]), json_matches, command_succeeded(argv). Cannot weaken/replace; model-proposed checks do not prove all owner requirements',
     "server.read": '{"section":"status|config|events|guardian_source|observer_source","offset":0,"expected_sha256":"previous page hash for continuation"}; operator-published read-only Mark diagnostics, no SSH/commands/arbitrary paths/private data; stale snapshots require qualification; own runtime code is in self.inspect',
-    "server.files": '{"action":"list|read|search","path":"absolute host path","query":"filename substring for search","offset":0,"expected_sha256":"hash for continued read/list"}; broad READ-ONLY host discovery and UTF-8 reading; search is bounded filename search, narrow path when incomplete; links, credentials, devices, databases excluded; file limit 2 MiB; redacted before paging. Start project questions at /var/lib/marka-catalog/PROJECTS.md, then inspect relevant live paths. No commands or writes.',
+    "server.files": '{"action":"list|read|search|grep|stat","path":"absolute host path","query":"literal filename substring for search or content for grep","cursor":"next_cursor from search/grep","offset":0,"expected_sha256":"hash for continued read/list"}; read-only host access: stat verifies current existence, grep searches redacted text, search finds names. Continue with next_cursor instead of restarting scans. If no cursor but incomplete, some entries were inaccessible. File limit2MiB. Start project questions at /var/lib/marka-catalog/PROJECTS.md, then relevant live paths. Use server.fetch to import media/documents.',
+    "server.fetch": '{"path":"absolute host source file","destination":"relative workspace destination","expected_sha256":"optional original file hash (source_sha256 from read, not redacted sha256)"}; import exact PNG/JPEG/WebP/GIF/PDF up to20MiB, or redacted UTF-8 text up to2MiB. Returns hashes/provenance, never binary in context. Existing different destination is refused. Then workspace.send to show/send it; listing image metadata is not delivery.',
     "connections.list": '{}; list installed protected connections and allowed actions; no credential values',
     "connections.check": '{"connection":"codex|telegram|openai_speech"}; bounded connection check, no inference, upload or messages; scope of verification is explicit, speech metadata access does not prove transcription/billing',
     "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; alternatively replace delay_seconds with due_at="2026-10-01T09:00:00+03:00"; exactly one time form, explicit offset for due_at; owner-requested only, 1–100 runs, minimum recurring interval 300 seconds',
@@ -159,6 +162,34 @@ class Workspace:
             raise ToolInputError("Replacement must match exactly once; inspect the file and add context")
         return self.write(value, text.replace(old, new, 1))
 
+    def import_bytes(self, value: str, content: bytes) -> dict:
+        """Larger retrieved artifacts stay outside executable-input limits."""
+        import shutil
+        import uuid
+        if not isinstance(content, bytes) or not 0 < len(content) <= 20 * 1024 * 1024:
+            raise ValueError("Imported artifact must contain 1 byte to 20 MiB")
+        target = self.path(value)
+        digest = hashlib.sha256(content).hexdigest()
+        if target.exists():
+            if target.is_file() and target.stat().st_size == len(content) and hashlib.sha256(target.read_bytes()).hexdigest() == digest:
+                return {"path": value, "bytes": len(content), "sha256": digest, "already_present": True}
+            raise ValueError("Destination exists with different contents; choose another path")
+        if shutil.disk_usage(self.root).free < len(content) + 256 * 1024 * 1024:
+            raise ValueError("Insufficient space to import artifact")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name('.import-' + uuid.uuid4().hex)
+        try:
+            with temporary.open('xb') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Exclusive destination creation avoids silently replacing an
+            # artifact made by another operation during the import.
+            os.link(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {"path": value, "bytes": len(content), "sha256": digest, "already_present": False}
+
     def find(self, query: str, value="") -> dict:
         if not isinstance(query, str) or not 1 <= len(query) <= 300:
             raise ValueError("Search text must contain 1–300 characters")
@@ -190,7 +221,7 @@ class Workspace:
                         return {"matches": results, "scanned": scanned, "truncated": True}
         return {"matches": results, "scanned": scanned, "truncated": False}
 
-    def snapshot(self, paths=None) -> dict[str, str]:
+    def snapshot(self, paths=None, *, omitted=None) -> dict[str, str]:
         result, total = {}, 0
         if paths is not None:
             if not isinstance(paths, list) or len(paths) > 200 or not all(isinstance(p, str) for p in paths):
@@ -205,6 +236,7 @@ class Workspace:
                     raise ValueError("Selected inputs exceed 1 MiB")
                 result[name] = base64.b64encode(payload).decode("ascii")
             return result
+        skipped = []
         for directory, dirs, names in os.walk(self.root, followlinks=False):
             dirs[:] = [d for d in dirs if not d.startswith(".") and not (Path(directory) / d).is_symlink()]
             for name in names:
@@ -212,21 +244,50 @@ class Workspace:
                     continue
                 relative = (Path(directory) / name).relative_to(self.root).as_posix()
                 target = self.path(relative)
-                if target.stat().st_size > 524288:
-                    raise ValueError("Runner input file exceeds 512 KiB")
-                payload = target.read_bytes()
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+                with os.fdopen(os.open(target, flags), "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("Runner inputs must be regular files without links")
+                    header = stream.read(32)
+                    binary_media = (header.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8", b"GIF87a", b"GIF89a", b"%PDF-"))
+                                    or (header.startswith(b"RIFF") and header[8:12] == b"WEBP"))
+                    if binary_media:
+                        payload = None
+                    else:
+                        if info.st_size > 524288:
+                            raise ValueError("Runner text input exceeds 512 KiB; supply explicit inputs to select smaller files")
+                        payload = header + stream.read(524289 - len(header))
+                        after = os.fstat(stream.fileno())
+                        if len(payload) > 524288 or (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                            raise ValueError("Runner input changed or exceeds 512 KiB")
+                        try:
+                            payload.decode("utf-8")
+                            if b"\0" in payload:
+                                payload = None
+                        except UnicodeError:
+                            payload = None
+                if payload is None:
+                    skipped.append({"path": relative, "bytes": info.st_size,
+                                    "reason": "binary_media" if binary_media else "not_utf8_text"})
+                    if len(skipped) > 200:
+                        raise ValueError("More than 200 binary artifacts; supply explicit inputs to select runner files")
+                    continue
                 total += len(payload)
                 if total > 1048576 or len(result) >= 200:
                     raise ValueError("Runner input exceeds 1 MiB/200 files; use a smaller workspace")
                 result[relative] = base64.b64encode(payload).decode("ascii")
+        if omitted is not None:
+            omitted.extend(skipped)
         return result
 
 
 class Tools:
-    def __init__(self, settings, store, queue, *, consultation=None, semantic=None):
+    def __init__(self, settings, store, queue, *, consultation=None, semantic=None, image_inspection=None):
         self.settings, self.store, self.queue = settings, store, queue
         self.workspace = Workspace(settings.workspace)
         self.consultation = consultation
+        self.image_inspection = image_inspection
         self.semantic = semantic
 
     async def search(self, query, limit=8, *, episodes=False):
@@ -300,13 +361,35 @@ class Tools:
         if name == "workspace.find":
             return self.workspace.find(args["query"], args.get("path", ""))
         if name == "workspace.send":
+            from .telegram import MAX_DOCUMENT_BYTES, validate_photo
             target = self.workspace.path(args["path"])
-            if not target.is_file() or target.stat().st_size > 20 * 1024 * 1024:
+            mode = args.get("mode", "auto")
+            if not isinstance(mode, str) or mode not in {"auto", "photo", "document"}:
+                raise ToolInputError("Delivery mode must be auto, photo or document")
+            if not target.is_file() or target.stat().st_size > MAX_DOCUMENT_BYTES:
                 raise ValueError("Delivery needs an existing file up to 20 MiB")
             if job["chat_id"] <= 0:
                 raise ValueError("File delivery is only available in the paired Telegram conversation")
-            self.queue.deliver(f"artifact:{job['id']}:{step}", job["chat_id"], str(args.get("caption", ""))[:800], args["path"])
-            return {"status": "queued", "path": args["path"]}
+            with target.open("rb") as stream:
+                content = stream.read(MAX_DOCUMENT_BYTES + 1)
+            if len(content) > MAX_DOCUMENT_BYTES:
+                raise ValueError("Delivery needs an existing file up to 20 MiB")
+            kind = "document"
+            if mode == "photo" or (mode == "auto" and content.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8"))):
+                try:
+                    await asyncio.to_thread(validate_photo, content)
+                    kind = "photo"
+                except ValueError as exc:
+                    if mode == "photo":
+                        raise ToolInputError(f"Cannot preview this image: {exc}; use mode=document to send the original") from None
+            # Bind the bytes observed now; a later workspace edit cannot silently
+            # replace an approved original while its delivery waits in the outbox.
+            queued = self.queue.deliver(f"artifact:{job['id']}:{step}", job["chat_id"], str(args.get("caption", ""))[:800], args["path"],
+                                       media_kind=kind, document_sha256=hashlib.sha256(content).hexdigest(), job_id=job["id"])
+            if not queued:
+                raise ToolInputError("Task cancelled before artifact delivery")
+            return {"status": "queued", "path": args["path"], "mode": kind,
+                    "original_bytes": kind == "document"}
         if name == "web.search":
             return await asyncio.to_thread(web.search, str(args["query"]))
         if name == "web.fetch":
@@ -317,10 +400,15 @@ class Tools:
                 raise ToolInputError("Code timeout must be 1–60 seconds")
             try:
                 sandbox._validate_command(args["argv"], timeout)
-                inputs = self.workspace.snapshot(args.get("inputs"))
+                omitted = []
+                inputs = self.workspace.snapshot(args.get("inputs"), omitted=omitted)
             except (ValueError, KeyError, TypeError) as exc:
                 raise ToolInputError(str(exc)) from None
-            return await self._run_code(args["argv"], timeout, inputs)
+            result = await self._run_code(args["argv"], timeout, inputs)
+            result["input_selection"] = {"mode": "automatic_text" if args.get("inputs") is None else "explicit",
+                                         "omitted": omitted,
+                                         "limits": {"file_bytes": 524288, "total_bytes": 1048576, "files": 200}}
+            return result
         if name.startswith("skill."):
             from .skills import SkillLibrary
             library = SkillLibrary(self.settings, self.store, self.queue)
@@ -387,10 +475,21 @@ class Tools:
             from .bridge_client import server_read
             return await server_read(self.settings.bridge_socket, args["section"],
                                      offset=args.get("offset", 0), expected_sha256=args.get("expected_sha256", ""))
+        if name == "server.fetch":
+            if not self.settings.bridge_socket:
+                raise ToolInputError("Server import requires the protected bridge")
+            if not {"path", "destination"} <= set(args) or set(args) - {"path", "destination", "expected_sha256"}:
+                raise ToolInputError("Supply source path and workspace destination")
+            self.workspace.path(args["destination"])
+            from .bridge_client import server_fetch
+            data, source = await server_fetch(self.settings.bridge_socket, args["path"],
+                                             expected_sha256=args.get("expected_sha256", ""))
+            artifact = await asyncio.to_thread(self.workspace.import_bytes, args["destination"], data)
+            return {**source, **artifact, "status": "imported"}
         if name == "server.files":
             if not self.settings.bridge_socket:
                 raise ToolInputError("Host reading requires the protected bridge")
-            if not {"action", "path"} <= set(args) or set(args) - {"action", "path", "query", "offset", "expected_sha256"}:
+            if not {"action", "path"} <= set(args) or set(args) - {"action", "path", "query", "offset", "expected_sha256", "cursor"}:
                 raise ToolInputError("Supply action and absolute path; no commands")
             from .bridge_client import server_files
             return await server_files(self.settings.bridge_socket, **args)
@@ -440,6 +539,10 @@ class Tools:
                 raise ToolInputError(str(exc)) from None
             saved = self.queue.get(identifier)
             return self._schedule_receipt(saved, now)
+        if name == "image.inspect":
+            if set(args) != {"path", "question"} or not self.image_inspection:
+                raise ToolInputError("Provide workspace image path and question; image inspection must be available")
+            return await self.image_inspection(args["path"], args["question"])
         if name == "consult" and self.consultation:
             return await self.consultation(str(args["question"])[:14000], str(args.get("role", "critic")))
         if name.startswith("self."):

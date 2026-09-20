@@ -25,10 +25,10 @@ from .bridge_client import (BridgeError, canonical, digest, pack_bytes, read_fra
                             unpack_bytes, write_frame)
 from .media import MAX_IMAGE_BYTES, image_inputs, validate_image
 from .provider import CodexProvider, validate_model_settings
-from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_IMAGE_DOWNLOAD_BYTES,
+from .telegram import (MAX_ATTACHMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_IMAGE_DOWNLOAD_BYTES, MAX_PHOTO_BYTES,
                        TYPING_INTERVAL, TYPING_TIMEOUT,
                        TelegramClient, TelegramError, TelegramRetryAfter, _message_envelope,
-                       parse_attachment, parse_image, parse_message, parse_voice, split_message)
+                       parse_attachment, parse_image, parse_message, parse_voice, split_message, validate_photo)
 from .voice import MAX_VOICE_BYTES, STT_TIMEOUT, transcribe, validate_audio_bytes
 
 
@@ -440,8 +440,24 @@ class Bridge:
                 raise Rejected("unavailable") from None
             finally:
                 self.journal.record_read(section, ok=completed)
+        if op == "server.fetch":
+            self._fields(request, ["path", "expected_sha256"])
+            from .host_read import host_rpc
+            completed = False
+            try:
+                value = await asyncio.to_thread(host_rpc, self.config.get("host_reader_socket"),
+                    {"action": "fetch", "path": request["path"], "expected_sha256": request["expected_sha256"],
+                     "query": "", "offset": 0})
+                completed = True
+                return value
+            except (OSError, ValueError, TypeError):
+                raise Rejected("unavailable") from None
+            finally:
+                self.journal.record_read("host-fetch", ok=completed)
         if op == "server.files":
-            self._fields(request, ["action", "path", "query", "offset", "expected_sha256"])
+            self._fields(request, ["action", "path", "query", "offset", "expected_sha256"] + (["cursor"] if "cursor" in request else []))
+            if not isinstance(request["action"], str) or request["action"] not in {"list", "read", "search", "grep", "stat"}:
+                raise Rejected()
             from .host_read import host_rpc
             completed = False
             try:
@@ -557,7 +573,7 @@ class Bridge:
             if result is not True:
                 raise Rejected("unavailable")
             return True
-        if op in {"telegram.send_message", "telegram.send_document"}:
+        if op in {"telegram.send_message", "telegram.send_document", "telegram.send_photo"}:
             names = ["chat_id", "effect_id", "attempt"] + (["text"] if op.endswith("send_message") else ["filename", "data", "caption"])
             self._fields(request, names)
             if type(request["chat_id"]) is not int or request["chat_id"] != self.owner_id:
@@ -575,7 +591,10 @@ class Bridge:
             filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:180] or "document.bin"
             if filename in {".", ".."}:
                 filename = "document.bin"
-            data = unpack_bytes(request["data"], MAX_DOCUMENT_BYTES)
+            photo = op == "telegram.send_photo"
+            data = unpack_bytes(request["data"], MAX_PHOTO_BYTES if photo else MAX_DOCUMENT_BYTES)
+            if photo:
+                validate_photo(data)
             payload = {"chat_id": self.owner_id, "filename": filename, "caption": caption,
                        "sha256": hashlib.sha256(data).hexdigest()}
 
@@ -584,8 +603,9 @@ class Bridge:
                     path = Path(temporary) / filename
                     path.write_bytes(data)
                     path.chmod(0o600)
-                    return await self.telegram.send_document(self.owner_id, path, caption=caption)
-            return await self._effect("telegram.document", request, payload, send)
+                    sender = self.telegram.send_photo if photo else self.telegram.send_document
+                    return await sender(self.owner_id, path, caption=caption)
+            return await self._effect("telegram.photo" if photo else "telegram.document", request, payload, send)
         raise Rejected("denied", permanent=True)
 
     async def handle(self, reader, writer):
