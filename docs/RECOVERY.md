@@ -56,3 +56,23 @@ waiting Telegram update was processed and its delivery marked sent before the
 2.6.2 deployment. The candidate passed 671 offline tests in its Linux container
 (one skipped); the previous container and fresh database checkpoint were kept
 for recovery.
+# 2.7.1: preserve the WAL connection across idle periods
+
+The newly recorded SQLite code identified READONLY (8), not lock contention.
+A disposable cross-UID Linux test reproduced the failure: a root read-only
+inspector repeatedly opened the database while UID 10001 opened and closed
+writable transactions. The baseline produced 807 `attempt to write a readonly
+database` errors alongside 46,898 successful transactions. File ownership and
+permissions appeared correct after the failure: the WAL lifecycle race was
+transient, so changing permanent ownership was not the fix.
+
+The gateway now keeps one owner connection open for its lifetime, after checking
+that it can begin and commit a write transaction. This connection holds no idle
+transaction or writer lock. Normal operations retain separate connections and
+durability semantics. On shutdown the connection closes with the gateway.
+
+The equivalent test with the connection held open completed 91,181 successful
+transactions and 55,322 root inspector opens with zero errors. An offline
+regression also checks stable WAL identity, concurrent writes and cleanup on
+exit. The queue contention handling from 2.6.2 remains useful for genuine BUSY
+errors; READONLY is not silently swallowed or retried indefinitely.

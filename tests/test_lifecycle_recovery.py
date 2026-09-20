@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         app.settings = SimpleNamespace(data_dir=self.root, retention_days=30)
         app.client = SimpleNamespace(get_me=AsyncMock(return_value={}), call=AsyncMock(return_value={}))
         app.queue, app.store = Mock(), Mock()
+        app.queue.keepalive.side_effect = nullcontext
         app.refresh_bridge_status = AsyncMock()
         app.stopping = asyncio.Event()
         app.heartbeat = Heartbeat(self.root)

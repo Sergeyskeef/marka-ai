@@ -85,3 +85,21 @@ class QueueContentionTests(unittest.IsolatedAsyncioTestCase):
         value = json.loads((self.root / 'last-exit.json').read_text())
         self.assertEqual(value['sqlite_errorcode'], sqlite3.SQLITE_ERROR)
         self.assertNotIn('private_table_name', json.dumps(value))
+
+    def test_keepalive_preserves_wal_without_holding_writer_transaction(self):
+        wal = Path(str(self.queue.path) + '-wal')
+        with self.queue.keepalive():
+            self.queue.enqueue('first', 42)
+            inode = wal.stat().st_ino
+            for _ in range(30):
+                observer = sqlite3.connect(self.queue.path.as_uri() + '?mode=ro', uri=True)
+                try:
+                    observer.execute('SELECT count(*) FROM jobs').fetchall()
+                    self.assertEqual(wal.stat().st_ino, inode)
+                    with self.queue.connection(timeout=0.1) as writer:
+                        writer.execute('BEGIN IMMEDIATE')
+                        writer.execute('UPDATE jobs SET updated=updated')
+                finally:
+                    observer.close()
+                self.assertEqual(wal.stat().st_ino, inode)
+        self.assertFalse(wal.exists())

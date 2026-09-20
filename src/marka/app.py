@@ -986,7 +986,7 @@ class Application:
         self.stopping.set()
 
     async def _run_gateway(self):
-        with instance_lock(self.settings.data_dir / "gateway.lock"):
+        with instance_lock(self.settings.data_dir / "gateway.lock"), self.queue.keepalive():
             self.heartbeat.write()
             await self.client.get_me()
             hook = await self.client.call("getWebhookInfo", {})

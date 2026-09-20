@@ -127,6 +127,17 @@ class Queue:
             row = db.execute("SELECT value FROM cursors WHERE name='telegram'").fetchone()
             return row[0] if row else 0
 
+    @contextmanager
+    def keepalive(self):
+        # Root-owned read-only inspectors and the unprivileged bot must not
+        # repeatedly become the last SQLite client. WAL recreation across UIDs
+        # can make a concurrent writable connection open its WAL read-only.
+        # Keep an owner connection open, but hold NO transaction while idle.
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.commit()
+            yield
+
     def advance(self, update_id: int):
         with self.connection() as db:
             db.execute("INSERT INTO cursors VALUES ('telegram',?) ON CONFLICT(name) DO UPDATE SET value=max(value,excluded.value)", (update_id + 1,))
