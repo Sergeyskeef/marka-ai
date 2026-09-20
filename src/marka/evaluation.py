@@ -61,6 +61,10 @@ def _target(name, args):
         # A successful different section/page cannot erase the failed read.
         # Refreshing a snapshot digest may repair the same section/page.
         return name + ":" + str(identity("section")) + ":" + str(args.get("offset", 0))
+    if name == "server.files":
+        return name + ":" + hashlib.sha256(json.dumps(
+            [identity("action"), identity("path"), identity("query"), args.get("offset", 0)],
+            sort_keys=True).encode()).hexdigest()[:16]
     if name == 'task.recall':
         return name + ':' + str(args.get('number')) + ':' + str(args.get('offset', 0))
     if name == 'self.search':

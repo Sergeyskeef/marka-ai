@@ -523,7 +523,7 @@ class Application:
                 self.bridge_capabilities = await bridge_status(self.settings.bridge_socket)
                 self.engine.provider_details = {key: self.bridge_capabilities.get(key)
                                                 for key in ("model_requested", "model_resolved", "reasoning_effort_requested",
-                                                            "reasoning_effort_resolved", "server_read_available", "bridge_runtime_version")}
+                                                            "reasoning_effort_resolved", "server_read_available", "host_read_available", "bridge_runtime_version")}
             except Exception:
                 self.bridge_capabilities = None
                 self.engine.provider_details = None

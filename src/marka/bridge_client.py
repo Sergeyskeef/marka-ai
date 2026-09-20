@@ -266,6 +266,14 @@ async def server_read(socket, section, *, offset=0, expected_sha256=""):
     return result
 
 
+async def server_files(socket, action, path, *, query="", offset=0, expected_sha256=""):
+    result = await _rpc(socket, {"op": "server.files", "action": action, "path": path,
+                                "query": query, "offset": offset, "expected_sha256": expected_sha256}, timeout=15)
+    if error := _error(result):
+        raise BridgeError(_message(error))
+    return result
+
+
 async def connections_list(socket):
     result = await _rpc(socket, {"op": "connections.list"}, timeout=40)
     if error := _error(result):

@@ -46,6 +46,7 @@ CATALOG = {
     "task.recall": '{"number":12,"offset":0,"limit":12000}; reread original tool observation from THIS task by step number; follow next_offset; no re-execution or other task access',
     "task.criteria": '{"criteria":[{"id":"result","kind":"json_matches","path":"result.json","assertions":[{"pointer":"/status","equals":"ready"}]}]}; freeze objective checks BEFORE effects; kinds artifact(path,min_bytes,max_bytes), text_contains(path,contains:[literal]), json_matches, command_succeeded(argv). Cannot weaken/replace; model-proposed checks do not prove all owner requirements',
     "server.read": '{"section":"status|config|events|guardian_source|observer_source","offset":0,"expected_sha256":"previous page hash for continuation"}; operator-published read-only Mark diagnostics, no SSH/commands/arbitrary paths/private data; stale snapshots require qualification; own runtime code is in self.inspect',
+    "server.files": '{"action":"list|read|search","path":"absolute host path","query":"filename substring for search","offset":0,"expected_sha256":"hash for continued read/list"}; broad READ-ONLY host discovery and UTF-8 reading; search is bounded filename search, narrow path when incomplete; links, credentials, devices, databases excluded; file limit 2 MiB; redacted before paging. Start project questions at /var/lib/marka-catalog/PROJECTS.md, then inspect relevant live paths. No commands or writes.',
     "connections.list": '{}; list installed protected connections and allowed actions; no credential values',
     "connections.check": '{"connection":"codex|telegram|openai_speech"}; bounded connection check, no inference, upload or messages; scope of verification is explicit, speech metadata access does not prove transcription/billing',
     "task.schedule": '{"prompt":"specific authorized task","delay_seconds":600,"interval_seconds":0,"runs":1}; alternatively replace delay_seconds with due_at="2026-10-01T09:00:00+03:00"; exactly one time form, explicit offset for due_at; owner-requested only, 1–100 runs, minimum recurring interval 300 seconds',
@@ -386,6 +387,13 @@ class Tools:
             from .bridge_client import server_read
             return await server_read(self.settings.bridge_socket, args["section"],
                                      offset=args.get("offset", 0), expected_sha256=args.get("expected_sha256", ""))
+        if name == "server.files":
+            if not self.settings.bridge_socket:
+                raise ToolInputError("Host reading requires the protected bridge")
+            if not {"action", "path"} <= set(args) or set(args) - {"action", "path", "query", "offset", "expected_sha256"}:
+                raise ToolInputError("Supply action and absolute path; no commands")
+            from .bridge_client import server_files
+            return await server_files(self.settings.bridge_socket, **args)
         if name in {"connections.list", "connections.check"}:
             if not self.settings.bridge_socket:
                 raise ToolInputError("Managed connections require the protected bridge")

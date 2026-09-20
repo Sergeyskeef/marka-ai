@@ -297,7 +297,7 @@ class Bridge:
     def __init__(self, config, *, telegram=None, provider=None, speech=transcribe):
         required = {"socket", "journal", "owner_id", "token_file", "codex_home", "voice_key_file",
                     "model", "daily_calls", "provider_timeout", "initial_offset"}
-        optional = {"reasoning_effort", "server_snapshot_dir"}
+        optional = {"reasoning_effort", "server_snapshot_dir", "host_reader_socket"}
         if not isinstance(config, dict) or not required <= set(config) or set(config) - required - optional:
             raise BridgeError("Invalid protected bridge configuration")
         self.config = {**config, "reasoning_effort": config.get("reasoning_effort")}
@@ -310,6 +310,10 @@ class Bridge:
             if not isinstance(config[name], str) or not config[name] or not Path(config[name]).is_absolute():
                 raise BridgeError("Invalid protected bridge configuration")
         snapshot_dir = config.get("server_snapshot_dir")
+        host_socket = config.get("host_reader_socket")
+        if host_socket is not None and (not isinstance(host_socket, str) or not host_socket.startswith('/')
+                                       or len(host_socket) > 4096 or '\0' in host_socket):
+            raise BridgeError("Invalid protected host reader socket")
         if snapshot_dir is not None and (not isinstance(snapshot_dir, str) or not snapshot_dir
                                          or len(snapshot_dir) > 4096 or "\0" in snapshot_dir
                                          or not Path(snapshot_dir).is_absolute()):
@@ -397,6 +401,8 @@ class Bridge:
                     "voice_available": Path(self.config["voice_key_file"]).is_file(),
                     "server_read_available": bool(self.config.get("server_snapshot_dir"))
                         and Path(self.config["server_snapshot_dir"]).is_dir(),
+                    "host_read_available": bool(self.config.get("host_reader_socket"))
+                        and Path(self.config["host_reader_socket"]).is_socket(),
                     "model_requested": self.config["model"], "model_resolved": None,
                     "reasoning_effort_requested": self.config["reasoning_effort"],
                     "reasoning_effort_resolved": None,
@@ -434,6 +440,19 @@ class Bridge:
                 raise Rejected("unavailable") from None
             finally:
                 self.journal.record_read(section, ok=completed)
+        if op == "server.files":
+            self._fields(request, ["action", "path", "query", "offset", "expected_sha256"])
+            from .host_read import host_rpc
+            completed = False
+            try:
+                value = await asyncio.to_thread(host_rpc, self.config.get("host_reader_socket"),
+                                               {k: v for k, v in request.items() if k != "op"})
+                completed = True
+                return value
+            except (OSError, ValueError, TypeError):
+                raise Rejected("unavailable") from None
+            finally:
+                self.journal.record_read("host-files", ok=completed)
         if op == "connections.list":
             self._fields(request, [])
             value = self.connections.list()

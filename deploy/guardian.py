@@ -878,7 +878,26 @@ class Guardian:
                                   (self.now() - self.cfg.get("heartbeat_timeout", 30),)).fetchone()
                 if past:
                     return False, "running task exceeded durable deadline"
+            if self.state.pop("inspection_busy_since", None) is not None:
+                self.save()
             return True, "healthy"
+        except sqlite3.OperationalError as exc:
+            code = getattr(exc, "sqlite_errorcode", 0)
+            self.state["last_inspection_error"] = {"at": self.now(), "sqlite_errorcode": code if type(code) is int else 0}
+            if (code & 255) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_PROTOCOL}:
+                since = self.state.setdefault("inspection_busy_since", self.now())
+                self.save()
+                try:
+                    hb = json_object(read_regular(Path(self.cfg["state_path"]) / "heartbeat.json", 8192))
+                    fresh = (hb.get("phase") == "running" and type(hb.get("tick")) in (int, float)
+                             and 0 <= self.now() - hb["tick"] <= self.cfg.get("heartbeat_timeout", 30))
+                except (OSError, ValueError, TypeError, Rejected):
+                    fresh = False
+                if fresh and 0 <= self.now() - since < 10:
+                    return False, "sqlite inspection temporarily busy"
+            else:
+                self.save()
+            return False, "canonical database or heartbeat unavailable"
         except (OSError, ValueError, TypeError, MemoryError, sqlite3.Error, Rejected):
             return False, "canonical database or heartbeat unavailable"
 
@@ -996,6 +1015,8 @@ class Guardian:
                 return
             okay, reason = self.healthy(self.state["current_image"], grace=self.now() - self.state.get("started", 0) < self.cfg.get("startup_grace", 60))
             if not okay:
+                if reason == "sqlite inspection temporarily busy":
+                    return
                 self.begin_recovery(reason)
                 return
             if idle(self.db, self.now()):
@@ -1037,6 +1058,8 @@ class Guardian:
             age = self.now() - active["activated"]
             okay, reason = self.healthy(active["candidate_image"], grace=age < self.cfg.get("startup_grace", 60))
             if not okay:
+                if reason == "sqlite inspection temporarily busy":
+                    return
                 self.begin_recovery(reason)
             elif age >= self.cfg.get("probation_seconds", 120):
                 request = self.request()
@@ -1060,6 +1083,8 @@ class Guardian:
         if self.now() - self.state.get("started", 0) >= self.cfg.get("startup_grace", 60):
             okay, reason = self.healthy(self.state["current_image"])
             if not okay:
+                if reason == "sqlite inspection temporarily busy":
+                    return
                 self.begin_recovery(reason)
                 return
         for path in (p for p in sorted(Path(self.cfg["inbox"]).glob("*.json")) if p.stem not in self.state["seen"]):
