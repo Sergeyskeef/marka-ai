@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sqlite3
 from pathlib import Path
 import time
 import traceback
@@ -69,6 +70,10 @@ class Heartbeat:
                  "event": event if event in {"failed", "cancelled", "returned", "requested", "signal"} else "failed",
                  "exception": name if name in ERRORS else ("other" if error is not None else None),
                  "signal": signal_number if signal_number in (2, 15) else None, "frames": frames}
+        if isinstance(error, sqlite3.Error):
+            code = getattr(error, "sqlite_errorcode", None)
+            if type(code) is int and 0 <= code <= 65535:
+                value["sqlite_errorcode"] = code
         target = self.path.with_name("last-exit.json")
         temporary = target.with_name("exit-" + uuid.uuid4().hex + ".tmp")
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)

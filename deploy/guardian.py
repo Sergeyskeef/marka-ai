@@ -800,6 +800,9 @@ class Guardian:
                     for key in ("version", "at", "started", "tick", "pid"):
                         if type(value.get(key)) in (int, float) and 0 <= value[key] <= 1e12:
                             clean[key] = value[key]
+                    code = value.get("sqlite_errorcode")
+                    if type(code) is int and 0 <= code <= 65535:
+                        clean["sqlite_errorcode"] = code
                     for key, allowed in (("phase", {"starting", "running", "stopping"}),
                                          ("component", {"startup", "supervisor", "polling", "worker", "delivery", "maintenance", "heartbeat", "signal"}),
                                          ("event", {"failed", "cancelled", "returned", "requested", "signal"}), ("exception", errors)):

@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import signal
+import sqlite3
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -830,9 +831,25 @@ class Application:
                 if failures >= 3 or not isinstance(exc, (TelegramError, TimeoutError)) or getattr(exc, "permanent", False):
                     return
 
+    async def poll_queue(self, operation, *, budget=30):
+        # Only these transactional claims may be retried, before any external
+        # action. Never replay a model/tool call or Telegram send here.
+        deadline = time.monotonic() + budget
+        while not self.stopping.is_set():
+            try:
+                return operation(timeout=0.1)
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, "sqlite_errorcode", 0)
+                if (code & 255) not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_PROTOCOL}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                await self.pause(0.25)
+        return None
+
     async def worker(self):
         while not self.stopping.is_set():
-            job = self.queue.claim()
+            job = await self.poll_queue(self.queue.claim)
             if not job:
                 self.work_available.clear()
                 try:
@@ -907,7 +924,7 @@ class Application:
 
     async def delivery(self):
         while not self.stopping.is_set():
-            item = self.queue.next_delivery()
+            item = await self.poll_queue(self.queue.next_delivery)
             if not item:
                 await self.pause(0.5)
                 continue

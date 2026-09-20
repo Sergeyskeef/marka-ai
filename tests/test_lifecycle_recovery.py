@@ -150,13 +150,14 @@ class RecoveryTests(unittest.TestCase):
         secret = 'synthetic-private-content'
         guardian.atomic(self.fixture.state_dir/'last-exit.json', guardian.canonical({
             'component': 'worker', 'event': 'failed', 'exception': 'RuntimeError',
-            'message': secret, 'boot_id': 'a'*32, 'frames': [
+            'message': secret, 'sqlite_errorcode': 5, 'boot_id': 'a'*32, 'frames': [
                 {'module': 'app', 'line': 42, 'source': secret}, {'module': secret, 'line': 9}]}))
         self.g.capture_incident('heartbeat unavailable')
         row = json.loads(next(self.g.root.glob('incident-*.json')).read_text())
         self.assertNotIn(secret, json.dumps(row))
         self.assertEqual(row['runtime_exit']['frames'], [{'module': 'app', 'line': 42}])
         self.assertFalse(row['runtime_exit_matches_boot'])
+        self.assertEqual(row['runtime_exit']['sqlite_errorcode'], 5)
 
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO')
     def test_fifo_cannot_block_incident_capture(self):

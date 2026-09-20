@@ -112,12 +112,11 @@ class Queue:
             db.execute("CREATE INDEX IF NOT EXISTS jobs_root ON jobs(root_id,state)")
 
     @contextmanager
-    def connection(self):
-        db = sqlite3.connect(self.path, timeout=20)
+    def connection(self, *, timeout=20):
+        db = sqlite3.connect(self.path, timeout=timeout)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=20000")
         try:
+            db.execute("PRAGMA journal_mode=WAL")
             with db:
                 yield db
         finally:
@@ -164,8 +163,8 @@ class Queue:
                     now, now, interval_seconds, runs, root_id or identifier))
         return identifier
 
-    def claim(self) -> dict | None:
-        with self.connection() as db:
+    def claim(self, *, timeout=20) -> dict | None:
+        with self.connection(timeout=timeout) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM jobs WHERE state='queued' AND due<=? ORDER BY due,created LIMIT 1", (time.time(),)).fetchone()
             if row is None:
@@ -572,8 +571,8 @@ class Queue:
         with self.connection() as db:
             db.execute("INSERT OR IGNORE INTO deliveries(source,chat_id,text,document,due) VALUES (?,?,?,?,?)", (source, chat_id, redact(text), document, time.time()))
 
-    def next_delivery(self) -> dict | None:
-        with self.connection() as db:
+    def next_delivery(self, *, timeout=20) -> dict | None:
+        with self.connection(timeout=timeout) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM deliveries WHERE state='pending' AND due<=? ORDER BY id LIMIT 1", (time.time(),)).fetchone()
             if row:

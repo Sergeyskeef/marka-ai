@@ -36,3 +36,23 @@ Bridge и runner остаются независимыми закреплённ�
 Позже 2.5.1 также была возвращена на 2.4 по тому же признаку, без отката базы.
 Поэтому операторская установка 2.6.1 использует фактическую 2.4 как резервный
 образ бота; закреплённые bridge и runner установлены отдельно в версии 2.6.1.
+# 2.6.2: queue contention and SQLite diagnostics
+
+Worker and delivery claims use a 100 ms SQLite busy timeout and yield between
+retries, for at most 30 seconds. Only SQLite BUSY, LOCKED and PROTOCOL errors
+are retried, before any external action. Other database errors still fail
+visibly; model calls, tool actions and Telegram sends are never replayed by
+this mechanism. Shutdown interrupts the wait. Queue connection setup failures
+also close their connection.
+
+Runtime exit receipts and guardian incident records retain the numeric SQLite
+error code without SQL text, exception messages or private data. The September
+20 incident identified OperationalError in worker/delivery claim transactions,
+but the older receipts did not contain this code: contention is a tested failure
+mode addressed by this release, not a proven explanation of that incident.
+
+The operator restored the existing database without checkpoint rollback. The
+waiting Telegram update was processed and its delivery marked sent before the
+2.6.2 deployment. The candidate passed 671 offline tests in its Linux container
+(one skipped); the previous container and fresh database checkpoint were kept
+for recovery.
